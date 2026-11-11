@@ -24,11 +24,26 @@ type Config struct {
 	DataDir  string
 	LogLevel slog.Level
 	Projects []Project
+	// AllowedOrigins lists the browser origins allowed to send events (CORS).
+	// ["*"] allows any origin. Requests without an Origin header (backend SDKs) are always allowed.
+	AllowedOrigins []string
+	// RateLimitPerMinute caps envelopes per project per minute. 0 disables the limit.
+	RateLimitPerMinute int
 }
+
+// Defaults used when the corresponding environment variable is not set.
+const (
+	DefaultPort               = 8000
+	DefaultDataDir            = "./data"
+	DefaultLogLevel           = slog.LevelInfo
+	DefaultAllowedOrigins     = "*"
+	DefaultRateLimitPerMinute = 1000
+)
 
 var (
 	projectNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 	publicKeyRe   = regexp.MustCompile(`^[A-Za-z0-9]{16,64}$`)
+	originRe      = regexp.MustCompile(`^https?://([a-z0-9.-]+|\[[0-9a-f:]+\])(:[0-9]{1,5})?$`)
 )
 
 // Load reads the configuration from the process environment.
@@ -38,9 +53,11 @@ func Load() (*Config, error) {
 
 func loadFrom(getenv func(string) string) (*Config, error) {
 	config := &Config{
-		Port:     8000,
-		DataDir:  "./data",
-		LogLevel: slog.LevelInfo,
+		Port:               DefaultPort,
+		DataDir:            DefaultDataDir,
+		LogLevel:           DefaultLogLevel,
+		AllowedOrigins:     []string{DefaultAllowedOrigins},
+		RateLimitPerMinute: DefaultRateLimitPerMinute,
 	}
 
 	if value := getenv("PORT"); value != "" {
@@ -63,6 +80,22 @@ func loadFrom(getenv func(string) string) (*Config, error) {
 		if err := config.LogLevel.UnmarshalText([]byte(value)); err != nil {
 			return nil, fmt.Errorf("LOG_LEVEL: %w", err)
 		}
+	}
+
+	if value := getenv("ALLOWED_ORIGINS"); value != "" {
+		origins, err := parseOrigins(value)
+		if err != nil {
+			return nil, fmt.Errorf("ALLOWED_ORIGINS: %w", err)
+		}
+		config.AllowedOrigins = origins
+	}
+
+	if value := getenv("RATE_LIMIT_PER_MINUTE"); value != "" {
+		limit, err := strconv.Atoi(value)
+		if err != nil || limit < 0 {
+			return nil, fmt.Errorf("RATE_LIMIT_PER_MINUTE: invalid value %q (0 or a positive integer)", value)
+		}
+		config.RateLimitPerMinute = limit
 	}
 
 	projects, err := parseProjects(getenv("PROJECTS"))
@@ -118,4 +151,24 @@ func parseProjects(raw string) ([]Project, error) {
 		projects = append(projects, Project{ID: id, Name: name, PublicKey: key})
 	}
 	return projects, nil
+}
+
+// parseOrigins parses "*" or "https://app.example.com,http://localhost:3000".
+// Origins are compared exactly, so a path or trailing slash is an error.
+func parseOrigins(raw string) ([]string, error) {
+	var origins []string
+	for _, entry := range strings.Split(raw, ",") {
+		origin := strings.ToLower(strings.TrimSpace(entry))
+		if origin == "" {
+			continue
+		}
+		if origin != "*" && !originRe.MatchString(origin) {
+			return nil, fmt.Errorf("invalid origin %q (expected scheme://host[:port], e.g. https://app.example.com)", entry)
+		}
+		origins = append(origins, origin)
+	}
+	if len(origins) == 0 {
+		return nil, fmt.Errorf("no origins in %q", raw)
+	}
+	return origins, nil
 }

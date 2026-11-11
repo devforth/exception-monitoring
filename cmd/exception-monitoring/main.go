@@ -9,10 +9,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/devforth/exception-monitoring/internal/config"
+	"github.com/devforth/exception-monitoring/internal/ingest"
 	"github.com/devforth/exception-monitoring/internal/server"
 	"github.com/devforth/exception-monitoring/internal/store"
 )
@@ -61,7 +63,8 @@ func run() error {
 	}
 
 	httpServer := &http.Server{
-		Handler:           server.New(logger, database).Handler(),
+		// LogSink only logs received data; storing it comes with the data model.
+		Handler:           server.New(logger, database, ingest.New(logger, settings, ingest.LogSink{Logger: logger})).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,
@@ -94,7 +97,7 @@ func run() error {
 func healthcheck() int {
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8000"
+		port = strconv.Itoa(config.DefaultPort)
 	}
 	client := http.Client{Timeout: 3 * time.Second}
 	response, err := client.Get("http://127.0.0.1:" + port + "/health")

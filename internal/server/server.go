@@ -17,15 +17,21 @@ type Pinger interface {
 type Server struct {
 	logger   *slog.Logger
 	database Pinger
+	ingest   http.Handler
 }
 
-func New(logger *slog.Logger, database Pinger) *Server {
-	return &Server{logger: logger, database: database}
+// New builds the server. ingest handles SDK envelopes (see package ingest).
+func New(logger *slog.Logger, database Pinger, ingest http.Handler) *Server {
+	return &Server{logger: logger, database: database, ingest: ingest}
 }
 
 func (server *Server) Handler() http.Handler {
 	router := http.NewServeMux()
 	router.HandleFunc("GET /health", server.health)
+	// SDKs derive this URL from the DSN. No method in the pattern: the ingest
+	// handler answers CORS preflight (OPTIONS) itself. {$} means an exact match.
+	router.Handle("/api/{projectID}/envelope/{$}", server.ingest)
+	router.Handle("/api/{projectID}/envelope", server.ingest)
 	return server.logRequests(router)
 }
 

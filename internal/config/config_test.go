@@ -15,16 +15,19 @@ func TestLoadDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.Port != 8000 || config.DataDir != "./data" || config.LogLevel != slog.LevelInfo || config.Projects != nil {
+	if config.Port != DefaultPort || config.DataDir != DefaultDataDir || config.LogLevel != DefaultLogLevel || config.Projects != nil ||
+		len(config.AllowedOrigins) != 1 || config.AllowedOrigins[0] != DefaultAllowedOrigins || config.RateLimitPerMinute != DefaultRateLimitPerMinute {
 		t.Fatalf("unexpected defaults: %+v", config)
 	}
 }
 
 func TestLoadValues(t *testing.T) {
 	config, err := loadFrom(env(map[string]string{
-		"PORT":      "9000",
-		"DATA_DIR":  "/data",
-		"LOG_LEVEL": "debug",
+		"PORT":                  "9000",
+		"DATA_DIR":              "/data",
+		"LOG_LEVEL":             "debug",
+		"ALLOWED_ORIGINS":       "https://App.example.com, http://localhost:3500,http://[::1]:8080",
+		"RATE_LIMIT_PER_MINUTE": "0",
 		// IDs are explicit, so they don't have to follow list order or be contiguous.
 		"PROJECTS": "3:frontend:0123456789abcdef0123, 1:backend:a1b2c3d4e5f6a7b8",
 	}))
@@ -33,6 +36,12 @@ func TestLoadValues(t *testing.T) {
 	}
 	if config.Port != 9000 || config.DataDir != "/data" || config.LogLevel != slog.LevelDebug {
 		t.Fatalf("unexpected config: %+v", config)
+	}
+	if strings.Join(config.AllowedOrigins, " ") != "https://app.example.com http://localhost:3500 http://[::1]:8080" {
+		t.Fatalf("origins = %q", config.AllowedOrigins)
+	}
+	if config.RateLimitPerMinute != 0 {
+		t.Fatalf("rate limit = %d, want 0 (disabled)", config.RateLimitPerMinute)
 	}
 	want := []Project{
 		{ID: 3, Name: "frontend", PublicKey: "0123456789abcdef0123"},
@@ -65,6 +74,10 @@ func TestLoadErrors(t *testing.T) {
 		{"short key", "PROJECTS", "1:backend:abc", "16-64"},
 		{"duplicate id", "PROJECTS", "1:backend:a1b2c3d4e5f6a7b8,1:frontend:0123456789abcdef", "duplicate project id"},
 		{"duplicate name", "PROJECTS", "1:backend:a1b2c3d4e5f6a7b8,2:backend:0123456789abcdef", "duplicate project name"},
+		{"origin with path", "ALLOWED_ORIGINS", "https://app.example.com/", "invalid origin"},
+		{"origin without scheme", "ALLOWED_ORIGINS", "app.example.com", "invalid origin"},
+		{"only commas in origins", "ALLOWED_ORIGINS", ",,", "no origins"},
+		{"negative rate limit", "RATE_LIMIT_PER_MINUTE", "-1", "RATE_LIMIT_PER_MINUTE"},
 		{"duplicate key", "PROJECTS", "1:backend:a1b2c3d4e5f6a7b8,2:frontend:a1b2c3d4e5f6a7b8", "already used"},
 	}
 	for _, testCase := range tests {

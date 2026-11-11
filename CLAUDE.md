@@ -31,18 +31,20 @@ CI (`.github/workflows/ci.yml`) runs `make lint`, `make test`, an amd64 image bu
 ## Architecture
 
 - `cmd/exception-monitoring/main.go`: loads config, opens the store, binds the listener before logging "server started", graceful shutdown on SIGTERM. The `healthcheck` subcommand is what Docker's HEALTHCHECK calls (no curl in a scratch image).
-- `internal/config`: everything comes from env (`PORT`, `DATA_DIR`, `LOG_LEVEL`, `PROJECTS`). `Load()` wraps `loadFrom(getenv)` so tests inject a map instead of touching the process env.
+- `internal/config`: everything comes from env (`PORT`, `DATA_DIR`, `LOG_LEVEL`, `PROJECTS`, `ALLOWED_ORIGINS`, `RATE_LIMIT_PER_MINUTE`). `Load()` wraps `loadFrom(getenv)` so tests inject a map instead of touching the process env.
 - `internal/store`: SQLite with WAL, `busy_timeout`, `foreign_keys`, and `_txlock=immediate`, which prevents "database is locked" on concurrent read-then-write transactions (there is a test for it). Migrations live in the `migrations` slice in `migrate.go`: versions must be sequential from 1, each runs in its own transaction, and never edit an applied migration (add a new one). Startup refuses a database whose schema is newer than the binary.
-- `internal/server`: `net/http` ServeMux with method patterns (`"GET /health"`), wrapped in a request-logging middleware. The server depends on small interfaces (`Pinger`), so tests use fakes instead of a real database.
+- `internal/server`: `net/http` ServeMux with method patterns (`"GET /health"`), wrapped in a request-logging middleware. The server depends on small interfaces (`Pinger`, `http.Handler` for ingest), so tests use fakes instead of a real database.
+- `internal/sentry`: the SDK wire format only (envelope splitting, `Event`, `Log`), no HTTP or storage. Decoding is deliberately lenient: custom types (`Timestamp`, `Message`, `Tags`, `ExceptionList`, …) accept every shape the protocol allows and fall back to the zero value on an unexpected one, because losing a field is better than losing the error report. `Event.Raw` keeps the full payload.
+- `internal/ingest`: `POST /api/{projectID}/envelope/`. Order matters: CORS → public key (query `sentry_key`, `X-Sentry-Auth`/`Authorization`, or the envelope header `dsn` when sent via a tunnel) → project auth → per-project rate limit → read/decompress body (gzip, deflate; 20 MB cap before and after decompression) → parse all items → `Sink`. All items are parsed before anything is stored, so a malformed item rejects the whole envelope. Only `event` and `log` items reach the `Sink`; other types are dropped. `LogSink` is a temporary sink that only logs; it gets replaced by a store-backed sink in stage 3. Rejections are logged at debug level (ingest is public, so warn-level logging would be a flood vector).
 
 ### Projects and DSNs
 
 `PROJECTS=1:backend:<key>,2:frontend:<key>` — `id:name:public_key`. IDs are chosen by the user and must stay stable: the id is part of the DSN (`http://<key>@host:8000/<id>`) and will be stored with every event, so it must never be derived from list order. Each service (backend, SSR, frontend…) gets its own project; all live in one container and the UI shows which project an error came from.
 
-### Ingest (stage 2) reference material
+### Protocol reference material
 
 - `docs/sentry-protocol.md`: notes on the envelope format as actually sent by Sentry SDK 11 (Node and browser): auth via `sentry_key` query or `X-Sentry-Auth` header, missing/`text/plain` Content-Type, item types, log batches, cause chains (innermost first), `fingerprint`, `trace_id`.
-- `testdata/envelopes/*.envelope` + `*.request.json`: real, sanitized SDK captures. Use them as parser and handler test fixtures.
+- `testdata/envelopes/*.envelope` + `*.request.json`: real, sanitized SDK captures. `internal/sentry` tests parse every fixture; `internal/ingest` tests replay every recorded request through the handler. A new fixture is picked up automatically.
 - `tools/envelope-dumper/dumper.mjs`: Node research server that writes incoming envelopes to `envelopes/` (gitignored). Used together with the separate `../sentry-playground` AdminForth app, which is the test client (routes under `/api/debug-sentry/`).
 
 Planned auth model: one admin from env plus an IP allowlist for the UI and API; the ingest endpoint stays open (protected only by DSN keys, CORS `ALLOWED_ORIGINS` and rate limiting) because browsers send errors directly.

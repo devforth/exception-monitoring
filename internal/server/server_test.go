@@ -26,7 +26,7 @@ func TestHealth(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	t.Run("ok", func(t *testing.T) {
-		response := request(t, New(logger, fakeDB{}).Handler(), http.MethodGet, "/health")
+		response := request(t, New(logger, fakeDB{}, http.NotFoundHandler()).Handler(), http.MethodGet, "/health")
 		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"ok"`) {
 			t.Fatalf("got %d %s", response.Code, response.Body)
 		}
@@ -36,7 +36,7 @@ func TestHealth(t *testing.T) {
 	})
 
 	t.Run("database down", func(t *testing.T) {
-		response := request(t, New(logger, fakeDB{err: errors.New("boom")}).Handler(), http.MethodGet, "/health")
+		response := request(t, New(logger, fakeDB{err: errors.New("boom")}, http.NotFoundHandler()).Handler(), http.MethodGet, "/health")
 		if response.Code != http.StatusServiceUnavailable {
 			t.Fatalf("got %d, want 503", response.Code)
 		}
@@ -46,9 +46,27 @@ func TestHealth(t *testing.T) {
 	})
 
 	t.Run("wrong method", func(t *testing.T) {
-		response := request(t, New(logger, fakeDB{}).Handler(), http.MethodPost, "/health")
+		response := request(t, New(logger, fakeDB{}, http.NotFoundHandler()).Handler(), http.MethodPost, "/health")
 		if response.Code != http.StatusMethodNotAllowed {
 			t.Fatalf("got %d, want 405", response.Code)
 		}
 	})
+}
+
+func TestEnvelopeRoutes(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ingest := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "project "+r.PathValue("projectID"))
+	})
+	handler := New(logger, fakeDB{}, ingest).Handler()
+
+	for _, path := range []string{"/api/7/envelope/", "/api/7/envelope"} {
+		response := request(t, handler, http.MethodPost, path)
+		if response.Code != http.StatusOK || response.Body.String() != "project 7" {
+			t.Fatalf("%s: got %d %q", path, response.Code, response.Body)
+		}
+	}
+	if response := request(t, handler, http.MethodPost, "/api/7/envelope/extra"); response.Code != http.StatusNotFound {
+		t.Fatalf("subpath: got %d, want 404", response.Code)
+	}
 }
