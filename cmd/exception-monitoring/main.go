@@ -63,8 +63,7 @@ func run() error {
 	}
 
 	httpServer := &http.Server{
-		// LogSink only logs received data; storing it comes with the data model.
-		Handler:           server.New(logger, database, ingest.New(logger, settings, ingest.LogSink{Logger: logger})).Handler(),
+		Handler:           server.New(logger, database, ingest.New(logger, settings, ingest.StoreSink{Store: database, Logger: logger})).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,
