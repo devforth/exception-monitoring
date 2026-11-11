@@ -9,9 +9,12 @@ import fs from "node:fs";
 import path from "node:path";
 import zlib from "node:zlib";
 import crypto from "node:crypto";
+import { fileURLToPath } from "node:url";
 
 const PORT = Number(process.env.PORT ?? 8000);
-const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
+// Localhost only: the dumper accepts anything and writes it to disk.
+const HOST = process.env.HOST ?? "127.0.0.1";
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const OUT_DIR = path.resolve(process.argv[2] ?? path.join(REPO_ROOT, "envelopes"));
 fs.mkdirSync(OUT_DIR, { recursive: true });
 
@@ -103,10 +106,19 @@ const server = http.createServer((req, res) => {
     }
 
     seq += 1;
-    const project = url.pathname.match(/^\/api\/([^/]+)\//)?.[1] ?? "x";
-    const name = `${String(seq).padStart(3, "0")}-p${project}-${[...new Set(itemTypes)].join("+")}`;
-    fs.writeFileSync(path.join(OUT_DIR, `${name}.json`), JSON.stringify(record, null, 2));
-    fs.writeFileSync(path.join(OUT_DIR, `${name}.envelope`), body);
+    // Request data ends up in a file name: keep only safe characters and cap the length.
+    const safe = (s) => String(s).replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 40);
+    const project = safe(url.pathname.match(/^\/api\/([^/]+)\//)?.[1] ?? "x");
+    const types = [...new Set(itemTypes)].map(safe).join("+").slice(0, 80);
+    const name = `${String(seq).padStart(3, "0")}-p${project}-${types}`;
+    try {
+      fs.writeFileSync(path.join(OUT_DIR, `${name}.json`), JSON.stringify(record, null, 2));
+      fs.writeFileSync(path.join(OUT_DIR, `${name}.envelope`), body);
+    } catch (e) {
+      console.error(`failed to write ${name}:`, e.message);
+      res.writeHead(500, CORS_HEADERS);
+      return res.end();
+    }
 
     console.log(`${record.receivedAt} ${req.method} ${url.pathname} ${req.headers["content-encoding"] ?? "-"} ${raw.length}B -> ${name}`);
 
@@ -116,4 +128,4 @@ const server = http.createServer((req, res) => {
   });
 });
 
-server.listen(PORT, () => console.log(`envelope dumper on http://localhost:${PORT}, writing to ${OUT_DIR}`));
+server.listen(PORT, HOST, () => console.log(`envelope dumper on http://${HOST}:${PORT}, writing to ${OUT_DIR}`));
