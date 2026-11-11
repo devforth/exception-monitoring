@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/devforth/exception-monitoring/internal/api"
 	"github.com/devforth/exception-monitoring/internal/config"
 	"github.com/devforth/exception-monitoring/internal/ingest"
 	"github.com/devforth/exception-monitoring/internal/server"
@@ -52,6 +53,12 @@ func run() error {
 	}
 	defer database.Close()
 
+	if settings.APIToken == "" {
+		logger.Warn("API_TOKEN is not set, the REST API is closed")
+	}
+	if len(settings.AllowedIPs) == 0 {
+		logger.Warn("ALLOWED_IPS is not set, the API is reachable from any address")
+	}
 	if len(settings.Projects) == 0 {
 		logger.Warn("no projects configured, events will be rejected; set PROJECTS=id:name:public_key,...")
 	}
@@ -63,7 +70,15 @@ func run() error {
 	}
 
 	httpServer := &http.Server{
-		Handler:           server.New(logger, database, ingest.New(logger, settings, ingest.StoreSink{Store: database, Logger: logger})).Handler(),
+		Handler: server.New(server.Options{
+			Logger:         logger,
+			Database:       database,
+			Ingest:         ingest.New(logger, settings, ingest.StoreSink{Store: database, Logger: logger}),
+			API:            api.New(logger, database, settings.Projects),
+			APIToken:       settings.APIToken,
+			AllowedIPs:     settings.AllowedIPs,
+			TrustedProxies: settings.TrustedProxies,
+		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,

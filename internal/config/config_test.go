@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -15,7 +16,7 @@ func TestLoadDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.Port != DefaultPort || config.DataDir != DefaultDataDir || config.LogLevel != DefaultLogLevel || config.Projects != nil ||
+	if config.Port != DefaultPort || config.DataDir != DefaultDataDir || config.LogLevel != DefaultLogLevel || config.Projects != nil || config.APIToken != "" || config.AllowedIPs != nil ||
 		len(config.AllowedOrigins) != 1 || config.AllowedOrigins[0] != DefaultAllowedOrigins || config.RateLimitPerMinute != DefaultRateLimitPerMinute {
 		t.Fatalf("unexpected defaults: %+v", config)
 	}
@@ -28,6 +29,9 @@ func TestLoadValues(t *testing.T) {
 		"LOG_LEVEL":             "debug",
 		"ALLOWED_ORIGINS":       "https://App.example.com, http://localhost:3500,http://[::1]:8080",
 		"RATE_LIMIT_PER_MINUTE": "0",
+		"API_TOKEN":             "0123456789abcdef0123456789abcdef",
+		"ALLOWED_IPS":           "10.0.0.0/8, 203.0.113.7,::1",
+		"TRUSTED_PROXIES":       "172.17.0.1",
 		// IDs are explicit, so they don't have to follow list order or be contiguous.
 		"PROJECTS": "3:frontend:0123456789abcdef0123, 1:backend:a1b2c3d4e5f6a7b8",
 	}))
@@ -42,6 +46,12 @@ func TestLoadValues(t *testing.T) {
 	}
 	if config.RateLimitPerMinute != 0 {
 		t.Fatalf("rate limit = %d, want 0 (disabled)", config.RateLimitPerMinute)
+	}
+	if config.APIToken != "0123456789abcdef0123456789abcdef" {
+		t.Fatalf("api token = %q", config.APIToken)
+	}
+	if fmt.Sprint(config.AllowedIPs) != "[10.0.0.0/8 203.0.113.7/32 ::1/128]" || fmt.Sprint(config.TrustedProxies) != "[172.17.0.1/32]" {
+		t.Fatalf("allowed=%v trusted=%v", config.AllowedIPs, config.TrustedProxies)
 	}
 	want := []Project{
 		{ID: 3, Name: "frontend", PublicKey: "0123456789abcdef0123"},
@@ -78,6 +88,9 @@ func TestLoadErrors(t *testing.T) {
 		{"origin without scheme", "ALLOWED_ORIGINS", "app.example.com", "invalid origin"},
 		{"only commas in origins", "ALLOWED_ORIGINS", ",,", "no origins"},
 		{"negative rate limit", "RATE_LIMIT_PER_MINUTE", "-1", "RATE_LIMIT_PER_MINUTE"},
+		{"short api token", "API_TOKEN", "secret", "at least"},
+		{"bad allowed ip", "ALLOWED_IPS", "10.0.0.300", "invalid address"},
+		{"bad network", "TRUSTED_PROXIES", "10.0.0.0/40", "invalid network"},
 		{"duplicate key", "PROJECTS", "1:backend:a1b2c3d4e5f6a7b8,2:frontend:a1b2c3d4e5f6a7b8", "already used"},
 	}
 	for _, testCase := range tests {

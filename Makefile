@@ -2,14 +2,19 @@ IMAGE ?= devforth/exception-monitoring
 VERSION ?= dev
 MAX_IMAGE_MB ?= 50
 
-.PHONY: test lint build run docker image-size
+.PHONY: test lint fix build run docker image-size
 
 test:
 	go test -race ./...
 
+# Needs golangci-lint v2 (config: .golangci.yml): https://golangci-lint.run/docs/welcome/install/
 lint:
-	go vet ./...
-	@test -z "$$(gofmt -l .)" || (echo "gofmt needed:"; gofmt -l .; exit 1)
+	golangci-lint run
+
+# Fixes formatting, imports and blank lines; prints what is left to fix by hand.
+fix:
+	golangci-lint fmt
+	golangci-lint run --fix
 
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=$(VERSION)" -o bin/exception-monitoring ./cmd/exception-monitoring

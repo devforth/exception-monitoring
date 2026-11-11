@@ -1,0 +1,23 @@
+# golangci-lint v2: `make lint` checks, `make fix` fixes what can be fixed automatically.
+version: "2"
+
+linters:
+  # standard = errcheck, govet, ineffassign, staticcheck, unused
+  default: standard
+  enable:
+    # Blank lines split a function into logical steps: before if/for/switch/return,
+    # after a block, between a group of declarations and the code using it.
+    # Idiomatic Go "cuddling" stays allowed: `value, err := f()` directly
+    # followed by `if err != nil` that uses it.
+    - wsl_v5
+
+formatters:
+  enable:
+    - gofmt
+    # goimports also sorts imports into groups: standard library, then
+    # third-party, then this module.
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/devforth/exception-monitoring

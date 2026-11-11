@@ -154,7 +154,7 @@ func (store *Store) SetIssueStatus(ctx context.Context, issueID int64, status st
 		return err
 	}
 	if count, err := update.RowsAffected(); err == nil && count == 0 {
-		return fmt.Errorf("issue %d not found", issueID)
+		return ErrNotFound
 	}
 	return nil
 }

@@ -4,6 +4,7 @@ package config
 import (
 	"fmt"
 	"log/slog"
+	"net/netip"
 	"os"
 	"regexp"
 	"strconv"
@@ -29,6 +30,15 @@ type Config struct {
 	AllowedOrigins []string
 	// RateLimitPerMinute caps envelopes per project per minute. 0 disables the limit.
 	RateLimitPerMinute int
+	// APIToken authorizes REST API requests (Authorization: Bearer <token>).
+	// Empty means the API is closed.
+	APIToken string
+	// AllowedIPs restricts the API and UI (not ingest or /health) to these
+	// networks. Empty means any address.
+	AllowedIPs []netip.Prefix
+	// TrustedProxies are reverse proxies whose X-Forwarded-For header is used
+	// to find the client address. Empty means the header is ignored.
+	TrustedProxies []netip.Prefix
 }
 
 // Defaults used when the corresponding environment variable is not set.
@@ -38,6 +48,9 @@ const (
 	DefaultLogLevel           = slog.LevelInfo
 	DefaultAllowedOrigins     = "*"
 	DefaultRateLimitPerMinute = 1000
+
+	// MinAPITokenLength keeps tokens out of brute-force range.
+	MinAPITokenLength = 32
 )
 
 var (
@@ -97,6 +110,25 @@ func loadFrom(getenv func(string) string) (*Config, error) {
 		}
 		config.RateLimitPerMinute = limit
 	}
+
+	if value := getenv("API_TOKEN"); value != "" {
+		if len(value) < MinAPITokenLength {
+			return nil, fmt.Errorf("API_TOKEN: must be at least %d characters (e.g. openssl rand -hex 32)", MinAPITokenLength)
+		}
+		config.APIToken = value
+	}
+
+	allowedIPs, err := parseNetworks(getenv("ALLOWED_IPS"))
+	if err != nil {
+		return nil, fmt.Errorf("ALLOWED_IPS: %w", err)
+	}
+	config.AllowedIPs = allowedIPs
+
+	trustedProxies, err := parseNetworks(getenv("TRUSTED_PROXIES"))
+	if err != nil {
+		return nil, fmt.Errorf("TRUSTED_PROXIES: %w", err)
+	}
+	config.TrustedProxies = trustedProxies
 
 	projects, err := parseProjects(getenv("PROJECTS"))
 	if err != nil {
@@ -171,4 +203,30 @@ func parseOrigins(raw string) ([]string, error) {
 		return nil, fmt.Errorf("no origins in %q", raw)
 	}
 	return origins, nil
+}
+
+// parseNetworks parses "10.0.0.0/8, 203.0.113.7, ::1". A plain address means
+// just that address (/32 or /128).
+func parseNetworks(raw string) ([]netip.Prefix, error) {
+	var networks []netip.Prefix
+	for _, entry := range strings.Split(raw, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		if strings.Contains(entry, "/") {
+			network, err := netip.ParsePrefix(entry)
+			if err != nil {
+				return nil, fmt.Errorf("invalid network %q", entry)
+			}
+			networks = append(networks, network.Masked())
+			continue
+		}
+		address, err := netip.ParseAddr(entry)
+		if err != nil {
+			return nil, fmt.Errorf("invalid address %q", entry)
+		}
+		networks = append(networks, netip.PrefixFrom(address.Unmap(), address.Unmap().BitLen()))
+	}
+	return networks, nil
 }
