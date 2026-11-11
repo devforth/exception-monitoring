@@ -42,22 +42,28 @@ type fakeSink struct {
 func (sink *fakeSink) StoreEvent(_ context.Context, project config.Project, event *sentry.Event) error {
 	sink.mutex.Lock()
 	defer sink.mutex.Unlock()
+
 	if sink.err != nil {
 		return sink.err
 	}
+
 	sink.events = append(sink.events, event)
 	sink.projects = append(sink.projects, project.Name)
+
 	return nil
 }
 
 func (sink *fakeSink) StoreLogs(_ context.Context, project config.Project, logs []sentry.Log) error {
 	sink.mutex.Lock()
 	defer sink.mutex.Unlock()
+
 	if sink.err != nil {
 		return sink.err
 	}
+
 	sink.logs = append(sink.logs, logs...)
 	sink.projects = append(sink.projects, project.Name)
+
 	return nil
 }
 
@@ -84,12 +90,14 @@ func newTestServer(settings *config.Config) *testServer {
 	handler := New(slog.New(slog.NewTextHandler(io.Discard, nil)), settings, sink)
 	router := http.NewServeMux()
 	router.Handle("/api/{projectID}/envelope/{$}", handler)
+
 	return &testServer{handler: handler, router: router, sink: sink}
 }
 
 func (server *testServer) send(request *http.Request) *httptest.ResponseRecorder {
 	response := httptest.NewRecorder()
 	server.router.ServeHTTP(response, request)
+
 	return response
 }
 
@@ -99,9 +107,11 @@ func newRequest(method, target string, body []byte) *http.Request {
 
 func envelopeURL(projectID, key string) string {
 	target := "/api/" + projectID + "/envelope/"
+
 	if key != "" {
 		target += "?sentry_version=7&sentry_key=" + key
 	}
+
 	return target
 }
 
@@ -117,50 +127,67 @@ type recordedRequest struct {
 
 func replayFixture(t *testing.T, server *testServer, name string) *httptest.ResponseRecorder {
 	t.Helper()
+
 	body, err := os.ReadFile(filepath.Join(fixturesDir, name+".envelope"))
+
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	meta, err := os.ReadFile(filepath.Join(fixturesDir, name+".request.json"))
+
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	var recorded recordedRequest
+
 	if err := json.Unmarshal(meta, &recorded); err != nil {
 		t.Fatal(err)
 	}
+
 	query := url.Values{}
+
 	for key, value := range recorded.Query {
 		query.Set(key, value)
 	}
+
 	request := newRequest(recorded.Method, recorded.Path+"?"+query.Encode(), body)
+
 	for key, value := range recorded.Headers {
 		request.Header.Set(key, value)
 	}
+
 	return server.send(request)
 }
 
 func TestReplayRecordedSDKRequests(t *testing.T) {
 	files, err := filepath.Glob(filepath.Join(fixturesDir, "*.request.json"))
+
 	if err != nil || len(files) == 0 {
 		t.Fatalf("no fixtures: %v", err)
 	}
+
 	for _, file := range files {
 		name := strings.TrimSuffix(filepath.Base(file), ".request.json")
 		t.Run(name, func(t *testing.T) {
 			server := newTestServer(testSettings())
 			response := replayFixture(t, server, name)
+
 			if response.Code != http.StatusOK {
 				t.Fatalf("got %d %s", response.Code, response.Body)
 			}
 
 			wantProject := "backend"
+
 			if strings.HasPrefix(name, "browser-") {
 				wantProject = "frontend"
+
 				if response.Header().Get("Access-Control-Allow-Origin") != "http://localhost:3500" {
 					t.Fatal("browser request without CORS header in the response")
 				}
 			}
+
 			for _, project := range server.sink.projects {
 				if project != wantProject {
 					t.Fatalf("stored for project %q, want %q", project, wantProject)
@@ -168,9 +195,11 @@ func TestReplayRecordedSDKRequests(t *testing.T) {
 			}
 
 			var body map[string]string
+
 			if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 				t.Fatal(err)
 			}
+
 			switch {
 			case strings.Contains(name, "-event-"):
 				if len(server.sink.events) != 1 || body["id"] != server.sink.events[0].EventID {
@@ -201,11 +230,13 @@ func TestAuthentication(t *testing.T) {
 		{"key in X-Sentry-Auth", func() *http.Request {
 			request := newRequest(http.MethodPost, envelopeURL("1", ""), []byte(simpleEnvelope))
 			request.Header.Set("X-Sentry-Auth", "Sentry sentry_version=7, sentry_client=sentry.python/2.0, sentry_key="+backendKey)
+
 			return request
 		}, http.StatusOK},
 		{"key in Authorization", func() *http.Request {
 			request := newRequest(http.MethodPost, envelopeURL("1", ""), []byte(simpleEnvelope))
 			request.Header.Set("Authorization", "sentry sentry_key="+backendKey)
+
 			return request
 		}, http.StatusOK},
 		{"key in envelope dsn (tunnel)", func() *http.Request {
@@ -232,13 +263,16 @@ func TestAuthentication(t *testing.T) {
 			return newRequest(http.MethodGet, envelopeURL("1", backendKey), nil)
 		}, http.StatusMethodNotAllowed},
 	}
+
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
 			server := newTestServer(testSettings())
 			response := server.send(testCase.request())
+
 			if response.Code != testCase.wantStatus {
 				t.Fatalf("got %d %s, want %d", response.Code, response.Body, testCase.wantStatus)
 			}
+
 			if testCase.wantStatus != http.StatusOK && len(server.sink.projects) != 0 {
 				t.Fatal("rejected request must not store anything")
 			}
@@ -255,6 +289,7 @@ func TestCORS(t *testing.T) {
 		request := newRequest(http.MethodPost, envelopeURL("2", browserKey), []byte(simpleEnvelope))
 		request.Header.Set("Origin", "https://App.example.com")
 		response := server.send(request)
+
 		if response.Code != http.StatusOK || response.Header().Get("Access-Control-Allow-Origin") != "https://App.example.com" {
 			t.Fatalf("got %d, allow-origin %q", response.Code, response.Header().Get("Access-Control-Allow-Origin"))
 		}
@@ -265,6 +300,7 @@ func TestCORS(t *testing.T) {
 		request.Header.Set("Origin", "https://app.example.com")
 		request.Header.Set("Access-Control-Request-Method", "POST")
 		response := server.send(request)
+
 		if response.Code != http.StatusOK || !strings.Contains(response.Header().Get("Access-Control-Allow-Methods"), "POST") {
 			t.Fatalf("got %d, headers %v", response.Code, response.Header())
 		}
@@ -275,6 +311,7 @@ func TestCORS(t *testing.T) {
 			request := newRequest(method, envelopeURL("2", browserKey), []byte(simpleEnvelope))
 			request.Header.Set("Origin", "https://evil.example.com")
 			response := server.send(request)
+
 			if response.Code != http.StatusForbidden || response.Header().Get("Access-Control-Allow-Origin") != "" {
 				t.Fatalf("%s: got %d, allow-origin %q", method, response.Code, response.Header().Get("Access-Control-Allow-Origin"))
 			}
@@ -283,6 +320,7 @@ func TestCORS(t *testing.T) {
 
 	t.Run("backend without origin", func(t *testing.T) {
 		response := server.send(newRequest(http.MethodPost, envelopeURL("1", backendKey), []byte(simpleEnvelope)))
+
 		if response.Code != http.StatusOK {
 			t.Fatalf("got %d", response.Code)
 		}
@@ -291,19 +329,26 @@ func TestCORS(t *testing.T) {
 
 func compress(t *testing.T, encoding string, data []byte) []byte {
 	t.Helper()
-	var buffer bytes.Buffer
-	var writer io.WriteCloser
+
+	var (
+		buffer bytes.Buffer
+		writer io.WriteCloser
+	)
+
 	if encoding == "gzip" {
 		writer = gzip.NewWriter(&buffer)
 	} else {
 		writer = zlib.NewWriter(&buffer)
 	}
+
 	if _, err := writer.Write(data); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := writer.Close(); err != nil {
 		t.Fatal(err)
 	}
+
 	return buffer.Bytes()
 }
 
@@ -326,14 +371,18 @@ func TestBody(t *testing.T) {
 		{"invalid envelope", "", func(t *testing.T) []byte { return []byte("not an envelope") }, http.StatusBadRequest},
 		{"invalid event json", "", func(t *testing.T) []byte { return []byte("{}\n{\"type\":\"event\"}\n{\"message\":\n") }, http.StatusBadRequest},
 	}
+
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
 			server := newTestServer(testSettings())
 			request := newRequest(http.MethodPost, envelopeURL("1", backendKey), testCase.body(t))
+
 			if testCase.encoding != "" {
 				request.Header.Set("Content-Encoding", testCase.encoding)
 			}
+
 			response := server.send(request)
+
 			if response.Code != testCase.wantStatus {
 				t.Fatalf("got %d %s, want %d", response.Code, response.Body, testCase.wantStatus)
 			}
@@ -345,9 +394,11 @@ func TestMalformedItemRejectsWholeEnvelope(t *testing.T) {
 	server := newTestServer(testSettings())
 	body := "{}\n{\"type\":\"event\"}\n{\"message\":\"ok\"}\n{\"type\":\"log\"}\nnot json\n"
 	response := server.send(newRequest(http.MethodPost, envelopeURL("1", backendKey), []byte(body)))
+
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("got %d, want 400", response.Code)
 	}
+
 	if len(server.sink.events) != 0 {
 		t.Fatal("the valid event must not be stored when another item is malformed")
 	}
@@ -357,6 +408,7 @@ func TestSinkFailure(t *testing.T) {
 	server := newTestServer(testSettings())
 	server.sink.err = errors.New("disk full")
 	response := server.send(newRequest(http.MethodPost, envelopeURL("1", backendKey), []byte(simpleEnvelope)))
+
 	if response.Code != http.StatusInternalServerError || strings.Contains(response.Body.String(), "disk full") {
 		t.Fatalf("got %d %s", response.Code, response.Body)
 	}
@@ -378,10 +430,13 @@ func TestRateLimit(t *testing.T) {
 			t.Fatalf("got %d before the limit", response.Code)
 		}
 	}
+
 	response := send("1", backendKey)
+
 	if response.Code != http.StatusTooManyRequests {
 		t.Fatalf("got %d, want 429", response.Code)
 	}
+
 	if response.Header().Get("Retry-After") != "46" || response.Header().Get("X-Sentry-Rate-Limits") != "46::project" {
 		t.Fatalf("headers %v", response.Header())
 	}
@@ -396,6 +451,7 @@ func TestRateLimit(t *testing.T) {
 	}
 
 	now = now.Add(time.Minute)
+
 	if response := send("1", backendKey); response.Code != http.StatusOK {
 		t.Fatalf("next minute: got %d", response.Code)
 	}

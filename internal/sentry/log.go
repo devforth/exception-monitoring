@@ -34,17 +34,22 @@ func ParseLogs(payload []byte, received time.Time) ([]Log, error) {
 	var batch struct {
 		Items []Log `json:"items"`
 	}
+
 	if err := json.Unmarshal(payload, &batch); err != nil {
 		return nil, fmt.Errorf("logs: %w", err)
 	}
+
 	for index := range batch.Items {
 		record := &batch.Items[index]
+
 		if record.Timestamp.IsZero() {
 			record.Timestamp = Timestamp{received}
 		}
+
 		if record.Level == "" {
 			record.Level = "info"
 		}
 	}
+
 	return batch.Items, nil
 }

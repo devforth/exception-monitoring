@@ -17,12 +17,15 @@ type cors struct {
 
 func newCORS(allowedOrigins []string) cors {
 	result := cors{origins: map[string]bool{}}
+
 	for _, origin := range allowedOrigins {
 		if origin == "*" {
 			result.anyOrigin = true
 		}
+
 		result.origins[strings.ToLower(origin)] = true
 	}
+
 	return result
 }
 
@@ -30,20 +33,26 @@ func newCORS(allowedOrigins []string) cors {
 func (policy cors) apply(w http.ResponseWriter, r *http.Request) bool {
 	header := w.Header()
 	header.Add("Vary", "Origin")
+
 	origin := r.Header.Get("Origin")
+
 	if origin == "" {
 		return true
 	}
+
 	if !policy.anyOrigin && !policy.origins[strings.ToLower(origin)] {
 		return false
 	}
+
 	header.Set("Access-Control-Allow-Origin", origin)
 	header.Set("Access-Control-Expose-Headers", "X-Sentry-Error, X-Sentry-Rate-Limits, Retry-After")
+
 	if r.Method == http.MethodOptions {
 		header.Set("Access-Control-Allow-Methods", "POST, OPTIONS")
 		header.Set("Access-Control-Allow-Headers", "Content-Type, Content-Encoding, X-Sentry-Auth, Authorization, Sentry-Trace, Baggage")
 		header.Set("Access-Control-Max-Age", "3600")
 	}
+
 	return true
 }
 
@@ -73,14 +82,18 @@ func (limiter *rateLimiter) allow(projectID int, now time.Time) (retryAfter stri
 
 	windowStart := now.Truncate(time.Minute)
 	window := limiter.windows[projectID]
+
 	if window == nil || !window.start.Equal(windowStart) {
 		window = &rateWindow{start: windowStart}
 		limiter.windows[projectID] = window
 	}
+
 	if window.count >= limiter.limit {
 		seconds := int(windowStart.Add(time.Minute).Sub(now).Seconds()) + 1
 		return strconv.Itoa(seconds), false
 	}
+
 	window.count++
+
 	return "", true
 }

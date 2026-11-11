@@ -9,9 +9,11 @@ import (
 
 func networks(values ...string) []netip.Prefix {
 	var result []netip.Prefix
+
 	for _, value := range values {
 		result = append(result, netip.MustParsePrefix(value))
 	}
+
 	return result
 }
 
@@ -29,13 +31,16 @@ func TestClientIP(t *testing.T) {
 		{"malformed entry", "172.17.0.1:5000", "not-an-ip", "172.17.0.1"},
 		{"ipv4-mapped ipv6", "[::ffff:203.0.113.7]:5000", "", "203.0.113.7"},
 	}
+
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
 			request := httptest.NewRequest(http.MethodGet, "/", nil)
 			request.RemoteAddr = testCase.remote
+
 			if testCase.forwarded != "" {
 				request.Header.Set("X-Forwarded-For", testCase.forwarded)
 			}
+
 			if got := ClientIP(request, proxies); got.String() != testCase.want {
 				t.Fatalf("got %s, want %s", got, testCase.want)
 			}
@@ -57,14 +62,18 @@ func TestRequireAllowedIP(t *testing.T) {
 		{"172.17.0.1:1", "10.1.2.3", http.StatusOK},
 		{"172.17.0.1:1", "203.0.113.7", http.StatusForbidden},
 	}
+
 	for _, testCase := range testCases {
 		request := httptest.NewRequest(http.MethodGet, "/", nil)
 		request.RemoteAddr = testCase.remote
+
 		if testCase.forwarded != "" {
 			request.Header.Set("X-Forwarded-For", testCase.forwarded)
 		}
+
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, request)
+
 		if response.Code != testCase.want {
 			t.Errorf("%s via %q: got %d, want %d", testCase.forwarded, testCase.remote, response.Code, testCase.want)
 		}
@@ -72,6 +81,7 @@ func TestRequireAllowedIP(t *testing.T) {
 
 	open := httptest.NewRecorder()
 	RequireAllowedIP(nil, nil, ok).ServeHTTP(open, httptest.NewRequest(http.MethodGet, "/", nil))
+
 	if open.Code != http.StatusOK {
 		t.Fatal("an empty allowlist must allow everyone")
 	}
@@ -79,6 +89,7 @@ func TestRequireAllowedIP(t *testing.T) {
 
 func TestRequireToken(t *testing.T) {
 	const token = "0123456789abcdef0123456789abcdef"
+
 	testCases := []struct {
 		name, configured, header string
 		want                     int
@@ -91,14 +102,18 @@ func TestRequireToken(t *testing.T) {
 		{"basic auth", token, "Basic " + token, http.StatusUnauthorized},
 		{"api disabled", "", "Bearer ", http.StatusUnauthorized},
 	}
+
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
 			request := httptest.NewRequest(http.MethodGet, "/", nil)
+
 			if testCase.header != "" {
 				request.Header.Set("Authorization", testCase.header)
 			}
+
 			response := httptest.NewRecorder()
 			RequireToken(testCase.configured, ok).ServeHTTP(response, request)
+
 			if response.Code != testCase.want {
 				t.Fatalf("got %d, want %d", response.Code, testCase.want)
 			}

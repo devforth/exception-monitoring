@@ -64,20 +64,26 @@ const (
 // when the server actually saw the problem.
 func (store *Store) SaveEvent(ctx context.Context, event NewEvent) (SaveResult, error) {
 	var result SaveResult
+
 	transaction, err := store.DB.BeginTx(ctx, nil)
+
 	if err != nil {
 		return result, err
 	}
+
 	defer transaction.Rollback()
 
 	var existingEventID int64
+
 	err = transaction.QueryRowContext(ctx,
 		`SELECT id FROM events WHERE project_id = ? AND event_id = ?`,
 		event.ProjectID, event.EventID).Scan(&existingEventID)
+
 	if err == nil {
 		result.Duplicate = true
 		return result, nil
 	}
+
 	if !errors.Is(err, sql.ErrNoRows) {
 		return result, fmt.Errorf("check duplicate: %w", err)
 	}
@@ -87,9 +93,11 @@ func (store *Store) SaveEvent(ctx context.Context, event NewEvent) (SaveResult, 
 	receivedAt := formatTime(event.ReceivedAt)
 
 	var status string
+
 	err = transaction.QueryRowContext(ctx,
 		`SELECT id, status FROM issues WHERE project_id = ? AND fingerprint = ?`,
 		event.ProjectID, event.Fingerprint).Scan(&result.IssueID, &status)
+
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		result.NewIssue = true
@@ -97,9 +105,11 @@ func (store *Store) SaveEvent(ctx context.Context, event NewEvent) (SaveResult, 
 			INSERT INTO issues (project_id, fingerprint, title, culprit, level, event_count, first_seen, last_seen)
 			VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
 			event.ProjectID, event.Fingerprint, title, culprit, event.Level, receivedAt, receivedAt)
+
 		if err != nil {
 			return result, fmt.Errorf("create issue: %w", err)
 		}
+
 		if result.IssueID, err = insert.LastInsertId(); err != nil {
 			return result, err
 		}
@@ -108,6 +118,7 @@ func (store *Store) SaveEvent(ctx context.Context, event NewEvent) (SaveResult, 
 	default:
 		result.Regression = status == StatusResolved
 		newStatus := status
+
 		if result.Regression {
 			newStatus = StatusUnresolved
 		}
@@ -121,6 +132,7 @@ func (store *Store) SaveEvent(ctx context.Context, event NewEvent) (SaveResult, 
 				resolved_at = CASE WHEN ? = 'resolved' THEN resolved_at ELSE NULL END
 			WHERE id = ?`,
 			title, culprit, event.Level, receivedAt, newStatus, newStatus, result.IssueID)
+
 		if err != nil {
 			return result, fmt.Errorf("update issue: %w", err)
 		}
@@ -131,9 +143,11 @@ func (store *Store) SaveEvent(ctx context.Context, event NewEvent) (SaveResult, 
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		event.ProjectID, result.IssueID, event.EventID, formatTime(event.Timestamp), receivedAt,
 		event.Level, event.Environment, event.Release, event.TraceID, string(event.Payload))
+
 	if err != nil {
 		return result, fmt.Errorf("insert event: %w", err)
 	}
+
 	return result, transaction.Commit()
 }
 
@@ -144,18 +158,24 @@ func (store *Store) SetIssueStatus(ctx context.Context, issueID int64, status st
 	default:
 		return fmt.Errorf("invalid status %q", status)
 	}
+
 	var resolvedAt any
+
 	if status == StatusResolved {
 		resolvedAt = formatTime(time.Now())
 	}
+
 	update, err := store.DB.ExecContext(ctx,
 		`UPDATE issues SET status = ?, resolved_at = ? WHERE id = ?`, status, resolvedAt, issueID)
+
 	if err != nil {
 		return err
 	}
+
 	if count, err := update.RowsAffected(); err == nil && count == 0 {
 		return ErrNotFound
 	}
+
 	return nil
 }
 
@@ -175,38 +195,48 @@ func (store *Store) SaveLogs(ctx context.Context, logs []NewLog) error {
 	if len(logs) == 0 {
 		return nil
 	}
+
 	transaction, err := store.DB.BeginTx(ctx, nil)
+
 	if err != nil {
 		return err
 	}
+
 	defer transaction.Rollback()
 
 	statement, err := transaction.PrepareContext(ctx, `
 		INSERT INTO logs (project_id, timestamp, level, severity_number, body, trace_id, attributes)
 		VALUES (?, ?, ?, ?, ?, ?, ?)`)
+
 	if err != nil {
 		return err
 	}
+
 	defer statement.Close()
 
 	for _, record := range logs {
 		attributes := string(record.Attributes)
+
 		if attributes == "" {
 			attributes = "{}"
 		}
+
 		if _, err := statement.ExecContext(ctx, record.ProjectID, formatTime(record.Timestamp), record.Level,
 			record.SeverityNumber, record.Body, record.TraceID, attributes); err != nil {
 			return fmt.Errorf("insert log: %w", err)
 		}
 	}
+
 	return transaction.Commit()
 }
 
 // truncate cuts text to at most limit characters (not bytes), adding "…".
 func truncate(text string, limit int) string {
 	runes := []rune(text)
+
 	if len(runes) <= limit {
 		return text
 	}
+
 	return string(runes[:limit-1]) + "…"
 }

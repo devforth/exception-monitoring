@@ -75,9 +75,11 @@ func loadFrom(getenv func(string) string) (*Config, error) {
 
 	if value := getenv("PORT"); value != "" {
 		port, err := strconv.Atoi(value)
+
 		if err != nil || port < 1 || port > 65535 {
 			return nil, fmt.Errorf("PORT: invalid port %q", value)
 		}
+
 		config.Port = port
 	}
 
@@ -86,6 +88,7 @@ func loadFrom(getenv func(string) string) (*Config, error) {
 		if strings.ContainsAny(value, "?#%") {
 			return nil, fmt.Errorf("DATA_DIR: path must not contain '?', '#' or '%%': %q", value)
 		}
+
 		config.DataDir = value
 	}
 
@@ -97,17 +100,21 @@ func loadFrom(getenv func(string) string) (*Config, error) {
 
 	if value := getenv("ALLOWED_ORIGINS"); value != "" {
 		origins, err := parseOrigins(value)
+
 		if err != nil {
 			return nil, fmt.Errorf("ALLOWED_ORIGINS: %w", err)
 		}
+
 		config.AllowedOrigins = origins
 	}
 
 	if value := getenv("RATE_LIMIT_PER_MINUTE"); value != "" {
 		limit, err := strconv.Atoi(value)
+
 		if err != nil || limit < 0 {
 			return nil, fmt.Errorf("RATE_LIMIT_PER_MINUTE: invalid value %q (0 or a positive integer)", value)
 		}
+
 		config.RateLimitPerMinute = limit
 	}
 
@@ -115,25 +122,32 @@ func loadFrom(getenv func(string) string) (*Config, error) {
 		if len(value) < MinAPITokenLength {
 			return nil, fmt.Errorf("API_TOKEN: must be at least %d characters (e.g. openssl rand -hex 32)", MinAPITokenLength)
 		}
+
 		config.APIToken = value
 	}
 
 	allowedIPs, err := parseNetworks(getenv("ALLOWED_IPS"))
+
 	if err != nil {
 		return nil, fmt.Errorf("ALLOWED_IPS: %w", err)
 	}
+
 	config.AllowedIPs = allowedIPs
 
 	trustedProxies, err := parseNetworks(getenv("TRUSTED_PROXIES"))
+
 	if err != nil {
 		return nil, fmt.Errorf("TRUSTED_PROXIES: %w", err)
 	}
+
 	config.TrustedProxies = trustedProxies
 
 	projects, err := parseProjects(getenv("PROJECTS"))
+
 	if err != nil {
 		return nil, fmt.Errorf("PROJECTS: %w", err)
 	}
+
 	config.Projects = projects
 
 	return config, nil
@@ -142,46 +156,58 @@ func loadFrom(getenv func(string) string) (*Config, error) {
 // parseProjects parses "id:name:key,id:name:key". Empty input means no projects.
 func parseProjects(raw string) ([]Project, error) {
 	raw = strings.TrimSpace(raw)
+
 	if raw == "" {
 		return nil, nil
 	}
 
 	var projects []Project
+
 	seenIDs := map[int]bool{}
 	seenNames := map[string]bool{}
 	seenKeys := map[string]bool{}
 
 	for index, entry := range strings.Split(raw, ",") {
 		parts := strings.Split(strings.TrimSpace(entry), ":")
+
 		if len(parts) != 3 {
 			return nil, fmt.Errorf("entry %d %q: expected id:name:public_key", index+1, entry)
 		}
+
 		rawID, name, key := parts[0], parts[1], parts[2]
 
 		id, err := strconv.Atoi(rawID)
+
 		if err != nil || id < 1 {
 			return nil, fmt.Errorf("entry %d: invalid id %q (positive integer)", index+1, rawID)
 		}
+
 		if seenIDs[id] {
 			return nil, fmt.Errorf("duplicate project id %d", id)
 		}
+
 		if !projectNameRe.MatchString(name) {
 			return nil, fmt.Errorf("entry %d: invalid name %q (lowercase letters, digits, '-', '_')", index+1, name)
 		}
+
 		if !publicKeyRe.MatchString(key) {
 			return nil, fmt.Errorf("project %q: public key must be 16-64 letters or digits", name)
 		}
+
 		if seenNames[name] {
 			return nil, fmt.Errorf("duplicate project name %q", name)
 		}
+
 		if seenKeys[key] {
 			return nil, fmt.Errorf("project %q: public key is already used by another project", name)
 		}
+
 		seenIDs[id] = true
 		seenNames[name] = true
 		seenKeys[key] = true
 		projects = append(projects, Project{ID: id, Name: name, PublicKey: key})
 	}
+
 	return projects, nil
 }
 
@@ -189,19 +215,25 @@ func parseProjects(raw string) ([]Project, error) {
 // Origins are compared exactly, so a path or trailing slash is an error.
 func parseOrigins(raw string) ([]string, error) {
 	var origins []string
+
 	for _, entry := range strings.Split(raw, ",") {
 		origin := strings.ToLower(strings.TrimSpace(entry))
+
 		if origin == "" {
 			continue
 		}
+
 		if origin != "*" && !originRe.MatchString(origin) {
 			return nil, fmt.Errorf("invalid origin %q (expected scheme://host[:port], e.g. https://app.example.com)", entry)
 		}
+
 		origins = append(origins, origin)
 	}
+
 	if len(origins) == 0 {
 		return nil, fmt.Errorf("no origins in %q", raw)
 	}
+
 	return origins, nil
 }
 
@@ -209,24 +241,34 @@ func parseOrigins(raw string) ([]string, error) {
 // just that address (/32 or /128).
 func parseNetworks(raw string) ([]netip.Prefix, error) {
 	var networks []netip.Prefix
+
 	for _, entry := range strings.Split(raw, ",") {
 		entry = strings.TrimSpace(entry)
+
 		if entry == "" {
 			continue
 		}
+
 		if strings.Contains(entry, "/") {
 			network, err := netip.ParsePrefix(entry)
+
 			if err != nil {
 				return nil, fmt.Errorf("invalid network %q", entry)
 			}
+
 			networks = append(networks, network.Masked())
+
 			continue
 		}
+
 		address, err := netip.ParseAddr(entry)
+
 		if err != nil {
 			return nil, fmt.Errorf("invalid address %q", entry)
 		}
+
 		networks = append(networks, netip.PrefixFrom(address.Unmap(), address.Unmap().BitLen()))
 	}
+
 	return networks, nil
 }

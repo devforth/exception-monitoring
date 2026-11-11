@@ -47,9 +47,11 @@ func (server *Server) Handler() http.Handler {
 	// handler answers CORS preflight (OPTIONS) itself. {$} means an exact match.
 	router.Handle("/api/{projectID}/envelope/{$}", server.Ingest)
 	router.Handle("/api/{projectID}/envelope", server.Ingest)
+
 	if server.API != nil {
 		server.API.Register(router, server.protectAPI)
 	}
+
 	return server.logRequests(router)
 }
 
@@ -61,13 +63,16 @@ func (server *Server) protectAPI(next http.Handler) http.Handler {
 
 func (server *Server) health(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+
 	defer cancel()
 
 	if err := server.Database.Ping(ctx); err != nil {
 		server.Logger.Error("health check: database unavailable", "err", err)
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "error", "error": "database unavailable"})
+
 		return
 	}
+
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 

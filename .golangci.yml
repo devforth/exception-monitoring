@@ -7,9 +7,24 @@ linters:
   enable:
     # Blank lines split a function into logical steps: before if/for/switch/return,
     # after a block, between a group of declarations and the code using it.
-    # Idiomatic Go "cuddling" stays allowed: `value, err := f()` directly
-    # followed by `if err != nil` that uses it.
     - wsl_v5
+  settings:
+    wsl_v5:
+      # Same rule as in our TypeScript projects: a block statement (if, for,
+      # switch, ...) always has a blank line above it, even `if err != nil`
+      # right after the call that returned err. Consecutive assignments stay together.
+      cuddle-max-statements: 0
+      disable:
+        # "err" requires `if err != nil` to be cuddled, the opposite of the rule above.
+        - err
+    errcheck:
+      # database/sql idioms where the error is either impossible or checked elsewhere:
+      # Rollback is deferred after Commit (then it is a no-op), rows errors come from
+      # rows.Err(), and a statement is closed with its transaction.
+      exclude-functions:
+        - (*database/sql.Tx).Rollback
+        - (*database/sql.Rows).Close
+        - (*database/sql.Stmt).Close
 
 formatters:
   enable:

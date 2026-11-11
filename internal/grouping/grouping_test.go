@@ -12,38 +12,51 @@ import (
 
 func fixtureEvent(t *testing.T, name string) *sentry.Event {
 	t.Helper()
+
 	body, err := os.ReadFile(filepath.Join("../../testdata/envelopes", name+".envelope"))
+
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	envelope, err := sentry.ParseEnvelope(body)
+
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	event, err := sentry.ParseEvent(envelope.Items[0].Payload, envelope.Header.EventID, time.Now())
+
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	return event
 }
 
 func parse(t *testing.T, payload string) *sentry.Event {
 	t.Helper()
+
 	event, err := sentry.ParseEvent([]byte(payload), "", time.Now())
+
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	return event
 }
 
 // exceptionEvent builds an event with one exception and in-app frames given as "file|function|line".
 func exceptionEvent(t *testing.T, errorType, value string, frames ...string) *sentry.Event {
 	t.Helper()
+
 	var frameJSON []string
+
 	for _, frame := range frames {
 		parts := strings.Split(frame, "|")
 		frameJSON = append(frameJSON, `{"filename":"`+parts[0]+`","function":"`+parts[1]+`","lineno":`+parts[2]+`,"in_app":true}`)
 	}
+
 	return parse(t, `{"exception":{"values":[{"type":"`+errorType+`","value":"`+value+`",
 		"stacktrace":{"frames":[{"filename":"node_modules/lib.js","function":"lib","in_app":false},`+strings.Join(frameJSON, ",")+`]}}]}}`)
 }
@@ -67,6 +80,7 @@ func TestSameProblemGroupsTogether(t *testing.T) {
 			exceptionEvent(t, "TypeError", "x", "https://app.example.com/assets/main.77aa00ff.js|render|1"),
 		},
 	}
+
 	for name, events := range testCases {
 		t.Run(name, func(t *testing.T) {
 			if Fingerprint(events[0]) != Fingerprint(events[1]) {
@@ -99,6 +113,7 @@ func TestDifferentProblemsSplit(t *testing.T) {
 			parse(t, `{"exception":{"values":[{"type":"TimeoutError","value":"x"},{"type":"Error","value":"load failed"}]}}`),
 		},
 	}
+
 	for name, events := range testCases {
 		t.Run(name, func(t *testing.T) {
 			if Fingerprint(events[0]) == Fingerprint(events[1]) {
@@ -133,6 +148,7 @@ func TestStackWithoutSourceAddsValue(t *testing.T) {
 		return parse(t, `{"exception":{"values":[{"type":"Error","value":"`+value+`","stacktrace":{"frames":[
 			{"filename":"a.ts","function":"load","in_app":true,"context_line":"throw err"}]}}]}}`)
 	}
+
 	if Fingerprint(withSource("user alice not found")) != Fingerprint(withSource("user bob not found")) {
 		t.Fatal("with source lines, the value must not split groups")
 	}
@@ -148,9 +164,11 @@ func TestCustomFingerprint(t *testing.T) {
 	if Fingerprint(custom) != Fingerprint(sameCustomOtherStack) {
 		t.Fatal("a custom fingerprint must override the stack")
 	}
+
 	if got := Components(withDefault); got[len(got)-1] != "eu" || !strings.Contains(strings.Join(got, " "), "frame:a.js f") {
 		t.Fatalf("{{ default }} not expanded: %q", got)
 	}
+
 	if Fingerprint(withDefault) == Fingerprint(plain) {
 		t.Fatal("{{ default }} plus an extra value must differ from the default alone")
 	}
@@ -162,12 +180,14 @@ func TestCustomFingerprint(t *testing.T) {
 
 func TestFixtures(t *testing.T) {
 	message := fixtureEvent(t, "node-event-message")
+
 	if got := Components(message); got[0] != "message" {
 		t.Fatalf("captureMessage must group by message, got %q", got)
 	}
 
 	unhandled := fixtureEvent(t, "node-event-unhandled")
 	components := strings.Join(Components(unhandled), "\n")
+
 	if strings.Contains(components, "node_modules") {
 		t.Fatalf("library frames must be skipped when there are in-app frames:\n%s", components)
 	}
@@ -191,6 +211,7 @@ func TestNormalizeMessage(t *testing.T) {
 		"short hex abc12 stays text-ish":               "short hex abc<n> stays text-ish",
 		"Cannot read properties of undefined":          "Cannot read properties of undefined",
 	}
+
 	for input, want := range testCases {
 		if got := NormalizeMessage(input); got != want {
 			t.Errorf("NormalizeMessage(%q) = %q, want %q", input, got, want)
@@ -202,7 +223,9 @@ func TestCulprit(t *testing.T) {
 	if got := Culprit(parse(t, `{"transaction":"GET /api/orders","message":"x"}`)); got != "GET /api/orders" {
 		t.Fatalf("culprit = %q", got)
 	}
+
 	event := exceptionEvent(t, "Error", "x", "src/orders.ts|loadOrders|10", "src/db.ts|query|5")
+
 	if got := Culprit(event); got != "query (src/db.ts)" {
 		t.Fatalf("culprit = %q, want the frame that threw", got)
 	}

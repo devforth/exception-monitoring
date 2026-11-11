@@ -91,27 +91,35 @@ type Breadcrumb struct {
 // get defaults, so the result is always usable.
 func ParseEvent(payload []byte, headerEventID string, received time.Time) (*Event, error) {
 	event := &Event{}
+
 	if err := json.Unmarshal(payload, event); err != nil {
 		return nil, fmt.Errorf("event: %w", err)
 	}
+
 	event.Raw = json.RawMessage(bytes.Clone(payload))
 
 	event.EventID = normalizeEventID(event.EventID)
+
 	if event.EventID == "" {
 		event.EventID = normalizeEventID(headerEventID)
 	}
+
 	if event.EventID == "" {
 		event.EventID = NewEventID()
 	}
+
 	if event.Timestamp.IsZero() {
 		event.Timestamp = Timestamp{received}
 	}
+
 	if event.Level == "" {
 		event.Level = "error"
 	}
+
 	if event.Message == "" {
 		event.Message = event.LogEntry
 	}
+
 	return event, nil
 }
 
@@ -127,9 +135,11 @@ func (event *Event) Title() string {
 			return exception.Value
 		}
 	}
+
 	if event.Message != "" {
 		return string(event.Message)
 	}
+
 	return "<unlabeled event>"
 }
 
@@ -139,26 +149,33 @@ func (event *Event) MainException() *Exception {
 	if len(event.Exception) == 0 {
 		return nil
 	}
+
 	return &event.Exception[len(event.Exception)-1]
 }
 
 // TraceID returns contexts.trace.trace_id, which links the event to logs.
 func (event *Event) TraceID() string {
 	raw, ok := event.Contexts["trace"]
+
 	if !ok {
 		return ""
 	}
+
 	var trace struct {
 		TraceID string `json:"trace_id"`
 	}
+
 	_ = json.Unmarshal(raw, &trace)
+
 	return trace.TraceID
 }
 
 // NewEventID returns a random 32-character hex ID in Sentry's format.
 func NewEventID() string {
 	var id [16]byte
+
 	_, _ = rand.Read(id[:])
+
 	return hex.EncodeToString(id[:])
 }
 
@@ -166,12 +183,15 @@ func NewEventID() string {
 // returns 32 lowercase hex characters, or "" if the value is not a valid ID.
 func normalizeEventID(value string) string {
 	value = strings.ToLower(strings.ReplaceAll(value, "-", ""))
+
 	if len(value) != 32 {
 		return ""
 	}
+
 	if _, err := hex.DecodeString(value); err != nil {
 		return ""
 	}
+
 	return value
 }
 
@@ -184,12 +204,16 @@ type Timestamp struct{ time.Time }
 
 func (timestamp *Timestamp) UnmarshalJSON(data []byte) error {
 	var seconds float64
+
 	if err := json.Unmarshal(data, &seconds); err == nil {
 		whole := int64(seconds)
 		timestamp.Time = time.Unix(whole, int64((seconds-float64(whole))*1e9)).UTC()
+
 		return nil
 	}
+
 	var text string
+
 	if err := json.Unmarshal(data, &text); err == nil {
 		for _, layout := range []string{time.RFC3339Nano, "2006-01-02T15:04:05.999999999"} {
 			if parsed, err := time.Parse(layout, text); err == nil {
@@ -198,6 +222,7 @@ func (timestamp *Timestamp) UnmarshalJSON(data []byte) error {
 			}
 		}
 	}
+
 	return nil
 }
 
@@ -206,14 +231,17 @@ type Message string
 
 func (message *Message) UnmarshalJSON(data []byte) error {
 	var text string
+
 	if err := json.Unmarshal(data, &text); err == nil {
 		*message = Message(text)
 		return nil
 	}
+
 	var object struct {
 		Formatted string `json:"formatted"`
 		Message   string `json:"message"`
 	}
+
 	if err := json.Unmarshal(data, &object); err == nil {
 		if object.Formatted != "" {
 			*message = Message(object.Formatted)
@@ -221,6 +249,7 @@ func (message *Message) UnmarshalJSON(data []byte) error {
 			*message = Message(object.Message)
 		}
 	}
+
 	return nil
 }
 
@@ -242,14 +271,18 @@ func unmarshalValues[T any](data []byte, target *[]T) error {
 	var wrapped struct {
 		Values []T `json:"values"`
 	}
+
 	if err := json.Unmarshal(data, &wrapped); err == nil {
 		*target = wrapped.Values
 		return nil
 	}
+
 	var bare []T
+
 	if err := json.Unmarshal(data, &bare); err == nil {
 		*target = bare
 	}
+
 	return nil
 }
 
@@ -258,23 +291,31 @@ type Tags map[string]string
 
 func (tags *Tags) UnmarshalJSON(data []byte) error {
 	result := Tags{}
+
 	var object map[string]json.RawMessage
+
 	if err := json.Unmarshal(data, &object); err == nil {
 		for key, value := range object {
 			result[key] = rawToString(value)
 		}
+
 		*tags = result
+
 		return nil
 	}
+
 	var pairs [][]json.RawMessage
+
 	if err := json.Unmarshal(data, &pairs); err == nil {
 		for _, pair := range pairs {
 			if len(pair) == 2 {
 				result[rawToString(pair[0])] = rawToString(pair[1])
 			}
 		}
+
 		*tags = result
 	}
+
 	return nil
 }
 
@@ -283,14 +324,19 @@ type StringList []string
 
 func (list *StringList) UnmarshalJSON(data []byte) error {
 	var values []json.RawMessage
+
 	if err := json.Unmarshal(data, &values); err != nil {
 		return nil
 	}
+
 	result := make(StringList, 0, len(values))
+
 	for _, value := range values {
 		result = append(result, rawToString(value))
 	}
+
 	*list = result
+
 	return nil
 }
 
@@ -304,19 +350,26 @@ func (flex *FlexString) UnmarshalJSON(data []byte) error {
 
 func rawToString(raw json.RawMessage) string {
 	var text string
+
 	if err := json.Unmarshal(raw, &text); err == nil {
 		return text
 	}
+
 	var number json.Number
+
 	if err := json.Unmarshal(raw, &number); err == nil {
 		return number.String()
 	}
+
 	var boolean bool
+
 	if err := json.Unmarshal(raw, &boolean); err == nil {
 		return strconv.FormatBool(boolean)
 	}
+
 	if string(raw) == "null" {
 		return ""
 	}
+
 	return string(raw)
 }

@@ -68,38 +68,48 @@ const (
 // binary data); otherwise it runs to the next newline or the end of the body.
 func ParseEnvelope(body []byte) (*Envelope, error) {
 	headerLine, rest := nextLine(body)
+
 	if len(bytes.TrimSpace(headerLine)) == 0 {
 		return nil, errors.New("empty envelope")
 	}
+
 	envelope := &Envelope{}
+
 	if err := json.Unmarshal(headerLine, &envelope.Header); err != nil {
 		return nil, fmt.Errorf("envelope header: %w", err)
 	}
 
 	for len(rest) > 0 {
 		var itemHeaderLine []byte
+
 		itemHeaderLine, rest = nextLine(rest)
+
 		if len(bytes.TrimSpace(itemHeaderLine)) == 0 {
 			// Trailing newlines at the end of the body.
 			if len(bytes.TrimSpace(rest)) == 0 {
 				break
 			}
+
 			return nil, fmt.Errorf("item %d: empty item header", len(envelope.Items)+1)
 		}
+
 		if len(envelope.Items) == MaxItems {
 			return nil, fmt.Errorf("too many items (max %d)", MaxItems)
 		}
 
 		var item Item
+
 		if err := json.Unmarshal(itemHeaderLine, &item.Header); err != nil {
 			return nil, fmt.Errorf("item %d header: %w", len(envelope.Items)+1, err)
 		}
 
 		if item.Header.Length != nil {
 			length := *item.Header.Length
+
 			if length < 0 || length > len(rest) {
 				return nil, fmt.Errorf("item %d: length %d does not fit the body", len(envelope.Items)+1, length)
 			}
+
 			item.Payload = rest[:length]
 			rest = rest[length:]
 			// The payload may be followed by a newline separator.
@@ -109,8 +119,10 @@ func ParseEnvelope(body []byte) (*Envelope, error) {
 		} else {
 			item.Payload, rest = nextLine(rest)
 		}
+
 		envelope.Items = append(envelope.Items, item)
 	}
+
 	return envelope, nil
 }
 
@@ -119,5 +131,6 @@ func nextLine(data []byte) (line, rest []byte) {
 	if index := bytes.IndexByte(data, '\n'); index >= 0 {
 		return bytes.TrimSuffix(data[:index], []byte("\r")), data[index+1:]
 	}
+
 	return data, nil
 }

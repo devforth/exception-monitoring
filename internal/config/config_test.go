@@ -13,9 +13,11 @@ func env(values map[string]string) func(string) string {
 
 func TestLoadDefaults(t *testing.T) {
 	config, err := loadFrom(env(nil))
+
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if config.Port != DefaultPort || config.DataDir != DefaultDataDir || config.LogLevel != DefaultLogLevel || config.Projects != nil || config.APIToken != "" || config.AllowedIPs != nil ||
 		len(config.AllowedOrigins) != 1 || config.AllowedOrigins[0] != DefaultAllowedOrigins || config.RateLimitPerMinute != DefaultRateLimitPerMinute {
 		t.Fatalf("unexpected defaults: %+v", config)
@@ -35,31 +37,40 @@ func TestLoadValues(t *testing.T) {
 		// IDs are explicit, so they don't have to follow list order or be contiguous.
 		"PROJECTS": "3:frontend:0123456789abcdef0123, 1:backend:a1b2c3d4e5f6a7b8",
 	}))
+
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if config.Port != 9000 || config.DataDir != "/data" || config.LogLevel != slog.LevelDebug {
 		t.Fatalf("unexpected config: %+v", config)
 	}
+
 	if strings.Join(config.AllowedOrigins, " ") != "https://app.example.com http://localhost:3500 http://[::1]:8080" {
 		t.Fatalf("origins = %q", config.AllowedOrigins)
 	}
+
 	if config.RateLimitPerMinute != 0 {
 		t.Fatalf("rate limit = %d, want 0 (disabled)", config.RateLimitPerMinute)
 	}
+
 	if config.APIToken != "0123456789abcdef0123456789abcdef" {
 		t.Fatalf("api token = %q", config.APIToken)
 	}
+
 	if fmt.Sprint(config.AllowedIPs) != "[10.0.0.0/8 203.0.113.7/32 ::1/128]" || fmt.Sprint(config.TrustedProxies) != "[172.17.0.1/32]" {
 		t.Fatalf("allowed=%v trusted=%v", config.AllowedIPs, config.TrustedProxies)
 	}
+
 	want := []Project{
 		{ID: 3, Name: "frontend", PublicKey: "0123456789abcdef0123"},
 		{ID: 1, Name: "backend", PublicKey: "a1b2c3d4e5f6a7b8"},
 	}
+
 	if len(config.Projects) != len(want) {
 		t.Fatalf("got %d projects, want %d", len(config.Projects), len(want))
 	}
+
 	for i := range want {
 		if config.Projects[i] != want[i] {
 			t.Errorf("project %d = %+v, want %+v", i, config.Projects[i], want[i])
@@ -93,9 +104,11 @@ func TestLoadErrors(t *testing.T) {
 		{"bad network", "TRUSTED_PROXIES", "10.0.0.0/40", "invalid network"},
 		{"duplicate key", "PROJECTS", "1:backend:a1b2c3d4e5f6a7b8,2:frontend:a1b2c3d4e5f6a7b8", "already used"},
 	}
+
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
 			_, err := loadFrom(env(map[string]string{testCase.key: testCase.value}))
+
 			if err == nil || !strings.Contains(err.Error(), testCase.wantErr) {
 				t.Fatalf("got error %v, want it to contain %q", err, testCase.wantErr)
 			}

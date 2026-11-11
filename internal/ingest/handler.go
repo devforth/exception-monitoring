@@ -37,9 +37,11 @@ type Handler struct {
 
 func New(logger *slog.Logger, settings *config.Config, sink Sink) *Handler {
 	projects := make(map[int]config.Project, len(settings.Projects))
+
 	for _, project := range settings.Projects {
 		projects[project.ID] = project
 	}
+
 	handler := &Handler{
 		logger:   logger,
 		projects: projects,
@@ -47,9 +49,11 @@ func New(logger *slog.Logger, settings *config.Config, sink Sink) *Handler {
 		cors:     newCORS(settings.AllowedOrigins),
 		now:      time.Now,
 	}
+
 	if settings.RateLimitPerMinute > 0 {
 		handler.limiter = newRateLimiter(settings.RateLimitPerMinute)
 	}
+
 	return handler
 }
 
@@ -74,40 +78,54 @@ func (handler *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, "origin not allowed")
 			return
 		}
+
 		w.WriteHeader(http.StatusOK)
+
 		return
 	}
+
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", "POST, OPTIONS")
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+
 		return
 	}
+
 	if !originAllowed {
 		writeError(w, http.StatusForbidden, "origin not allowed")
 		return
 	}
 
 	response, err := handler.ingest(w, r)
+
 	if err != nil {
 		var rejection *requestError
+
 		if errors.As(err, &rejection) {
 			handler.logger.Debug("envelope rejected", "path", r.URL.Path, "status", rejection.status, "reason", rejection.message)
+
 			if rejection.retryAfter != "" {
 				writeRateLimited(w, rejection.retryAfter)
 				return
 			}
+
 			writeError(w, rejection.status, rejection.message)
+
 			return
 		}
+
 		handler.logger.Error("ingest failed", "path", r.URL.Path, "err", err)
 		writeError(w, http.StatusInternalServerError, "internal error")
+
 		return
 	}
+
 	writeJSON(w, http.StatusOK, response)
 }
 
 func (handler *Handler) ingest(w http.ResponseWriter, r *http.Request) (map[string]string, error) {
 	projectID, err := strconv.Atoi(r.PathValue("projectID"))
+
 	if err != nil {
 		return nil, reject(http.StatusNotFound, "invalid project id")
 	}
@@ -115,17 +133,23 @@ func (handler *Handler) ingest(w http.ResponseWriter, r *http.Request) (map[stri
 	// Usually the key is in the request. Behind a tunnel it is only in the
 	// envelope header, so the body has to be parsed before authenticating.
 	var envelope *sentry.Envelope
+
 	key := publicKeyFromRequest(r)
+
 	if key == "" {
 		if envelope, err = readEnvelope(w, r); err != nil {
 			return nil, err
 		}
+
 		key = publicKeyFromDSN(envelope.Header.DSN, projectID)
 	}
+
 	if key == "" {
 		return nil, reject(http.StatusUnauthorized, "missing sentry_key")
 	}
+
 	project, ok := handler.projects[projectID]
+
 	if !ok || key != project.PublicKey {
 		return nil, reject(http.StatusForbidden, "invalid project or key")
 	}
@@ -141,6 +165,7 @@ func (handler *Handler) ingest(w http.ResponseWriter, r *http.Request) (map[stri
 			return nil, err
 		}
 	}
+
 	return handler.process(r.Context(), project, envelope)
 }
 
@@ -148,28 +173,37 @@ func (handler *Handler) ingest(w http.ResponseWriter, r *http.Request) (map[stri
 // rejects the whole envelope instead of storing half of it.
 func (handler *Handler) process(ctx context.Context, project config.Project, envelope *sentry.Envelope) (map[string]string, error) {
 	received := handler.now()
-	var events []*sentry.Event
-	var logs []sentry.Log
+
+	var (
+		events []*sentry.Event
+		logs   []sentry.Log
+	)
+
 	dropped := map[string]int{}
 
 	for index, item := range envelope.Items {
 		switch item.Header.Type {
 		case sentry.ItemEvent:
 			event, err := sentry.ParseEvent(item.Payload, envelope.Header.EventID, received)
+
 			if err != nil {
 				return nil, reject(http.StatusBadRequest, "item %d: %v", index+1, err)
 			}
+
 			events = append(events, event)
 		case sentry.ItemLog:
 			batch, err := sentry.ParseLogs(item.Payload, received)
+
 			if err != nil {
 				return nil, reject(http.StatusBadRequest, "item %d: %v", index+1, err)
 			}
+
 			logs = append(logs, batch...)
 		default:
 			dropped[item.Header.Type]++
 		}
 	}
+
 	if len(dropped) > 0 {
 		handler.logger.Debug("dropped unsupported items", "project", project.Name, "types", dropped)
 	}
@@ -179,6 +213,7 @@ func (handler *Handler) process(ctx context.Context, project config.Project, env
 			return nil, fmt.Errorf("store event: %w", err)
 		}
 	}
+
 	if len(logs) > 0 {
 		if err := handler.sink.StoreLogs(ctx, project, logs); err != nil {
 			return nil, fmt.Errorf("store logs: %w", err)
@@ -186,21 +221,27 @@ func (handler *Handler) process(ctx context.Context, project config.Project, env
 	}
 
 	response := map[string]string{}
+
 	if len(events) > 0 {
 		response["id"] = events[0].EventID
 	}
+
 	return response, nil
 }
 
 func readEnvelope(w http.ResponseWriter, r *http.Request) (*sentry.Envelope, error) {
 	body, err := readBody(w, r)
+
 	if err != nil {
 		return nil, err
 	}
+
 	envelope, err := sentry.ParseEnvelope(body)
+
 	if err != nil {
 		return nil, reject(http.StatusBadRequest, "%v", err)
 	}
+
 	return envelope, nil
 }
 

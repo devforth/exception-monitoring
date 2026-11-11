@@ -56,6 +56,7 @@ func (handler *Handler) Register(router *http.ServeMux, protect func(http.Handle
 		"GET /api/v1/logs":                                  handler.listLogs,
 		"GET /api/v1/traces/{traceID}":                      handler.getTrace,
 	}
+
 	for pattern, route := range routes {
 		router.Handle(pattern, protect(route))
 	}
@@ -74,6 +75,7 @@ func invalid(format string, args ...any) error {
 // and reported without details.
 func (handler *Handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 	var userError badRequest
+
 	switch {
 	case errors.As(err, &userError):
 		writeError(w, http.StatusBadRequest, userError.message)
@@ -111,26 +113,35 @@ func decodeCursor(raw string, kind byte) (int64, error) {
 	if raw == "" {
 		return 0, nil
 	}
+
 	decoded, err := base64.RawURLEncoding.DecodeString(raw)
+
 	if err != nil || len(decoded) < 2 || decoded[0] != kind {
 		return 0, invalid("invalid cursor")
 	}
+
 	value, err := strconv.ParseInt(string(decoded[1:]), 10, 64)
+
 	if err != nil || value < 0 {
 		return 0, invalid("invalid cursor")
 	}
+
 	return value, nil
 }
 
 func parseLimit(r *http.Request) (int, error) {
 	raw := r.URL.Query().Get("limit")
+
 	if raw == "" {
 		return defaultLimit, nil
 	}
+
 	limit, err := strconv.Atoi(raw)
+
 	if err != nil || limit < 1 || limit > maxLimit {
 		return 0, invalid("limit must be between 1 and %d", maxLimit)
 	}
+
 	return limit, nil
 }
 
@@ -138,14 +149,17 @@ func parseLimit(r *http.Request) (int, error) {
 // Returns 0 when the parameter is absent.
 func (handler *Handler) projectFromQuery(r *http.Request) (int, error) {
 	raw := strings.TrimSpace(r.URL.Query().Get("project"))
+
 	if raw == "" {
 		return 0, nil
 	}
+
 	for _, project := range handler.projects {
 		if strconv.Itoa(project.ID) == raw || project.Name == raw {
 			return project.ID, nil
 		}
 	}
+
 	return 0, invalid("unknown project %q", raw)
 }
 
@@ -161,20 +175,26 @@ func (handler *Handler) projectName(projectID int) string {
 
 func pathID(r *http.Request, name string) (int64, error) {
 	id, err := strconv.ParseInt(r.PathValue(name), 10, 64)
+
 	if err != nil || id < 1 {
 		return 0, store.ErrNotFound
 	}
+
 	return id, nil
 }
 
 func parseTimeParam(r *http.Request, name string) (time.Time, error) {
 	raw := r.URL.Query().Get(name)
+
 	if raw == "" {
 		return time.Time{}, nil
 	}
+
 	parsed, err := time.Parse(time.RFC3339Nano, raw)
+
 	if err != nil {
 		return time.Time{}, invalid("%s must be an RFC 3339 time, e.g. 2026-11-11T10:00:00Z", name)
 	}
+
 	return parsed, nil
 }

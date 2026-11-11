@@ -25,17 +25,23 @@ func readBody(w http.ResponseWriter, r *http.Request) ([]byte, error) {
 	case "", "identity":
 	case "gzip", "x-gzip":
 		decompressor, err := gzip.NewReader(reader)
+
 		if err != nil {
 			return nil, readError(err)
 		}
-		defer decompressor.Close()
+
+		defer func() { _ = decompressor.Close() }() // reading only: nothing to flush
+
 		reader = decompressor
 	case "deflate":
 		decompressor, err := zlib.NewReader(reader)
+
 		if err != nil {
 			return nil, readError(err)
 		}
-		defer decompressor.Close()
+
+		defer func() { _ = decompressor.Close() }() // reading only: nothing to flush
+
 		reader = decompressor
 	default:
 		return nil, reject(http.StatusUnsupportedMediaType, "unsupported Content-Encoding %q (use gzip, deflate or none)", encoding)
@@ -43,20 +49,25 @@ func readBody(w http.ResponseWriter, r *http.Request) ([]byte, error) {
 
 	// +1 byte to tell "exactly at the limit" from "over the limit" after decompression.
 	body, err := io.ReadAll(io.LimitReader(reader, MaxBodyBytes+1))
+
 	if err != nil {
 		return nil, readError(err)
 	}
+
 	if len(body) > MaxBodyBytes {
 		return nil, reject(http.StatusRequestEntityTooLarge, "envelope is larger than %d bytes", MaxBodyBytes)
 	}
+
 	return body, nil
 }
 
 func readError(err error) error {
 	var tooLarge *http.MaxBytesError
+
 	if errors.As(err, &tooLarge) {
 		return reject(http.StatusRequestEntityTooLarge, "envelope is larger than %d bytes", MaxBodyBytes)
 	}
+
 	return reject(http.StatusBadRequest, "read body: %v", err)
 }
 
@@ -67,18 +78,23 @@ func publicKeyFromRequest(r *http.Request) string {
 	if key := r.URL.Query().Get("sentry_key"); key != "" {
 		return key
 	}
+
 	for _, header := range []string{"X-Sentry-Auth", "Authorization"} {
 		value := strings.TrimSpace(r.Header.Get(header))
+
 		if len(value) < len("Sentry ") || !strings.EqualFold(value[:len("Sentry ")], "Sentry ") {
 			continue
 		}
+
 		for _, pair := range strings.Split(value[len("Sentry "):], ",") {
 			name, keyValue, found := strings.Cut(strings.TrimSpace(pair), "=")
+
 			if found && strings.TrimSpace(name) == "sentry_key" {
 				return strings.TrimSpace(keyValue)
 			}
 		}
 	}
+
 	return ""
 }
 
@@ -89,13 +105,18 @@ func publicKeyFromDSN(dsn string, projectID int) string {
 	if dsn == "" {
 		return ""
 	}
+
 	parsed, err := url.Parse(dsn)
+
 	if err != nil || parsed.User == nil {
 		return ""
 	}
+
 	path := strings.TrimSuffix(parsed.Path, "/")
+
 	if path[strings.LastIndexByte(path, '/')+1:] != strconv.Itoa(projectID) {
 		return ""
 	}
+
 	return parsed.User.Username()
 }

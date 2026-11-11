@@ -15,7 +15,8 @@ jobs:
           go-version-file: go.mod
       - uses: golangci/golangci-lint-action@v8
         with:
-          version: latest
+          # Pinned: a new release can add checks and break CI on unchanged code.
+          version: v2.15.0
       - run: make test
 
   docker:

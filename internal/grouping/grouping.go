@@ -40,7 +40,9 @@ func Components(event *sentry.Event) []string {
 	if len(event.Fingerprint) == 0 {
 		return defaultComponents(event)
 	}
+
 	components := []string{"custom"}
+
 	for _, value := range event.Fingerprint {
 		if isDefaultPlaceholder(value) {
 			components = append(components, defaultComponents(event)...)
@@ -48,6 +50,7 @@ func Components(event *sentry.Event) []string {
 			components = append(components, value)
 		}
 	}
+
 	return components
 }
 
@@ -61,32 +64,41 @@ func defaultComponents(event *sentry.Event) []string {
 	// of the call site. Group it by the message: different messages logged from
 	// the same place are different problems.
 	isMessage := main == nil || (main.Type == "" && event.Message != "")
+
 	if isMessage {
 		text := string(event.Message)
+
 		if text == "" && main != nil {
 			text = main.Value
 		}
+
 		return []string{"message", NormalizeMessage(text)}
 	}
 
 	components := []string{"exception"}
+
 	for _, exception := range event.Exception {
 		components = append(components, "type:"+exception.Type)
 		frames := groupingFrames(exception.Stacktrace)
+
 		if len(frames) == 0 {
 			// No stack: the value is all we have to tell errors of one type apart.
 			components = append(components, "value:"+NormalizeMessage(exception.Value))
 			continue
 		}
+
 		hasSource := false
+
 		for _, frame := range frames {
 			components = append(components, "frame:"+frameKey(frame))
 			hasSource = hasSource || strings.TrimSpace(frame.ContextLine) != ""
 		}
+
 		if !hasSource {
 			components = append(components, "value:"+NormalizeMessage(exception.Value))
 		}
 	}
+
 	return components
 }
 
@@ -95,23 +107,29 @@ func groupingFrames(stacktrace *sentry.Stacktrace) []sentry.Frame {
 	if stacktrace == nil {
 		return nil
 	}
+
 	var inApp []sentry.Frame
+
 	for _, frame := range stacktrace.Frames {
 		if frame.InApp != nil && *frame.InApp {
 			inApp = append(inApp, frame)
 		}
 	}
+
 	if len(inApp) > 0 {
 		return inApp
 	}
+
 	return stacktrace.Frames
 }
 
 func frameKey(frame sentry.Frame) string {
 	location := frame.Module
+
 	if location == "" {
 		location = normalizeFilename(frame.Filename)
 	}
+
 	if isAnonymous(frame.Function) {
 		// The source line identifies an anonymous function. Without source code,
 		// fall back to the line number: less stable across deploys, but better
@@ -119,8 +137,10 @@ func frameKey(frame sentry.Frame) string {
 		if line := strings.TrimSpace(frame.ContextLine); line != "" {
 			return location + " " + line
 		}
+
 		return location + " line " + strconv.Itoa(frame.Lineno)
 	}
+
 	return location + " " + frame.Function
 }
 
@@ -129,6 +149,7 @@ func isAnonymous(function string) bool {
 	case "", "?", "<anonymous>", "anonymous", "<unknown>":
 		return true
 	}
+
 	return false
 }
 
@@ -145,15 +166,18 @@ var (
 func normalizeFilename(filename string) string {
 	if index := strings.Index(filename, "://"); index >= 0 {
 		rest := filename[index+3:]
+
 		if slash := strings.IndexByte(rest, '/'); slash >= 0 {
 			filename = rest[slash:]
 		} else {
 			filename = "/"
 		}
 	}
+
 	if index := strings.IndexAny(filename, "?#"); index >= 0 {
 		filename = filename[:index]
 	}
+
 	return bundleHashRe.ReplaceAllString(filename, "")
 }
 
@@ -162,6 +186,7 @@ func normalizeFilename(filename string) string {
 func NormalizeMessage(message string) string {
 	message = uuidRe.ReplaceAllString(message, "<uuid>")
 	message = hexRe.ReplaceAllString(message, "<hex>")
+
 	return numberRe.ReplaceAllString(message, "<n>")
 }
 
@@ -172,21 +197,29 @@ func Culprit(event *sentry.Event) string {
 	if event.Transaction != "" {
 		return event.Transaction
 	}
+
 	main := event.MainException()
+
 	if main == nil {
 		return ""
 	}
+
 	frames := groupingFrames(main.Stacktrace)
+
 	if len(frames) == 0 {
 		return ""
 	}
+
 	frame := frames[len(frames)-1]
 	location := frame.Module
+
 	if location == "" {
 		location = normalizeFilename(frame.Filename)
 	}
+
 	if frame.Function == "" {
 		return location
 	}
+
 	return frame.Function + " (" + location + ")"
 }

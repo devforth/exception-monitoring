@@ -56,6 +56,7 @@ Planned auth model: one admin from env plus an IP allowlist for the UI and API; 
 ## Conventions
 
 - Tests sit next to the code (`*_test.go`, same package); fixtures go in `testdata/`.
+- Blank lines (enforced by `wsl` in `.golangci.yml`, same rule as the team's TypeScript projects): always a blank line before `if`/`for`/`switch`/`defer`/`return`, including `if err != nil` right after the call; consecutive assignments stay together. Run `make fix` after editing; `--fix` only adds blank lines, it never removes extra ones.
 - Use descriptive variable names (`settings`, `database`, `transaction`, `migrationList`), not one-letter ones. Keep the standard Go idioms `err`, `ctx`, `t`, and `w`/`r` in HTTP handlers.
 - Do not copy code from Bugsink (PolyForm Shield license) or Sentry (FSL). GlitchTip (MIT) is fine as a reference.
 - Commit messages: one subject line containing `DevFo-OSS/17`, no body, no AI attribution. Commit only when asked.

@@ -22,6 +22,7 @@ func Open(ctx context.Context, dataDir string) (*Store, error) {
 	if err := os.MkdirAll(dataDir, 0o750); err != nil {
 		return nil, fmt.Errorf("create data dir: %w", err)
 	}
+
 	return openWithMigrations(ctx, filepath.Join(dataDir, fileName), migrations)
 }
 
@@ -38,17 +39,21 @@ func openWithMigrations(ctx context.Context, path string, migrationList []migrat
 		"&_pragma=foreign_keys(ON)"
 
 	db, err := sql.Open("sqlite", connectionString)
+
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
+
 	if err := db.PingContext(ctx); err != nil {
-		db.Close()
+		_ = db.Close() // the open error is the one to report
 		return nil, fmt.Errorf("open database %s: %w", path, err)
 	}
+
 	if err := migrate(ctx, db, migrationList); err != nil {
-		db.Close()
+		_ = db.Close() // the open error is the one to report
 		return nil, err
 	}
+
 	return &Store{DB: db}, nil
 }
 

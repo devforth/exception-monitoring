@@ -38,6 +38,7 @@ func main() {
 
 func run() error {
 	settings, err := config.Load()
+
 	if err != nil {
 		return err
 	}
@@ -45,26 +46,37 @@ func run() error {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: settings.LogLevel}))
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+
 	defer stop()
 
 	database, err := store.Open(ctx, settings.DataDir)
+
 	if err != nil {
 		return err
 	}
-	defer database.Close()
+
+	defer func() {
+		// Closing flushes the WAL into the database file; a failure here is worth knowing about.
+		if err := database.Close(); err != nil {
+			logger.Error("close database", "err", err)
+		}
+	}()
 
 	if settings.APIToken == "" {
 		logger.Warn("API_TOKEN is not set, the REST API is closed")
 	}
+
 	if len(settings.AllowedIPs) == 0 {
 		logger.Warn("ALLOWED_IPS is not set, the API is reachable from any address")
 	}
+
 	if len(settings.Projects) == 0 {
 		logger.Warn("no projects configured, events will be rejected; set PROJECTS=id:name:public_key,...")
 	}
 
 	// Bind before logging "started" so a busy port fails here, not after a false start message.
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", settings.Port))
+
 	if err != nil {
 		return err
 	}
@@ -88,6 +100,7 @@ func run() error {
 	logger.Info("server started", "version", version, "addr", listener.Addr().String(), "data_dir", settings.DataDir, "projects", len(settings.Projects))
 
 	serveResult := make(chan error, 1)
+
 	go func() {
 		serveResult <- httpServer.Serve(listener)
 	}()
@@ -99,30 +112,40 @@ func run() error {
 		}
 	case <-ctx.Done():
 		logger.Info("shutting down")
+
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+
 		defer cancel()
+
 		if err := httpServer.Shutdown(shutdownCtx); err != nil {
 			return fmt.Errorf("shutdown: %w", err)
 		}
 	}
+
 	return nil
 }
 
 func healthcheck() int {
 	port := os.Getenv("PORT")
+
 	if port == "" {
 		port = strconv.Itoa(config.DefaultPort)
 	}
+
 	client := http.Client{Timeout: 3 * time.Second}
 	response, err := client.Get("http://127.0.0.1:" + port + "/health")
+
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	defer response.Body.Close()
+
+	defer func() { _ = response.Body.Close() }() // read-only, nothing to lose on close
+
 	if response.StatusCode != http.StatusOK {
 		fmt.Fprintln(os.Stderr, "unhealthy:", response.Status)
 		return 1
 	}
+
 	return 0
 }
