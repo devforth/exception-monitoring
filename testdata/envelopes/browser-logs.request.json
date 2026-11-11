@@ -1,0 +1,14 @@
+{
+  "method": "POST",
+  "path": "/api/2/envelope/",
+  "query": {
+    "sentry_version": "7",
+    "sentry_key": "browserkey0000000000000000000002",
+    "sentry_client": "sentry.javascript.browser/11.11.0"
+  },
+  "headers": {
+    "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Code/1.145.0 Chrome/150.0.7871.250 Electron/43.8.3 Safari/537.36",
+    "content-type": "text/plain;charset=UTF-8",
+    "origin": "http://localhost:3500"
+  }
+}
