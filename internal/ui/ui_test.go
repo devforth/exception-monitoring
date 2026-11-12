@@ -494,6 +494,41 @@ func TestStaticAndSecurityHeaders(t *testing.T) {
 	if response.Header().Get("X-Frame-Options") != "DENY" {
 		t.Fatal("pages must not be framed")
 	}
+	// Pages hold error data: no cache keeps them; static files stay cacheable.
+	if response.Header().Get("Cache-Control") != "no-store" || !strings.Contains(response.Header().Get("Vary"), "HX-Request") {
+		t.Fatalf("page cache headers: %q, Vary %q", response.Header().Get("Cache-Control"), response.Header().Get("Vary"))
+	}
+
+	if cache := server.get(assetPath(server.page("/login"), "app.css")).Header().Get("Cache-Control"); !strings.Contains(cache, "immutable") {
+		t.Fatalf("versioned static file: Cache-Control %q", cache)
+	}
+}
+
+// assetPath finds the versioned URL of a static file in a page.
+func assetPath(page, name string) string {
+	match := regexp.MustCompile(`/static/` + regexp.QuoteMeta(name) + `\?v=[0-9a-f]+`).FindString(page)
+
+	return strings.ReplaceAll(match, "&amp;", "&")
+}
+
+// Logging in again ends the session the browser had: a session cookie set
+// by someone else (fixation) is never kept.
+func TestLoginReplacesSession(t *testing.T) {
+	server := newTestServer(t, password)
+	server.login()
+
+	previous := server.cookie
+	server.login()
+
+	if server.cookie.Value == previous.Value {
+		t.Fatal("login must issue a new session token")
+	}
+
+	server.cookie = previous
+
+	if response := server.get("/issues"); response.Code != http.StatusSeeOther {
+		t.Fatalf("the previous session still works: %d", response.Code)
+	}
 }
 
 // requestEnvelopes builds an error and a log from one backend request, the

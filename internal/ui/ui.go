@@ -163,7 +163,10 @@ func assetURL(name string) string {
 }
 
 // securityHeaders: scripts and styles only from our own /static/ (no inline
-// code), no framing by other sites (clickjacking), no MIME sniffing.
+// code), no framing by other sites (clickjacking), no MIME sniffing. Pages
+// hold error data and must not stay in any cache (staticCache overrides this
+// for static files); the same URL serves a full page or an htmx fragment, so
+// caches must tell them apart (Vary).
 func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		header := w.Header()
@@ -172,6 +175,8 @@ func securityHeaders(next http.Handler) http.Handler {
 		header.Set("X-Content-Type-Options", "nosniff")
 		header.Set("Referrer-Policy", "same-origin")
 		header.Set("X-Frame-Options", "DENY")
+		header.Set("Cache-Control", "no-store")
+		header.Add("Vary", "HX-Request")
 		next.ServeHTTP(w, r)
 	})
 }

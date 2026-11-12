@@ -96,7 +96,9 @@ func (limiter *loginLimiter) blocked(address netip.Addr, now time.Time) bool {
 	return state != nil && now.Sub(state.start) < loginWindow && state.count >= maxLoginFailures
 }
 
-func (limiter *loginLimiter) fail(address netip.Addr, now time.Time) {
+// fail counts a failed login and reports whether it used up the last
+// allowed attempt, so the address is blocked from now on.
+func (limiter *loginLimiter) fail(address netip.Addr, now time.Time) bool {
 	limiter.mutex.Lock()
 	defer limiter.mutex.Unlock()
 
@@ -115,6 +117,8 @@ func (limiter *loginLimiter) fail(address netip.Addr, now time.Time) {
 	}
 
 	state.count++
+
+	return state.count == maxLoginFailures
 }
 
 func (limiter *loginLimiter) reset(address netip.Addr) {
@@ -257,8 +261,12 @@ func (handler *Handler) login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !credentialsMatch(r.FormValue("username"), r.FormValue("password"), handler.adminUsername, handler.adminPassword) {
-		handler.limiter.fail(client, now)
-		handler.logger.Warn("failed UI login", "client", client.String(), "username", r.FormValue("username"))
+		// A single wrong password is a typo, not an event: only a blocked
+		// address (likely password guessing) is logged. What was typed is
+		// never logged, it may be a password entered in the wrong field.
+		if handler.limiter.fail(client, now) {
+			handler.logger.Warn("too many failed UI logins, address blocked", "client", client.String(), "attempts", maxLoginFailures, "for", loginWindow)
+		}
 
 		data.Error = "Wrong username or password."
 		handler.render(w, r, http.StatusUnauthorized, "login", data)
@@ -267,6 +275,14 @@ func (handler *Handler) login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	handler.limiter.reset(client)
+
+	// A new session every login; a session cookie the browser already had
+	// (possibly planted) is ended, never reused.
+	if cookie, err := r.Cookie(sessionCookie); err == nil && cookie.Value != "" {
+		if err := handler.store.DeleteSession(r.Context(), hashToken(cookie.Value)); err != nil {
+			handler.logger.Error("delete previous session", "err", err)
+		}
+	}
 
 	token := newToken()
 	expires := now.Add(sessionLifetime)

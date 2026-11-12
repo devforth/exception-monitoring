@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -393,5 +394,32 @@ func TestRateLimit(t *testing.T) {
 
 	if response := send("1", fixtures.BackendKey); response.Code != http.StatusOK {
 		t.Fatalf("next minute: got %d", response.Code)
+	}
+}
+
+// Credentials of the monitored app's users never reach the sink (and so the
+// database, the panel, the API or notifications).
+func TestCredentialsAreScrubbed(t *testing.T) {
+	server := newTestServer(testSettings())
+	body := "{}\n" +
+		`{"type":"event"}` + "\n" +
+		`{"message":"hello","request":{"headers":{"Cookie":"sid=cookie-value","Authorization":"Bearer header-token-value"},"cookies":{"sid":"cookie-object-value"}}}` + "\n" +
+		`{"type":"log"}` + "\n" +
+		`{"items":[{"timestamp":1731400000,"level":"info","body":"request","attributes":{"http.request.header.authorization":{"value":"Bearer log-token-value","type":"string"}}}]}` + "\n"
+
+	if response := server.send(newRequest(http.MethodPost, envelopeURL("1", fixtures.BackendKey), []byte(body))); response.Code != http.StatusOK {
+		t.Fatalf("got %d %s", response.Code, response.Body)
+	}
+
+	if len(server.sink.events) != 1 || len(server.sink.logs) != 1 {
+		t.Fatalf("stored %d events, %d logs", len(server.sink.events), len(server.sink.logs))
+	}
+
+	stored := string(server.sink.events[0].Raw) + fmt.Sprint(server.sink.logs[0].Attributes)
+
+	for _, secret := range []string{"cookie-value", "header-token-value", "cookie-object-value", "log-token-value"} {
+		if strings.Contains(stored, secret) {
+			t.Errorf("%q reached the sink:\n%s", secret, stored)
+		}
 	}
 }

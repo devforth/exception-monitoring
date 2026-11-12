@@ -17,6 +17,7 @@ import (
 
 	"github.com/devforth/exception-monitoring/internal/config"
 	"github.com/devforth/exception-monitoring/internal/httpjson"
+	"github.com/devforth/exception-monitoring/internal/scrub"
 	"github.com/devforth/exception-monitoring/internal/sentry"
 )
 
@@ -184,7 +185,9 @@ func (handler *Handler) process(ctx context.Context, project config.Project, env
 	for index, item := range envelope.Items {
 		switch item.Header.Type {
 		case sentry.ItemEvent:
-			event, err := sentry.ParseEvent(item.Payload, envelope.Header.EventID, received)
+			// Credentials (cookies, Authorization, tokens) are removed before
+			// anything is parsed or stored; see package scrub.
+			event, err := sentry.ParseEvent(scrub.JSON(item.Payload), envelope.Header.EventID, received)
 
 			if err != nil {
 				return nil, reject(http.StatusBadRequest, "item %d: %v", index+1, err)
@@ -192,7 +195,7 @@ func (handler *Handler) process(ctx context.Context, project config.Project, env
 
 			events = append(events, event)
 		case sentry.ItemLog:
-			batch, err := sentry.ParseLogs(item.Payload, received)
+			batch, err := sentry.ParseLogs(scrub.JSON(item.Payload), received)
 
 			if err != nil {
 				return nil, reject(http.StatusBadRequest, "item %d: %v", index+1, err)
