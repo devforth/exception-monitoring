@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"html"
 	"strconv"
 	"time"
 
@@ -20,6 +21,8 @@ import (
 	"github.com/devforth/exception-monitoring/internal/config"
 	"github.com/devforth/exception-monitoring/internal/fixtures"
 	"github.com/devforth/exception-monitoring/internal/ingest"
+	"github.com/devforth/exception-monitoring/internal/notify"
+	"github.com/devforth/exception-monitoring/internal/secret"
 	"github.com/devforth/exception-monitoring/internal/server"
 	"github.com/devforth/exception-monitoring/internal/store"
 	"github.com/devforth/exception-monitoring/internal/ui"
@@ -42,7 +45,11 @@ type testServer struct {
 	t       *testing.T
 	handler http.Handler
 	cookie  *http.Cookie
+	// mails receives what the server sent through its (fake) SMTP server.
+	mails <-chan fixtures.SMTPSession
 }
+
+const secretKey = "0123456789abcdef0123456789abcdef"
 
 func newTestServer(t *testing.T, adminPassword string) *testServer {
 	t.Helper()
@@ -74,14 +81,23 @@ func startServer(t *testing.T, database *store.Store, adminUsername, adminPasswo
 	t.Helper()
 
 	logger := slog.New(slog.NewTextHandler(testLog{t}, nil))
+	smtp, mails := fixtures.FakeSMTP(t)
 	settings := &config.Config{
 		Projects:       fixtures.Projects(),
 		AllowedOrigins: []string{"*"},
 		AdminUsername:  adminUsername,
 		AdminPassword:  adminPassword,
+		// Every connection type is available: SMTP for email, a key for chat tokens.
+		Notifications: config.Notifications{ChannelTypes: config.AllChannelTypes, SecretKey: secretKey, SMTP: smtp},
 	}
 
-	webUI, err := ui.New(context.Background(), logger, database, settings)
+	box, err := secret.New(secretKey)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	webUI, err := ui.New(context.Background(), logger, database, settings, notify.Factory{SMTP: smtp, Box: box})
 
 	if err != nil {
 		t.Fatal(err)
@@ -94,7 +110,7 @@ func startServer(t *testing.T, database *store.Store, adminUsername, adminPasswo
 		UI:       webUI,
 	}).Handler()
 
-	return &testServer{t: t, handler: handler}
+	return &testServer{t: t, handler: handler, mails: mails}
 }
 
 func (server *testServer) send(request *http.Request) *httptest.ResponseRecorder {
@@ -356,6 +372,22 @@ func TestIssueDetails(t *testing.T) {
 	}
 
 	body := server.page("/issues/" + ids[0])
+
+	prompt := regexp.MustCompile(`<textarea id="agent-fix-prompt" hidden>([\s\S]*?)</textarea>`).FindStringSubmatch(body)
+
+	if len(prompt) != 2 {
+		t.Fatal("missing hidden agent prompt")
+	}
+
+	for _, want := range []string{"connect ECONNREFUSED", "## Exception", "## Breadcrumbs", "Logs of the same", "Events: ", "Do not change any code"} {
+		if !strings.Contains(html.UnescapeString(prompt[1]), want) {
+			t.Errorf("agent prompt is missing %q", want)
+		}
+	}
+
+	if !strings.Contains(body, `type="button" data-copy-prompt="agent-fix-prompt"`) {
+		t.Fatal("copy prompt button must not submit the issue action form")
+	}
 
 	for _, want := range []string{
 		"Caused by",            // cause chain

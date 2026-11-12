@@ -1,0 +1,57 @@
+{{define "title"}}Notifications{{end}}
+
+{{define "content"}}
+{{with .Data}}
+<div class="page-heading">
+  <h1>Notifications</h1>
+  {{if .CanCreate}}<a class="button primary" href="/notifications/new">Add connection</a>{{end}}
+</div>
+<p class="muted">New issues and regressions are sent to every active connection that has the project and the level selected.</p>
+
+{{with .Notice}}<p class="notice-success" role="status">{{.}}</p>{{end}}
+
+{{if not .CanCreate}}
+<p class="notice">No connection type can be added: allow types with <code>NOTIFY_CHANNEL_TYPES</code> and set <code>SMTP_HOST</code> for email or <code>SECRET_KEY</code> for Telegram and Slack.</p>
+{{end}}
+
+{{if .Rows}}
+<table class="list">
+  <thead><tr><th>Name</th><th>Type</th><th>Destination</th><th>Projects</th><th>Levels</th><th>Status</th><th>Actions</th></tr></thead>
+  <tbody>
+    {{range .Rows}}
+    <tr>
+      <td><a class="issue-title" href="/notifications/{{.ID}}">{{.Name}}</a></td>
+      <td>{{.TypeLabel}}</td>
+      <td class="muted">{{.Destination}}</td>
+      <td>{{.Projects}}</td>
+      <td>{{.Levels}}</td>
+      <td>
+        <form method="post" action="/notifications/{{.ID}}/active">
+          <input type="hidden" name="active" value="{{if .Active}}0{{else}}1{{end}}">
+          <button type="submit" class="connection-status connection-{{.StatusClass}}" {{if and (not .Active) (not .Verified)}}disabled title="Confirm the email address first"{{else}}title="{{if .Active}}Deactivate{{else}}Activate{{end}}"{{end}} aria-label="{{if .Active}}Deactivate{{else}}Activate{{end}} {{.Name}}">
+            <svg viewBox="0 0 24 24" aria-hidden="true">{{if not .Verified}}<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>{{else if .Active}}<path d="M8 5v14 M16 5v14"/>{{else}}<path d="m7 4 14 8-14 8Z"/>{{end}}</svg>
+            {{.Status}}
+          </button>
+        </form>
+      </td>
+      <td>
+        <div class="actions connection-actions">
+          <a class="button" href="/notifications/{{.ID}}" title="Edit" aria-label="Edit {{.Name}}">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m16 3 5 5-12 12-6 1 1-6Z M14 5l5 5"/></svg>
+          </a>
+          <form method="post" action="/notifications/{{.ID}}/delete">
+            <button type="submit" class="danger" title="Delete" aria-label="Delete {{.Name}}" data-confirm="Delete the connection {{.Name}}? Its queued messages are dropped; a confirmed address stays confirmed.">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18 M9 6V3h6v3 M5 6l1 15h12l1-15 M10 10v7 M14 10v7"/></svg>
+            </button>
+          </form>
+        </div>
+      </td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>
+{{else}}
+<p class="empty">No connections yet. Nothing is sent until you add one.</p>
+{{end}}
+{{end}}
+{{end}}

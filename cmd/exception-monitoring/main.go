@@ -10,12 +10,15 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/devforth/exception-monitoring/internal/api"
 	"github.com/devforth/exception-monitoring/internal/config"
 	"github.com/devforth/exception-monitoring/internal/ingest"
+	"github.com/devforth/exception-monitoring/internal/notify"
+	"github.com/devforth/exception-monitoring/internal/secret"
 	"github.com/devforth/exception-monitoring/internal/server"
 	"github.com/devforth/exception-monitoring/internal/store"
 	"github.com/devforth/exception-monitoring/internal/ui"
@@ -75,7 +78,13 @@ func run() error {
 		logger.Warn("ALLOWED_IPS is not set, the API and UI are reachable from any address")
 	}
 
-	webUI, err := ui.New(ctx, logger, database, settings)
+	factory, err := notificationFactory(logger, settings.Notifications)
+
+	if err != nil {
+		return err
+	}
+
+	webUI, err := ui.New(ctx, logger, database, settings, factory)
 
 	if err != nil {
 		return err
@@ -84,6 +93,28 @@ func run() error {
 	if len(settings.Projects) == 0 {
 		logger.Warn("no projects configured, events will be rejected; set PROJECTS=id:name:public_key,...")
 	}
+
+	notifier := notify.New(notify.Options{
+		Store:      database,
+		Channels:   factory,
+		Logger:     logger,
+		RetryFor:   settings.Notifications.RetryFor,
+		KeepSent:   settings.Notifications.KeepSent,
+		KeepFailed: settings.Notifications.KeepFailed,
+	})
+
+	defer func() {
+		// Send what is still queued; give up after a while so shutdown cannot hang.
+		closeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+
+		defer cancel()
+
+		if err := notifier.Close(closeCtx); err != nil {
+			logger.Warn("notifications not sent before shutdown", "err", err)
+		}
+	}()
+
+	sink := ingest.StoreSink{Store: database, Logger: logger, Notifier: notifier, PublicURL: settings.Notifications.PublicURL}
 
 	// Bind before logging "started" so a busy port fails here, not after a false start message.
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", settings.Port))
@@ -96,7 +127,7 @@ func run() error {
 		Handler: server.New(server.Options{
 			Logger:         logger,
 			Database:       database,
-			Ingest:         ingest.New(logger, settings, ingest.StoreSink{Store: database, Logger: logger}),
+			Ingest:         ingest.New(logger, settings, sink),
 			API:            api.New(logger, database, settings.Projects),
 			UI:             webUI,
 			APIToken:       settings.APIToken,
@@ -135,6 +166,40 @@ func run() error {
 	}
 
 	return nil
+}
+
+// notificationFactory builds channels for the connections set up in the UI.
+// It logs which connection types can be created with the current settings.
+func notificationFactory(logger *slog.Logger, settings config.Notifications) (notify.Factory, error) {
+	factory := notify.Factory{SMTP: settings.SMTP}
+
+	if settings.SecretKey != "" {
+		box, err := secret.New(settings.SecretKey)
+
+		if err != nil {
+			return factory, fmt.Errorf("SECRET_KEY: %w", err)
+		}
+
+		factory.Box = box
+	}
+
+	var available, unavailable []string
+
+	for _, channelType := range config.AllChannelTypes {
+		if ok, reason := settings.ChannelAvailable(channelType); ok {
+			available = append(available, channelType)
+		} else {
+			unavailable = append(unavailable, channelType+" ("+reason+")")
+		}
+	}
+
+	logger.Info("notification connection types", "available", strings.Join(available, ", "), "unavailable", strings.Join(unavailable, "; "))
+
+	if settings.PublicURL == "" && len(available) > 0 {
+		logger.Warn("PUBLIC_URL is not set, notifications will not link to the issue")
+	}
+
+	return factory, nil
 }
 
 func healthcheck() int {

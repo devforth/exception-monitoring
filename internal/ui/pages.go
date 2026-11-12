@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/devforth/exception-monitoring/internal/agentprompt"
 	"github.com/devforth/exception-monitoring/internal/sentry"
 	"github.com/devforth/exception-monitoring/internal/store"
 )
@@ -335,6 +336,7 @@ type issueData struct {
 	// the same trace around the time of the error when spans do not match.
 	RelatedLogs     []store.LogRecord
 	LogsFromRequest bool
+	AgentPrompt     string
 	SelectedID      string
 }
 
@@ -434,6 +436,8 @@ func (handler *Handler) issuePage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+
+	data.AgentPrompt = agentPrompt(issue.ProjectName, issue.Issue, data.Parsed, data.RelatedLogs, data.LogsFromRequest)
 
 	handler.render(w, r, http.StatusOK, "issue", data)
 }
@@ -608,4 +612,20 @@ func (handler *Handler) projectsPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	handler.render(w, r, http.StatusOK, "projects", projects)
+}
+
+// agentPrompt is the text of the "Prompt" button: what a coding agent needs
+// to fix the error, without what identifies servers or people.
+func agentPrompt(project string, issue store.Issue, event *sentry.Event, relatedLogs []store.LogRecord, fromRequest bool) string {
+	logs := make([]agentprompt.Log, 0, len(relatedLogs))
+
+	for _, record := range relatedLogs {
+		logs = append(logs, agentprompt.Log{Time: record.Timestamp, Level: record.Level, Body: record.Body})
+	}
+
+	return agentprompt.Build(agentprompt.Input{
+		Project: project, Title: issue.Title, Level: issue.Level, Culprit: issue.Culprit, Event: event,
+		Issue: &agentprompt.Issue{Status: issue.Status, Events: issue.EventCount, FirstSeen: issue.FirstSeen, LastSeen: issue.LastSeen},
+		Logs:  logs, LogsFromRequest: fromRequest,
+	})
 }

@@ -141,6 +141,13 @@ label.pick { display: inline-flex; align-items: center; gap: 6px; cursor: pointe
 .facts dt { color: var(--muted); font-size: 12px; }
 .facts dd { margin: 0; }
 .actions { display: flex; gap: 8px; }
+.issue-header .actions { flex-wrap: wrap; }
+.copy-prompt { margin-left: auto; display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 36px; padding: 8px 12px; background: var(--info-bg); color: var(--info); border-color: var(--info); }
+.copy-prompt:hover { background: var(--info); color: var(--surface); border-color: var(--info); }
+.copy-prompt svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.copy-toast { position: fixed; right: 20px; bottom: 20px; z-index: 1000; max-width: min(360px, calc(100vw - 40px)); padding: 12px 16px; border: 1px solid var(--info); border-radius: 8px; background: var(--info-bg); color: var(--info); box-shadow: 0 4px 20px rgb(0 0 0 / .15); }
+.copy-toast:empty { display: none; }
+.agent-prompt-fallback { width: 100%; min-height: 240px; margin-top: 12px; font-family: ui-monospace, monospace; }
 
 .exception { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 12px; }
 .exception-type { color: var(--error); }
@@ -250,3 +257,53 @@ span.flatpickr-weekday { color: var(--muted); background: transparent; }
 .flatpickr-day.selected.startRange + .endRange:not(:nth-child(7n+1)),
 .flatpickr-day.startRange.startRange + .endRange:not(:nth-child(7n+1)),
 .flatpickr-day.endRange.startRange + .endRange:not(:nth-child(7n+1)) { box-shadow: -10px 0 0 var(--accent); }
+
+/* Notification connections. */
+.page-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.page-heading h1 { margin-bottom: 8px; }
+a.button { display: inline-block; padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); }
+a.button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+a.button:hover { text-decoration: none; border-color: var(--muted); }
+.notice-success { padding: 8px 12px; border-radius: 6px; background: var(--info-bg); color: var(--info); }
+.error { padding: 8px 12px; border-radius: 6px; background: var(--error-bg); color: var(--error); }
+.field-error { margin: -6px 0 10px; color: var(--error); font-size: 12px; }
+.connection-form { display: flex; flex-direction: column; gap: 12px; max-width: 620px; margin-top: 16px; }
+.connection-form > label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 13px; }
+.connection-form input[type="text"], .connection-form input:not([type]), .connection-form input[type="email"] { width: 100%; }
+fieldset { border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; margin: 0; background: var(--surface); }
+legend { padding: 0 4px; color: var(--muted); font-size: 13px; }
+label.option { display: flex; align-items: center; gap: 8px; padding: 3px 0; color: var(--text); font-size: 14px; flex-direction: row; }
+label.option.disabled { color: var(--muted); }
+.type-fields { display: flex; flex-direction: column; gap: 8px; }
+.type-fields label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 13px; }
+.type-fields[hidden] { display: none; }
+.project-choices { display: flex; flex-wrap: wrap; gap: 0 18px; margin-top: 4px; }
+.project-choices[hidden] { display: none; }
+.card.verify { max-width: 620px; }
+.inline-form { display: flex; gap: 8px; margin: 8px 0; }
+.inline-form input { width: 140px; font-family: ui-monospace, monospace; letter-spacing: .15em; }
+.secondary-actions { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border); max-width: 620px; }
+.connection-status { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.connection-active { color: #2e7d32; }
+.connection-inactive { color: var(--muted); }
+.connection-awaiting { color: var(--warning); }
+.connection-options { flex-wrap: wrap; gap: 8px 20px; }
+.email-link-option[hidden] { display: none; }
+.connection-actions { align-items: center; }
+.connection-actions a.button, .connection-actions button { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; padding: 7px; }
+.connection-actions svg, .connection-status svg { width: 18px; height: 18px; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.connection-status:disabled { opacity: .65; cursor: not-allowed; }
+
+/* Email step of a new connection, and the rest of the form locked until it is confirmed. */
+.email-step { display: flex; flex-direction: column; gap: 6px; }
+.email-step label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 13px; }
+.email-step .inline-form input[type="email"] { flex: 1; width: auto; letter-spacing: normal; font-family: inherit; }
+.email-step p { margin: 0; }
+.email-confirmed { font-weight: 600; }
+.confirmed { margin-left: 8px; color: #2e7d32; font-weight: 500; font-size: 13px; }
+.step-actions { display: flex; gap: 16px; }
+fieldset.connection-rest { border: none; padding: 0; background: none; display: flex; flex-direction: column; gap: 12px; }
+/* Locked fields fade; Cancel stays usable and looks it, Add looks disabled. */
+fieldset.connection-rest:disabled > :not(.actions) { opacity: .45; }
+fieldset.connection-rest:disabled button[type="submit"] { opacity: .45; cursor: not-allowed; }
+fieldset.connection-rest > label:not(.option) { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 13px; }

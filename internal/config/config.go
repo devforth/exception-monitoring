@@ -70,6 +70,8 @@ type Config struct {
 	// An empty password means the UI is closed.
 	AdminUsername string
 	AdminPassword string
+	// Notifications: where to send alerts about new and regressed issues.
+	Notifications Notifications
 }
 
 // Defaults used when the corresponding environment variable is not set.
@@ -173,6 +175,14 @@ func loadFrom(getenv func(string) string) (*Config, error) {
 
 		config.AdminPassword = value
 	}
+
+	notifications, err := parseNotifications(getenv)
+
+	if err != nil {
+		return nil, err
+	}
+
+	config.Notifications = notifications
 
 	allowedIPs, err := parseNetworks(getenv("ALLOWED_IPS"))
 

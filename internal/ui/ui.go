@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/devforth/exception-monitoring/internal/config"
+	"github.com/devforth/exception-monitoring/internal/notify"
 	"github.com/devforth/exception-monitoring/internal/store"
 )
 
@@ -40,13 +41,15 @@ type Handler struct {
 	// credentials fingerprints the admin username and password; sessions are
 	// valid only with the fingerprint they were created with.
 	credentials    string
+	notifications  config.Notifications
+	factory        notify.Factory
 	trustedProxies []netip.Prefix
 	limiter        *loginLimiter
 	pages          map[string]*template.Template
 	now            func() time.Time
 }
 
-func New(ctx context.Context, logger *slog.Logger, database *store.Store, settings *config.Config) (*Handler, error) {
+func New(ctx context.Context, logger *slog.Logger, database *store.Store, settings *config.Config, factory notify.Factory) (*Handler, error) {
 	pages, err := parseTemplates()
 
 	if err != nil {
@@ -73,6 +76,8 @@ func New(ctx context.Context, logger *slog.Logger, database *store.Store, settin
 		adminPassword:  settings.AdminPassword,
 		credentials:    credentials,
 		trustedProxies: settings.TrustedProxies,
+		notifications:  settings.Notifications,
+		factory:        factory,
 		limiter:        newLoginLimiter(),
 		pages:          pages,
 		now:            time.Now,
@@ -81,7 +86,7 @@ func New(ctx context.Context, logger *slog.Logger, database *store.Store, settin
 
 // pageNames are the templates in templates/ that are full pages. Each is
 // parsed together with layout.html and partials.html.
-var pageNames = []string{"login", "issues", "issue", "logs", "projects"}
+var pageNames = []string{"login", "issues", "issue", "logs", "projects", "notifications", "connection"}
 
 func parseTemplates() (map[string]*template.Template, error) {
 	pages := map[string]*template.Template{}
@@ -115,7 +120,20 @@ func (handler *Handler) Register(router *http.ServeMux, protect func(http.Handle
 		"POST /issues/bulk":             handler.requireLogin(sameOrigin(handler.bulkIssueAction)),
 		"GET /logs":                     handler.requireLogin(handler.logsPage),
 		"GET /projects":                 handler.requireLogin(handler.projectsPage),
-		"GET /static/":                  http.StripPrefix("/static/", staticCache(http.FileServerFS(static))).ServeHTTP,
+
+		"GET /notifications":                        handler.requireLogin(handler.connectionsPage),
+		"GET /notifications/new":                    handler.requireLogin(handler.newConnectionPage),
+		"POST /notifications":                       handler.requireLogin(sameOrigin(handler.createConnection)),
+		"GET /notifications/{connectionID}":         handler.requireLogin(handler.connectionPage),
+		"POST /notifications/{connectionID}":        handler.requireLogin(sameOrigin(handler.updateConnection)),
+		"POST /notifications/email/start":           handler.requireLogin(sameOrigin(handler.emailStart)),
+		"POST /notifications/email/resend":          handler.requireLogin(sameOrigin(handler.emailResend)),
+		"POST /notifications/email/confirm":         handler.requireLogin(sameOrigin(handler.emailConfirm)),
+		"POST /notifications/email/change":          handler.requireLogin(sameOrigin(handler.emailChange)),
+		"POST /notifications/{connectionID}/test":   handler.requireLogin(sameOrigin(handler.testConnection)),
+		"POST /notifications/{connectionID}/active": handler.requireLogin(sameOrigin(handler.setConnectionActive)),
+		"POST /notifications/{connectionID}/delete": handler.requireLogin(sameOrigin(handler.deleteConnection)),
+		"GET /static/":                              http.StripPrefix("/static/", staticCache(http.FileServerFS(static))).ServeHTTP,
 	}
 
 	for pattern, route := range routes {
@@ -198,7 +216,13 @@ func (handler *Handler) renderFragment(w http.ResponseWriter, r *http.Request, p
 	handler.execute(w, r, http.StatusOK, page, fragment, view{Page: page, LoggedIn: true, Data: data})
 }
 
-func (handler *Handler) execute(w http.ResponseWriter, r *http.Request, status int, page, name string, data view) {
+// renderPartial executes a template of a page with data as is (not wrapped
+// in view), for fragments that stand alone such as the email step.
+func (handler *Handler) renderPartial(w http.ResponseWriter, r *http.Request, page, name string, data any) {
+	handler.execute(w, r, http.StatusOK, page, name, data)
+}
+
+func (handler *Handler) execute(w http.ResponseWriter, r *http.Request, status int, page, name string, data any) {
 	// Render into a buffer first: a template error must not leave a half-written page.
 	var buffer bytes.Buffer
 

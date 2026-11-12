@@ -1,0 +1,70 @@
+{{/* Email clients ignore <style> blocks and classes, so every style is inline. */}}
+
+{{define "level"}}<span style="display:inline-block;padding:1px 6px;border-radius:4px;font-size:12px;font-weight:600;{{if or (eq . "fatal") (eq . "critical") (eq . "error")}}color:#c62828;background:#fdecea{{else if or (eq . "warning") (eq . "warn")}}color:#9a6700;background:#fff4d6{{else if or (eq . "info") (eq . "log")}}color:#1f5fbf;background:#e5efff{{else}}color:#555560;background:#ececf0{{end}}">{{.}}</span>{{end}}
+
+{{define "notification"}}<!doctype html>
+<html><body style="margin:0;padding:24px;background:#f7f7f8;font:14px/1.5 -apple-system,'Segoe UI',sans-serif;color:#1d1d22">
+<div style="max-width:760px;margin:0 auto;background:#ffffff;border:1px solid #e3e3e8;border-radius:8px;padding:24px">
+  <p style="margin:0 0 4px;color:#6b6b76;font-size:12px;text-transform:uppercase;letter-spacing:.04em">{{.Kind}} · {{.Notification.Project}} · {{template "level" .Notification.Level}}</p>
+  <h1 style="margin:0 0 6px;font-size:18px;word-break:break-word">{{.Notification.Title}}</h1>
+  {{with .Notification.Culprit}}<p style="margin:0 0 16px;color:#6b6b76">{{.}}</p>{{end}}
+
+  {{with .Notification.IssueURL}}<p style="margin:0 0 20px"><a href="{{.}}" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:8px 14px;border-radius:6px">Open issue</a></p>{{end}}
+
+  {{with .PromptFile}}<p style="margin:0 0 20px;padding:8px 12px;background:#eef2ff;border-radius:6px;color:#3730a3;font-size:13px">A prompt for a coding agent is attached: <b>{{.}}</b>. Paste it into your agent: it reproduces and explains the error without changing code, so you can check it before asking for a fix.</p>{{end}}
+
+  <table style="border-collapse:collapse;margin:0 0 20px;font-size:13px">
+    {{range .Facts}}<tr><td style="padding:2px 16px 2px 0;color:#6b6b76;white-space:nowrap">{{.Name}}</td><td style="padding:2px 0;word-break:break-word">{{if eq .Name "Level"}}{{template "level" .Value}}{{else}}{{.Value}}{{end}}</td></tr>{{end}}
+  </table>
+
+  {{with .Event}}
+  {{range $index, $exception := .Exception.OutermostFirst}}
+  <h2 style="margin:20px 0 6px;font-size:15px">{{if gt $index 0}}<span style="color:#6b6b76">Caused by</span> {{end}}<span style="color:#c62828">{{or .Type "Error"}}</span></h2>
+  {{with .Value}}<p style="margin:0 0 8px;font-family:Menlo,Consolas,monospace;font-size:13px;white-space:pre-wrap;word-break:break-word">{{.}}</p>{{end}}
+  {{range $.InAppFrames .Stacktrace}}
+  <div style="margin:0 0 8px">
+    <div style="font-family:Menlo,Consolas,monospace;font-size:12px"><b>{{or .Function "<anonymous>"}}</b> <span style="color:#6b6b76">{{or .Filename .Module}}{{if .Lineno}}:{{.Lineno}}{{end}}</span></div>
+    {{with .SourceLines}}<pre style="margin:4px 0 0;padding:6px 0;background:#f1f1f4;border-radius:4px;font-size:12px;overflow:auto">{{range .}}<span style="display:block;padding:0 8px;{{if .Current}}background:#fff3c4;{{end}}"><span style="color:#9a9aa6">{{printf "%4d" .Number}}</span>  {{.Text}}</span>{{end}}</pre>{{end}}
+  </div>
+  {{end}}
+  {{end}}
+
+  {{if and (not .Exception) .Message}}<pre style="padding:10px;background:#f1f1f4;border-radius:4px;white-space:pre-wrap">{{.Message}}</pre>{{end}}
+
+  {{with $.Breadcrumbs}}
+  <h2 style="margin:20px 0 6px;font-size:15px">Last breadcrumbs</h2>
+  <table style="border-collapse:collapse;width:100%;font-size:12px">
+    {{range .}}<tr><td style="padding:2px 10px 2px 0;color:#6b6b76;white-space:nowrap;vertical-align:top">{{.Time}}</td><td style="padding:2px 10px 2px 0;white-space:nowrap;vertical-align:top">{{.Category}}</td><td style="padding:2px 0;font-family:Menlo,Consolas,monospace;word-break:break-word">{{.Message}}</td></tr>{{end}}
+  </table>
+  {{end}}
+
+  {{with .Tags}}
+  <h2 style="margin:20px 0 6px;font-size:15px">Tags</h2>
+  <p style="margin:0">{{range $name, $value := .}}<span style="display:inline-block;margin:0 6px 6px 0;padding:1px 8px;border:1px solid #e3e3e8;border-radius:10px;font-size:12px">{{$name}}: <b>{{$value}}</b></span>{{end}}</p>
+  {{end}}
+  {{end}}
+
+
+  <p style="margin:24px 0 0;color:#9a9aa6;font-size:12px">Sent by Exception Monitoring to a notification connection of this address.</p>
+</div>
+</body></html>{{end}}
+
+{{define "summary"}}<!doctype html>
+<html><body style="margin:0;padding:24px;background:#f7f7f8;font:14px/1.5 -apple-system,'Segoe UI',sans-serif;color:#1d1d22">
+<div style="max-width:760px;margin:0 auto;background:#ffffff;border:1px solid #e3e3e8;border-radius:8px;padding:24px">
+  <h1 style="margin:0 0 12px;font-size:18px">{{.Heading}}</h1>
+  <ul style="margin:0 0 12px;padding-left:20px">
+    {{range .Summary.Items}}<li style="margin:0 0 4px"><code>{{.Project}}</code> {{if .IssueURL}}<a href="{{.IssueURL}}">{{.Title}}</a>{{else}}{{.Title}}{{end}}</li>{{end}}
+  </ul>
+  <p style="margin:0;color:#6b6b76">{{.Note}}</p>
+</div>
+</body></html>{{end}}
+
+{{define "verification"}}<!doctype html>
+<html><body style="margin:0;padding:24px;background:#f7f7f8;font:14px/1.5 -apple-system,'Segoe UI',sans-serif;color:#1d1d22">
+<div style="max-width:520px;margin:0 auto;background:#ffffff;border:1px solid #e3e3e8;border-radius:8px;padding:24px">
+  <p style="margin:0 0 12px">Your confirmation code for the notification connection <b>{{.ConnectionName}}</b>:</p>
+  <p style="margin:0 0 16px;font:700 28px/1.2 Menlo,Consolas,monospace;letter-spacing:.2em">{{.Code}}</p>
+  <p style="margin:0;color:#6b6b76">Enter it in Exception Monitoring within {{.ValidFor}}. If you did not add this address, ignore this email.</p>
+</div>
+</body></html>{{end}}

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -172,6 +173,65 @@ func (event *Event) Trace() EventTrace {
 	}
 
 	return trace
+}
+
+// Reading helpers, shared by the issue page and email notifications.
+
+// OutermostFirst orders a cause chain for reading: the error that was thrown
+// last (the outer one) first, its causes below. SDKs send innermost first.
+func (list ExceptionList) OutermostFirst() []Exception {
+	ordered := slices.Clone([]Exception(list))
+	slices.Reverse(ordered)
+
+	return ordered
+}
+
+// NewestFirst returns the frames with the one that threw at the top, like a
+// JS/Node stack trace. SDKs send oldest first.
+func (stacktrace *Stacktrace) NewestFirst() []Frame {
+	if stacktrace == nil {
+		return nil
+	}
+
+	frames := slices.Clone(stacktrace.Frames)
+	slices.Reverse(frames)
+
+	return frames
+}
+
+// IsInApp reports whether the frame is the application's own code, not a library.
+func (frame Frame) IsInApp() bool {
+	return frame.InApp != nil && *frame.InApp
+}
+
+// SourceLine is one line of code around a frame.
+type SourceLine struct {
+	Number  int
+	Text    string
+	Current bool // the line that threw
+}
+
+// SourceLines returns the code around the frame with line numbers, or nil
+// when the SDK sent no source (browsers).
+func (frame Frame) SourceLines() []SourceLine {
+	if frame.ContextLine == "" {
+		return nil
+	}
+
+	lines := make([]SourceLine, 0, len(frame.PreContext)+1+len(frame.PostContext))
+	first := frame.Lineno - len(frame.PreContext)
+
+	for index, text := range frame.PreContext {
+		lines = append(lines, SourceLine{Number: first + index, Text: text})
+	}
+
+	lines = append(lines, SourceLine{Number: frame.Lineno, Text: frame.ContextLine, Current: true})
+
+	for index, text := range frame.PostContext {
+		lines = append(lines, SourceLine{Number: frame.Lineno + 1 + index, Text: text})
+	}
+
+	return lines
 }
 
 // NewEventID returns a random 32-character hex ID in Sentry's format.

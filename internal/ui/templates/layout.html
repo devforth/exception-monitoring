@@ -20,6 +20,7 @@
       <a href="/issues" {{if eq .Page "issues" "issue"}}class="active"{{end}}>Issues</a>
       <a href="/logs" {{if eq .Page "logs"}}class="active"{{end}}>Logs</a>
       <a href="/projects" {{if eq .Page "projects"}}class="active"{{end}}>Projects</a>
+      <a href="/notifications" {{if eq .Page "notifications" "connection"}}class="active"{{end}}>Notifications</a>
     </nav>
     <form method="post" action="/logout">
       <button type="submit" class="link">Log out</button>

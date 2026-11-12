@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"html/template"
 	"regexp"
-	"slices"
 	"strings"
 	"time"
 
@@ -14,20 +13,16 @@ import (
 )
 
 var templateFuncs = template.FuncMap{
-	"timeAgo":          timeAgo,
-	"isoTime":          func(value time.Time) string { return value.UTC().Format(time.RFC3339) },
-	"fullTime":         func(value time.Time) string { return value.UTC().Format("2006-01-02 15:04:05.000 UTC") },
-	"levelClass":       levelClass,
-	"cleanLog":         cleanLog,
-	"prettyJSON":       prettyJSON,
-	"outermostFirst":   outermostFirst,
-	"newestFrameFirst": newestFrameFirst,
-	"codeLines":        codeLines,
-	"isInApp":          func(frame sentry.Frame) bool { return frame.InApp != nil && *frame.InApp },
-	"handledLabel":     handledLabel,
-	"parseRequest":     parseRequest,
-	"short":            short,
-	"asset":            assetURL,
+	"timeAgo":      timeAgo,
+	"isoTime":      func(value time.Time) string { return value.UTC().Format(time.RFC3339) },
+	"fullTime":     func(value time.Time) string { return value.UTC().Format("2006-01-02 15:04:05.000 UTC") },
+	"levelClass":   levelClass,
+	"cleanLog":     cleanLog,
+	"prettyJSON":   prettyJSON,
+	"handledLabel": handledLabel,
+	"parseRequest": parseRequest,
+	"short":        short,
+	"asset":        assetURL,
 	// filterBy passes a filter link and one value to the level-filter / project-filter partials.
 	"filterBy": func(links filterLinks, field, value string) map[string]any {
 		return map[string]any{"Filter": links, field: value}
@@ -91,56 +86,6 @@ func prettyJSON(raw json.RawMessage) string {
 	}
 
 	return buffer.String()
-}
-
-// outermostFirst orders a cause chain for reading: the error that was thrown
-// last (the outer one) first, its causes below. The SDK sends innermost first.
-func outermostFirst(exceptions sentry.ExceptionList) []sentry.Exception {
-	ordered := slices.Clone([]sentry.Exception(exceptions))
-	slices.Reverse(ordered)
-
-	return ordered
-}
-
-// newestFrameFirst puts the frame that threw at the top, like a JS/Node stack trace.
-func newestFrameFirst(stacktrace *sentry.Stacktrace) []sentry.Frame {
-	if stacktrace == nil {
-		return nil
-	}
-
-	frames := slices.Clone(stacktrace.Frames)
-	slices.Reverse(frames)
-
-	return frames
-}
-
-type codeLine struct {
-	Number  int
-	Text    string
-	Current bool
-}
-
-// codeLines returns the source around a frame with line numbers, the
-// throwing line marked as current.
-func codeLines(frame sentry.Frame) []codeLine {
-	if frame.ContextLine == "" {
-		return nil
-	}
-
-	lines := make([]codeLine, 0, len(frame.PreContext)+1+len(frame.PostContext))
-	first := frame.Lineno - len(frame.PreContext)
-
-	for index, text := range frame.PreContext {
-		lines = append(lines, codeLine{Number: first + index, Text: text})
-	}
-
-	lines = append(lines, codeLine{Number: frame.Lineno, Text: frame.ContextLine, Current: true})
-
-	for index, text := range frame.PostContext {
-		lines = append(lines, codeLine{Number: frame.Lineno + 1 + index, Text: text})
-	}
-
-	return lines
 }
 
 func handledLabel(mechanism *sentry.Mechanism) string {

@@ -19,7 +19,13 @@
   {{$issue := .Issue}}
   <form class="actions" method="post" action="/issues/{{$issue.ID}}/action" hx-post="/issues/{{$issue.ID}}/action">
     {{template "issue-action-buttons" $issue.Status}}
+    <button type="button" data-copy-prompt="agent-fix-prompt" class="copy-prompt" title="Copy prompt for a coding agent" aria-label="Copy prompt for a coding agent">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg>
+      <span>Prompt</span>
+    </button>
   </form>
+  <textarea id="agent-fix-prompt" hidden>{{.AgentPrompt}}</textarea>
+  <span class="copy-toast" id="agent-copy-status" role="status" aria-live="polite"></span>
 </section>
 
 {{if .Events}}
@@ -60,7 +66,7 @@
 {{if .Exception}}
 <section>
   <h2>Exception</h2>
-  {{range $index, $exception := outermostFirst .Exception}}
+  {{range $index, $exception := .Exception.OutermostFirst}}
   <div class="exception">
     <h3>
       {{if gt $index 0}}<span class="muted">Caused by</span> {{end}}
@@ -69,14 +75,14 @@
     </h3>
     {{with .Value}}<p class="exception-value">{{.}}</p>{{end}}
 
-    {{range newestFrameFirst .Stacktrace}}
-    {{$inApp := isInApp .}}
+    {{range .Stacktrace.NewestFirst}}
+    {{$inApp := .IsInApp}}
     <details class="frame {{if $inApp}}in-app{{end}}" {{if and $inApp .ContextLine}}open{{end}}>
       <summary>
         <span class="function">{{or .Function "<anonymous>"}}</span>
         <span class="muted">{{or .Filename .Module}}{{if .Lineno}}:{{.Lineno}}{{end}}{{if .Colno}}:{{.Colno}}{{end}}</span>
       </summary>
-      {{with codeLines .}}
+      {{with .SourceLines}}
       <pre class="code">{{range .}}<span class="line {{if .Current}}current{{end}}"><span class="number">{{.Number}}</span>{{.Text}}</span>
 {{end}}</pre>
       {{end}}

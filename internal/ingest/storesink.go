@@ -9,6 +9,7 @@ import (
 
 	"github.com/devforth/exception-monitoring/internal/config"
 	"github.com/devforth/exception-monitoring/internal/grouping"
+	"github.com/devforth/exception-monitoring/internal/notify"
 	"github.com/devforth/exception-monitoring/internal/sentry"
 	"github.com/devforth/exception-monitoring/internal/store"
 )
@@ -20,6 +21,15 @@ type StoreSink struct {
 	Store  *store.Store
 	Logger *slog.Logger
 	Now    func() time.Time // nil means time.Now
+	// Notifier is told about new and regressed issues. Nil sends nothing.
+	Notifier Notifier
+	// PublicURL is the UI address for links in notifications; empty means no link.
+	PublicURL string
+}
+
+// Notifier queues alerts without blocking ingest (see package notify).
+type Notifier interface {
+	Notify(notification notify.Notification)
 }
 
 func (sink StoreSink) now() time.Time {
@@ -32,6 +42,8 @@ func (sink StoreSink) now() time.Time {
 
 func (sink StoreSink) StoreEvent(ctx context.Context, project config.Project, event *sentry.Event) error {
 	trace := event.Trace()
+
+	receivedAt := sink.now()
 
 	result, err := sink.Store.SaveEvent(ctx, store.NewEvent{
 		ProjectID:    project.ID,
@@ -46,7 +58,7 @@ func (sink StoreSink) StoreEvent(ctx context.Context, project config.Project, ev
 		SpanID:       trace.SpanID,
 		ParentSpanID: trace.ParentSpanID,
 		Timestamp:    event.Timestamp.Time,
-		ReceivedAt:   sink.now(),
+		ReceivedAt:   receivedAt,
 		Payload:      event.Raw,
 	})
 
@@ -61,13 +73,42 @@ func (sink StoreSink) StoreEvent(ctx context.Context, project config.Project, ev
 		sink.Logger.Debug("duplicate event ignored", attributes...)
 	case result.NewIssue:
 		sink.Logger.Info("new issue", attributes...)
+		sink.notify(notify.NewIssue, project, result.IssueID, event, receivedAt)
 	case result.Regression:
 		sink.Logger.Info("issue regressed", attributes...)
+		sink.notify(notify.Regression, project, result.IssueID, event, receivedAt)
 	default:
 		sink.Logger.Debug("event stored", attributes...)
 	}
 
 	return nil
+}
+
+func (sink StoreSink) notify(kind notify.Kind, project config.Project, issueID int64, event *sentry.Event, receivedAt time.Time) {
+	if sink.Notifier == nil {
+		return
+	}
+
+	issueURL := ""
+
+	if sink.PublicURL != "" {
+		issueURL = fmt.Sprintf("%s/issues/%d", sink.PublicURL, issueID)
+	}
+
+	sink.Notifier.Notify(notify.Notification{
+		Kind:        kind,
+		ProjectID:   project.ID,
+		Project:     project.Name,
+		IssueID:     issueID,
+		IssueURL:    issueURL,
+		Title:       event.Title(),
+		Culprit:     grouping.Culprit(event),
+		Level:       event.Level,
+		Environment: event.Environment,
+		Release:     event.Release,
+		Time:        receivedAt,
+		Event:       event,
+	})
 }
 
 func (sink StoreSink) StoreLogs(ctx context.Context, project config.Project, logs []sentry.Log) error {

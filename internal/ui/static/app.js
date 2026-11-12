@@ -1,5 +1,47 @@
 // Small enhancements on top of the server-rendered pages. The UI works without them.
 
+let copyToastTimeout;
+
+document.addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-copy-prompt]");
+  if (!button) return;
+
+  const source = document.getElementById(button.dataset.copyPrompt);
+  const status = document.getElementById("agent-copy-status");
+  if (!source) return;
+
+  clearTimeout(copyToastTimeout);
+  if (status) status.textContent = "";
+  const label = button.title;
+  button.disabled = true;
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
+    await navigator.clipboard.writeText(source.value);
+    button.title = "Copied!";
+    if (status) status.textContent = "Agent prompt copied to clipboard.";
+  } catch {
+    // HTTP and browsers without clipboard permission can still copy a selection.
+    source.hidden = false;
+    source.classList.add("agent-prompt-fallback");
+    source.readOnly = true;
+    source.focus();
+    source.select();
+    let copied = false;
+    try {
+      copied = document.execCommand("copy");
+    } catch {
+      // Keep the selected text available for manual copying.
+    }
+    source.hidden = copied;
+    if (status) status.textContent = copied ? "Agent prompt copied to clipboard." : "Copy the selected prompt with Ctrl+C or ⌘C.";
+    if (copied) button.title = "Copied!";
+  } finally {
+    button.disabled = false;
+    setTimeout(() => { button.title = label; }, 2000);
+    copyToastTimeout = setTimeout(() => { if (status) status.textContent = ""; }, 5000);
+  }
+});
+
 // Show exact times in the browser's time zone (the server renders UTC).
 function localizeTimes(root) {
   root.querySelectorAll("time[datetime]").forEach((element) => {
@@ -150,6 +192,40 @@ function linkDateRange(form) {
   }
 }
 
+// Connection form: show only the fields of the selected type, lock the rest
+// of an email connection until the address is confirmed, and hide the project
+// list while "All projects" is checked (it covers every project).
+function updateConnectionForm(form) {
+  // A new connection has type radios; an existing one keeps its type on the form.
+  const selected = form.querySelector('input[name="type"]:checked');
+  const type = selected ? selected.value : form.dataset.type;
+
+  if (selected) {
+    form.querySelectorAll(".type-fields").forEach((fields) => {
+      fields.hidden = fields.dataset.type !== selected.value;
+    });
+  }
+
+  const emailLinkOption = form.querySelector(".email-link-option");
+  if (emailLinkOption) {
+    emailLinkOption.hidden = type !== "email";
+  }
+
+  // An email connection is filled in only after its address is confirmed.
+  const rest = form.querySelector(".connection-rest");
+
+  if (rest && type) {
+    rest.disabled = type === "email" && !form.querySelector(".email-step[data-verified]");
+  }
+
+  const allProjects = form.querySelector("input.all-projects");
+  const projectChoices = form.querySelector(".project-choices");
+
+  if (allProjects && projectChoices) {
+    projectChoices.hidden = allProjects.checked;
+  }
+}
+
 function enhance() {
   localizeTimes(document);
   showExpandButtons(document);
@@ -158,7 +234,16 @@ function enhance() {
     setupRangePicker(form);
     linkDateRange(form);
   });
+  document.querySelectorAll("form.connection-form").forEach(updateConnectionForm);
 }
+
+document.addEventListener("change", (event) => {
+  const form = event.target.closest("form.connection-form");
+
+  if (form) {
+    updateConnectionForm(form);
+  }
+});
 
 document.addEventListener("input", (event) => {
   if (event.target.matches('form.filters input[type="date"]')) {

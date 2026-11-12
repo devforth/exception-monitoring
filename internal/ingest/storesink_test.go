@@ -5,10 +5,14 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/devforth/exception-monitoring/internal/fixtures"
+	"github.com/devforth/exception-monitoring/internal/notify"
+	"github.com/devforth/exception-monitoring/internal/sentry"
 	"github.com/devforth/exception-monitoring/internal/store"
 )
 
@@ -89,5 +93,70 @@ func TestFixturesEndToEnd(t *testing.T) {
 
 	if culprits := count(`SELECT COUNT(*) FROM issues WHERE culprit = ''`); culprits != 0 {
 		t.Fatalf("%d issues without a culprit", culprits)
+	}
+}
+
+type recordingNotifier struct {
+	notifications []notify.Notification
+}
+
+func (notifier *recordingNotifier) Notify(notification notify.Notification) {
+	notifier.notifications = append(notifier.notifications, notification)
+}
+
+// New issues and regressions are notified; repeats of a known issue are not.
+func TestStoreSinkNotifies(t *testing.T) {
+	database, err := store.Open(context.Background(), t.TempDir())
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+
+	notifier := &recordingNotifier{}
+	sink := StoreSink{Store: database, Logger: slog.New(slog.DiscardHandler), Notifier: notifier, PublicURL: "https://errors.example.com"}
+	project := fixtures.Projects()[0]
+
+	event := func(id string) *sentry.Event {
+		parsed, err := sentry.ParseEvent([]byte(`{"event_id":"`+id+`","exception":{"values":[{"type":"Error","value":"boom"}]}}`), "", time.Now())
+
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		return parsed
+	}
+
+	for _, id := range []string{"00000000000000000000000000000001", "00000000000000000000000000000002"} {
+		if err := sink.StoreEvent(context.Background(), project, event(id)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if len(notifier.notifications) != 1 || notifier.notifications[0].Kind != notify.NewIssue {
+		t.Fatalf("after a new issue and a repeat: %+v", notifier.notifications)
+	}
+
+	first := notifier.notifications[0]
+
+	if first.IssueURL != "https://errors.example.com/issues/"+strconv.FormatInt(first.IssueID, 10) || first.Project != "backend" || first.Title != "Error: boom" || first.Event == nil {
+		t.Fatalf("notification: %+v", first)
+	}
+
+	if err := database.SetIssueStatus(context.Background(), first.IssueID, store.StatusResolved); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := sink.StoreEvent(context.Background(), project, event("00000000000000000000000000000003")); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(notifier.notifications) != 2 || notifier.notifications[1].Kind != notify.Regression {
+		t.Fatalf("after the resolved issue happened again: %+v", notifier.notifications)
 	}
 }
