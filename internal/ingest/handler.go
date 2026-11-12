@@ -8,7 +8,6 @@ package ingest
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -17,6 +16,7 @@ import (
 	"time"
 
 	"github.com/devforth/exception-monitoring/internal/config"
+	"github.com/devforth/exception-monitoring/internal/httpjson"
 	"github.com/devforth/exception-monitoring/internal/sentry"
 )
 
@@ -120,7 +120,7 @@ func (handler *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, response)
+	httpjson.Write(w, http.StatusOK, response)
 }
 
 func (handler *Handler) ingest(w http.ResponseWriter, r *http.Request) (map[string]string, error) {
@@ -248,7 +248,7 @@ func readEnvelope(w http.ResponseWriter, r *http.Request) (*sentry.Envelope, err
 // Errors use Sentry's {"detail": "..."} shape; SDKs log it on failure.
 func writeError(w http.ResponseWriter, status int, message string) {
 	w.Header().Set("X-Sentry-Error", message)
-	writeJSON(w, status, map[string]string{"detail": message})
+	httpjson.Write(w, status, map[string]string{"detail": message})
 }
 
 // writeRateLimited tells the SDK to pause sending. X-Sentry-Rate-Limits is
@@ -257,10 +257,4 @@ func writeRateLimited(w http.ResponseWriter, retryAfter string) {
 	w.Header().Set("Retry-After", retryAfter)
 	w.Header().Set("X-Sentry-Rate-Limits", retryAfter+"::project")
 	writeError(w, http.StatusTooManyRequests, "rate limit exceeded")
-}
-
-func writeJSON(w http.ResponseWriter, status int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
 }

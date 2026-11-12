@@ -1,0 +1,18 @@
+{{define "title"}}Projects{{end}}
+
+{{define "content"}}
+<h1>Projects</h1>
+<p class="muted">Projects are configured with the <code>PROJECTS</code> environment variable. Put a project's DSN into the Sentry SDK config of that service.</p>
+
+{{range .Data}}
+<section class="card">
+  <h2>{{.Name}} <span class="muted small">#{{.ID}}</span></h2>
+  <p><a href="/issues?project={{.Name}}">{{.UnresolvedIssues}} unresolved issues</a> · <a href="/logs?project={{.Name}}">logs</a></p>
+  <label class="small muted">DSN
+    <input class="dsn" value="{{.DSN}}" readonly>
+  </label>
+</section>
+{{else}}
+<p class="empty">No projects configured. Set <code>PROJECTS=1:backend:&lt;public key&gt;</code>.</p>
+{{end}}
+{{end}}

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -201,7 +202,8 @@ func TestSetIssueStatusErrors(t *testing.T) {
 func TestLongTitleIsTruncated(t *testing.T) {
 	database := openTestStore(t)
 	event := testEvent("e1", "fp", baseTime)
-	event.Title = strings.Repeat("я", 2000)
+	// "é" is two bytes: the limit must count characters, not cut one in half.
+	event.Title = strings.Repeat("é", 2000)
 	result := save(t, database, event)
 
 	var title string
@@ -240,5 +242,131 @@ func TestSaveLogs(t *testing.T) {
 
 	if count != 2 || attributes != "{}" {
 		t.Fatalf("count=%d attributes of a log without them=%s, want {}", count, attributes)
+	}
+}
+
+// Migration 4 fills span columns of rows stored before it, from their JSON.
+func TestSpanMigrationBackfillsExistingRows(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "test.db")
+
+	before, err := openWithMigrations(ctx, path, migrations[:3])
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = before.DB.ExecContext(ctx, `
+		INSERT INTO issues (id, project_id, fingerprint, title, level, first_seen, last_seen) VALUES (1, 1, 'fp', 'Error', 'error', 'x', 'x');
+		INSERT INTO events (project_id, issue_id, event_id, timestamp, received_at, level, trace_id, payload)
+		VALUES (1, 1, 'e1', 'x', 'x', 'error', 't1', '{"contexts":{"trace":{"trace_id":"t1","span_id":"handler1","parent_span_id":"request1"}}}');
+		INSERT INTO logs (project_id, timestamp, level, body, trace_id, attributes)
+		VALUES (1, 'x', 'error', 'log', 't1', '{"sentry.trace.parent_span_id":{"type":"string","value":"request1"}}');`)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	closeDatabase(t, before)
+
+	database, err := openWithMigrations(ctx, path, migrations)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer closeDatabase(t, database)
+
+	var spanID, parentSpanID, logSpanID string
+
+	if err := database.DB.QueryRow(`SELECT span_id, parent_span_id FROM events`).Scan(&spanID, &parentSpanID); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := database.DB.QueryRow(`SELECT span_id FROM logs`).Scan(&logSpanID); err != nil {
+		t.Fatal(err)
+	}
+
+	if spanID != "handler1" || parentSpanID != "request1" || logSpanID != "request1" {
+		t.Fatalf("event span=%q parent=%q, log span=%q", spanID, parentSpanID, logSpanID)
+	}
+}
+
+func TestIssuesSeenInRange(t *testing.T) {
+	database := openTestStore(t)
+
+	// Seen before and after the range, but not inside it.
+	save(t, database, testEvent("gap-1", "gap", baseTime))
+	save(t, database, testEvent("gap-2", "gap", baseTime.Add(10*time.Hour)))
+	// Seen inside the range.
+	inside := save(t, database, testEvent("in-1", "inside", baseTime.Add(5*time.Hour)))
+
+	issues, err := database.ListIssues(context.Background(), IssueFilter{
+		SeenSince: baseTime.Add(4 * time.Hour),
+		SeenUntil: baseTime.Add(6 * time.Hour),
+		Limit:     10,
+	})
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(issues) != 1 || issues[0].ID != inside.IssueID {
+		t.Fatalf("got %+v, want only the issue with an event inside the range", issues)
+	}
+
+	open, err := database.ListIssues(context.Background(), IssueFilter{SeenSince: baseTime.Add(9 * time.Hour), Limit: 10})
+
+	if err != nil || len(open) != 1 {
+		t.Fatalf("since only: %v, %d issues", err, len(open))
+	}
+}
+
+func TestIssueDateFields(t *testing.T) {
+	database := openTestStore(t)
+
+	// "early": first seen at 0h, last seen at 10h. "middle": only at 5h.
+	early := save(t, database, testEvent("early-1", "early", baseTime))
+	save(t, database, testEvent("early-2", "early", baseTime.Add(10*time.Hour)))
+	middle := save(t, database, testEvent("middle-1", "middle", baseTime.Add(5*time.Hour)))
+
+	testCases := []struct {
+		name      string
+		field     string
+		from, to  time.Duration
+		wantIssue []int64
+	}{
+		{"any event at the start", DateAnyEvent, -time.Hour, time.Hour, []int64{early.IssueID}},
+		{"first seen at the start", DateFirstSeen, -time.Hour, time.Hour, []int64{early.IssueID}},
+		{"last seen at the start", DateLastSeen, -time.Hour, time.Hour, nil},
+		{"any event at the end", DateAnyEvent, 9 * time.Hour, 11 * time.Hour, []int64{early.IssueID}},
+		{"first seen at the end", DateFirstSeen, 9 * time.Hour, 11 * time.Hour, nil},
+		{"last seen at the end", DateLastSeen, 9 * time.Hour, 11 * time.Hour, []int64{early.IssueID}},
+		{"first seen in the middle", DateFirstSeen, 4 * time.Hour, 6 * time.Hour, []int64{middle.IssueID}},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			issues, err := database.ListIssues(context.Background(), IssueFilter{
+				SeenSince: baseTime.Add(testCase.from),
+				SeenUntil: baseTime.Add(testCase.to),
+				DateField: testCase.field,
+				Limit:     10,
+			})
+
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			var got []int64
+
+			for _, issue := range issues {
+				got = append(got, issue.ID)
+			}
+
+			if fmt.Sprint(got) != fmt.Sprint(testCase.wantIssue) {
+				t.Fatalf("got issues %v, want %v", got, testCase.wantIssue)
+			}
+		})
 	}
 }

@@ -34,9 +34,13 @@ type NewEvent struct {
 	Environment string
 	Release     string
 	TraceID     string
-	Timestamp   time.Time // when it happened, by the SDK's clock
-	ReceivedAt  time.Time // when the server got it
-	Payload     []byte    // full event JSON
+	// SpanID is the span the error was captured in, ParentSpanID its parent
+	// (usually the HTTP request span). Logs of the request carry one of them.
+	SpanID       string
+	ParentSpanID string
+	Timestamp    time.Time // when it happened, by the SDK's clock
+	ReceivedAt   time.Time // when the server got it
+	Payload      []byte    // full event JSON
 }
 
 // SaveResult tells what storing an event changed. Notifications (stage 6) use it.
@@ -139,10 +143,10 @@ func (store *Store) SaveEvent(ctx context.Context, event NewEvent) (SaveResult, 
 	}
 
 	_, err = transaction.ExecContext(ctx, `
-		INSERT INTO events (project_id, issue_id, event_id, timestamp, received_at, level, environment, release, trace_id, payload)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO events (project_id, issue_id, event_id, timestamp, received_at, level, environment, release, trace_id, span_id, parent_span_id, payload)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		event.ProjectID, result.IssueID, event.EventID, formatTime(event.Timestamp), receivedAt,
-		event.Level, event.Environment, event.Release, event.TraceID, string(event.Payload))
+		event.Level, event.Environment, event.Release, event.TraceID, event.SpanID, event.ParentSpanID, string(event.Payload))
 
 	if err != nil {
 		return result, fmt.Errorf("insert event: %w", err)
@@ -187,6 +191,7 @@ type NewLog struct {
 	SeverityNumber int
 	Body           string
 	TraceID        string
+	SpanID         string // the span the log was written in
 	Attributes     []byte // JSON object
 }
 
@@ -205,8 +210,8 @@ func (store *Store) SaveLogs(ctx context.Context, logs []NewLog) error {
 	defer transaction.Rollback()
 
 	statement, err := transaction.PrepareContext(ctx, `
-		INSERT INTO logs (project_id, timestamp, level, severity_number, body, trace_id, attributes)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`)
+		INSERT INTO logs (project_id, timestamp, level, severity_number, body, trace_id, span_id, attributes)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
 
 	if err != nil {
 		return err
@@ -222,7 +227,7 @@ func (store *Store) SaveLogs(ctx context.Context, logs []NewLog) error {
 		}
 
 		if _, err := statement.ExecContext(ctx, record.ProjectID, formatTime(record.Timestamp), record.Level,
-			record.SeverityNumber, record.Body, record.TraceID, attributes); err != nil {
+			record.SeverityNumber, record.Body, record.TraceID, record.SpanID, attributes); err != nil {
 			return fmt.Errorf("insert log: %w", err)
 		}
 	}

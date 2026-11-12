@@ -1,0 +1,56 @@
+{{/* Small pieces shared by pages. */}}
+
+{{define "time"}}<time datetime="{{isoTime .}}" title="{{fullTime .}}">{{timeAgo .}}</time>{{end}}
+
+{{define "level"}}<span class="badge {{levelClass .}}">{{.}}</span>{{end}}
+
+{{/* Status icon: ● unresolved, ✓ resolved, ⊘ ignored; the name is in the tooltip and for screen readers. */}}
+{{define "status-icon"}}<span class="status-icon status-{{.}}" title="{{.}}" role="img" aria-label="{{.}}">{{if eq . "resolved"}}✓{{else if eq . "ignored"}}⊘{{else}}●{{end}}</span>{{end}}
+
+{{define "status"}}<span class="status status-{{.}}">{{template "status-icon" .}} {{.}}</span>{{end}}
+
+{{define "project-select"}}
+<select name="project" aria-label="Project">
+  <option value="">All projects</option>
+  {{range .}}<option value="{{.Name}}" {{if .Selected}}selected{{end}}>{{.Name}}</option>{{end}}
+</select>
+{{end}}
+
+{{/* A log line; app.js shows "Expand" when it is taller than the box. */}}
+{{define "log-body"}}<div class="log-text"><pre class="log-body">{{cleanLog .}}</pre><div class="log-actions"><button type="button" class="link small expand" hidden>Expand</button><button type="button" class="link small full-screen">Full screen</button></div></div>{{end}}
+
+{{/* Level and project as links that filter the current list by that value. */}}
+{{define "level-filter"}}<a class="badge {{levelClass .Level}}" href="{{.Filter.With "level" .Level}}" title="Show only {{.Level}}">{{.Level}}</a>{{end}}
+{{define "project-filter"}}<a class="project" href="{{.Filter.With "project" .Name}}" title="Show only {{.Name}}">{{.Name}}</a>{{end}}
+
+{{/* Issue action buttons, posted as "action" (see actions.go). The argument is
+     the issue status on the issue page, or "bulk" on the list, where all apply.
+     Every action asks first (data-confirm in app.js); {count} becomes the
+     number of checked issues. */}}
+{{define "issue-action-buttons"}}
+{{$target := "this issue"}}{{if eq . "bulk"}}{{$target = "{count} selected issue(s)"}}{{end}}
+{{if or (eq . "unresolved") (eq . "bulk")}}
+<button name="action" value="resolve" class="primary"
+        data-confirm="Resolve {{$target}}? If the error happens again, it is reopened.">Resolve</button>
+<button name="action" value="ignore"
+        data-confirm="Ignore {{$target}}? New events are still recorded, but it stays out of the unresolved list.">Ignore</button>
+{{end}}
+{{if ne . "unresolved"}}
+<button name="action" value="reopen"
+        data-confirm="Reopen {{$target}}?">Reopen</button>
+{{end}}
+<button name="action" value="delete" class="danger"
+        data-confirm="Delete {{$target}} and all its events? This cannot be undone. If the error happens again, it starts a new issue.">Delete</button>
+{{end}}
+
+{{/* Applied filters as chips: × removes one, "Clear all" removes every filter. */}}
+{{define "active-filters"}}
+{{if .Items}}
+<div class="active-filters">
+  {{range .Items}}
+  <span class="chip">{{.Label}}: <strong>{{.Value}}</strong><a class="chip-remove" href="{{.RemoveURL}}" title="Remove this filter" aria-label="Remove filter {{.Label}}">×</a></span>
+  {{end}}
+  <a class="clear-filters" href="{{.ClearURL}}">Clear all</a>
+</div>
+{{end}}
+{{end}}

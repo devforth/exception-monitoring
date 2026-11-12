@@ -20,11 +20,38 @@ type Project struct {
 	PublicKey string
 }
 
+// Projects is the list from PROJECTS, in the order it was written.
+type Projects []Project
+
+// ByID returns the project with this ID. Stored data can belong to a project
+// that was removed from PROJECTS, so callers handle ok == false.
+func (projects Projects) ByID(id int) (Project, bool) {
+	for _, project := range projects {
+		if project.ID == id {
+			return project, true
+		}
+	}
+
+	return Project{}, false
+}
+
+// Find returns the project given as an ID ("1") or a name ("backend"), the
+// two ways a project is referred to in URLs.
+func (projects Projects) Find(idOrName string) (Project, bool) {
+	for _, project := range projects {
+		if strconv.Itoa(project.ID) == idOrName || project.Name == idOrName {
+			return project, true
+		}
+	}
+
+	return Project{}, false
+}
+
 type Config struct {
 	Port     int
 	DataDir  string
 	LogLevel slog.Level
-	Projects []Project
+	Projects Projects
 	// AllowedOrigins lists the browser origins allowed to send events (CORS).
 	// ["*"] allows any origin. Requests without an Origin header (backend SDKs) are always allowed.
 	AllowedOrigins []string
@@ -39,6 +66,10 @@ type Config struct {
 	// TrustedProxies are reverse proxies whose X-Forwarded-For header is used
 	// to find the client address. Empty means the header is ignored.
 	TrustedProxies []netip.Prefix
+	// AdminUsername and AdminPassword log in to the web UI.
+	// An empty password means the UI is closed.
+	AdminUsername string
+	AdminPassword string
 }
 
 // Defaults used when the corresponding environment variable is not set.
@@ -49,8 +80,12 @@ const (
 	DefaultAllowedOrigins     = "*"
 	DefaultRateLimitPerMinute = 1000
 
+	DefaultAdminUsername = "admin"
+
 	// MinAPITokenLength keeps tokens out of brute-force range.
 	MinAPITokenLength = 32
+	// MinAdminPasswordLength: logins are rate limited, but the UI is often public.
+	MinAdminPasswordLength = 12
 )
 
 var (
@@ -71,6 +106,7 @@ func loadFrom(getenv func(string) string) (*Config, error) {
 		LogLevel:           DefaultLogLevel,
 		AllowedOrigins:     []string{DefaultAllowedOrigins},
 		RateLimitPerMinute: DefaultRateLimitPerMinute,
+		AdminUsername:      DefaultAdminUsername,
 	}
 
 	if value := getenv("PORT"); value != "" {
@@ -126,6 +162,18 @@ func loadFrom(getenv func(string) string) (*Config, error) {
 		config.APIToken = value
 	}
 
+	if value := getenv("ADMIN_USERNAME"); value != "" {
+		config.AdminUsername = value
+	}
+
+	if value := getenv("ADMIN_PASSWORD"); value != "" {
+		if len([]rune(value)) < MinAdminPasswordLength {
+			return nil, fmt.Errorf("ADMIN_PASSWORD: must be at least %d characters", MinAdminPasswordLength)
+		}
+
+		config.AdminPassword = value
+	}
+
 	allowedIPs, err := parseNetworks(getenv("ALLOWED_IPS"))
 
 	if err != nil {
@@ -154,14 +202,14 @@ func loadFrom(getenv func(string) string) (*Config, error) {
 }
 
 // parseProjects parses "id:name:key,id:name:key". Empty input means no projects.
-func parseProjects(raw string) ([]Project, error) {
+func parseProjects(raw string) (Projects, error) {
 	raw = strings.TrimSpace(raw)
 
 	if raw == "" {
 		return nil, nil
 	}
 
-	var projects []Project
+	var projects Projects
 
 	seenIDs := map[int]bool{}
 	seenNames := map[string]bool{}

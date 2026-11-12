@@ -5,10 +5,10 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/devforth/exception-monitoring/internal/fixtures"
 	"github.com/devforth/exception-monitoring/internal/store"
 )
 
@@ -32,27 +32,20 @@ func TestFixturesEndToEnd(t *testing.T) {
 	router.Handle("/api/{projectID}/envelope/{$}", handler)
 	server := &testServer{handler: handler, router: router}
 
-	files, err := filepath.Glob(filepath.Join(fixturesDir, "*.request.json"))
-
-	if err != nil {
-		t.Fatal(err)
-	}
-
+	recorded := fixtures.All(t)
 	eventFixtures := 0
 
-	for _, file := range files {
-		if strings.Contains(file, "-event-") {
+	for _, fixture := range recorded {
+		if strings.Contains(fixture.Name, "-event-") {
 			eventFixtures++
 		}
 	}
 
 	// The second pass sends the same event_ids again, like an SDK retry.
 	for pass := 1; pass <= 2; pass++ {
-		for _, file := range files {
-			name := strings.TrimSuffix(filepath.Base(file), ".request.json")
-
-			if response := replayFixture(t, server, name); response.Code != http.StatusOK {
-				t.Fatalf("pass %d, %s: got %d %s", pass, name, response.Code, response.Body)
+		for _, fixture := range recorded {
+			if response := server.send(fixture.HTTP()); response.Code != http.StatusOK {
+				t.Fatalf("pass %d, %s: got %d %s", pass, fixture.Name, response.Code, response.Body)
 			}
 		}
 	}

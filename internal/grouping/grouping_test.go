@@ -1,25 +1,19 @@
 package grouping
 
 import (
-	"os"
-	"path/filepath"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/devforth/exception-monitoring/internal/fixtures"
 	"github.com/devforth/exception-monitoring/internal/sentry"
 )
 
 func fixtureEvent(t *testing.T, name string) *sentry.Event {
 	t.Helper()
 
-	body, err := os.ReadFile(filepath.Join("../../testdata/envelopes", name+".envelope"))
-
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	envelope, err := sentry.ParseEnvelope(body)
+	envelope, err := sentry.ParseEnvelope(fixtures.Envelope(t, name))
 
 	if err != nil {
 		t.Fatal(err)
@@ -79,6 +73,13 @@ func TestSameProblemGroupsTogether(t *testing.T) {
 			exceptionEvent(t, "TypeError", "x", "http://localhost:3500/assets/main.3f2a1b9c.js?v=1|render|1"),
 			exceptionEvent(t, "TypeError", "x", "https://app.example.com/assets/main.77aa00ff.js|render|1"),
 		},
+		// tsx watch adds "?<timestamp>" on every restart; the Node SDK copies it into the module.
+		"cache-busting query in module": {
+			parse(t, `{"exception":{"values":[{"type":"Error","value":"x","stacktrace":{"frames":[
+				{"module":"tsx.dist.esm:index.mjs?1794411765314","filename":"/app/index.mjs?1794411765314","function":"F","in_app":false}]}}]}}`),
+			parse(t, `{"exception":{"values":[{"type":"Error","value":"x","stacktrace":{"frames":[
+				{"module":"tsx.dist.esm:index.mjs?1794411844942","filename":"/app/index.mjs?1794411844942","function":"F","in_app":false}]}}]}}`),
+		},
 	}
 
 	for name, events := range testCases {
@@ -120,6 +121,33 @@ func TestDifferentProblemsSplit(t *testing.T) {
 				t.Fatalf("want two groups, both are %q", Components(events[0]))
 			}
 		})
+	}
+}
+
+// sourceEvent is an Error thrown in function at lineno, with the source line the SDK sends.
+func sourceEvent(t *testing.T, function string, lineno int, source string) *sentry.Event {
+	t.Helper()
+
+	return parse(t, fmt.Sprintf(`{"exception":{"values":[{"type":"Error","value":"x","stacktrace":{"frames":[
+		{"filename":"routes.ts","function":%q,"lineno":%d,"in_app":true,"context_line":%q}]}}]}}`, function, lineno, source))
+}
+
+func TestSourceLineSeparatesSameNamedFunctions(t *testing.T) {
+	// JS names `handler: () => {...}` after the property, so many functions in
+	// one file are called "handler". Found in the playground: 9 different
+	// errors merged into one issue.
+	checkout := sourceEvent(t, "handler", 120, `throw new Error("Checkout failed");`)
+	invoice := sourceEvent(t, "handler", 240, `throw new Error("Could not generate invoice PDF");`)
+
+	if Fingerprint(checkout) == Fingerprint(invoice) {
+		t.Fatal("different throws in functions with the same name must not merge")
+	}
+
+	// The same line after a deploy moved it: still the same issue.
+	moved := sourceEvent(t, "handler", 135, `    throw new Error("Checkout failed");`)
+
+	if Fingerprint(checkout) != Fingerprint(moved) {
+		t.Fatalf("a moved line must stay in its group:\n%q\n%q", Components(checkout), Components(moved))
 	}
 }
 

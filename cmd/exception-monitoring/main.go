@@ -18,6 +18,7 @@ import (
 	"github.com/devforth/exception-monitoring/internal/ingest"
 	"github.com/devforth/exception-monitoring/internal/server"
 	"github.com/devforth/exception-monitoring/internal/store"
+	"github.com/devforth/exception-monitoring/internal/ui"
 )
 
 // version is set at build time: -ldflags "-X main.version=..."
@@ -66,8 +67,18 @@ func run() error {
 		logger.Warn("API_TOKEN is not set, the REST API is closed")
 	}
 
+	if settings.AdminPassword == "" {
+		logger.Warn("ADMIN_PASSWORD is not set, the web UI is closed")
+	}
+
 	if len(settings.AllowedIPs) == 0 {
-		logger.Warn("ALLOWED_IPS is not set, the API is reachable from any address")
+		logger.Warn("ALLOWED_IPS is not set, the API and UI are reachable from any address")
+	}
+
+	webUI, err := ui.New(ctx, logger, database, settings)
+
+	if err != nil {
+		return err
 	}
 
 	if len(settings.Projects) == 0 {
@@ -87,6 +98,7 @@ func run() error {
 			Database:       database,
 			Ingest:         ingest.New(logger, settings, ingest.StoreSink{Store: database, Logger: logger}),
 			API:            api.New(logger, database, settings.Projects),
+			UI:             webUI,
 			APIToken:       settings.APIToken,
 			AllowedIPs:     settings.AllowedIPs,
 			TrustedProxies: settings.TrustedProxies,

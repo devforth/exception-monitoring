@@ -1,0 +1,33 @@
+{{define "layout"}}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- htmx injects an inline <style> for indicators by default; the CSP forbids inline styles. -->
+  <meta name="htmx-config" content='{"includeIndicatorStyles": false}'>
+  <title>{{template "title" .}} · Exception Monitoring</title>
+  <link rel="stylesheet" href="{{asset "flatpickr.min.css"}}">
+  <link rel="stylesheet" href="{{asset "app.css"}}">
+  <script src="{{asset "htmx.min.js"}}" defer></script>
+  <script src="{{asset "flatpickr.min.js"}}" defer></script>
+  <script src="{{asset "app.js"}}" defer></script>
+</head>
+<body>
+  {{if .LoggedIn}}
+  <header class="topbar">
+    <a class="brand" href="/issues">Exception Monitoring</a>
+    <nav>
+      <a href="/issues" {{if eq .Page "issues" "issue"}}class="active"{{end}}>Issues</a>
+      <a href="/logs" {{if eq .Page "logs"}}class="active"{{end}}>Logs</a>
+      <a href="/projects" {{if eq .Page "projects"}}class="active"{{end}}>Projects</a>
+    </nav>
+    <form method="post" action="/logout">
+      <button type="submit" class="link">Log out</button>
+    </form>
+  </header>
+  {{end}}
+  <main>
+    {{template "content" .}}
+  </main>
+</body>
+</html>{{end}}

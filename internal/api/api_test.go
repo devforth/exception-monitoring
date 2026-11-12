@@ -11,23 +11,20 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
-	"net/url"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/devforth/exception-monitoring/internal/api"
 	"github.com/devforth/exception-monitoring/internal/config"
+	"github.com/devforth/exception-monitoring/internal/fixtures"
 	"github.com/devforth/exception-monitoring/internal/ingest"
 	"github.com/devforth/exception-monitoring/internal/server"
 	"github.com/devforth/exception-monitoring/internal/store"
 )
 
 const (
-	token       = "0123456789abcdef0123456789abcdef"
-	fixturesDir = "../../testdata/envelopes"
+	token = "0123456789abcdef0123456789abcdef"
 )
 
 type testServer struct {
@@ -51,10 +48,7 @@ func newTestServer(t *testing.T, allowedIPs ...string) *testServer {
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	settings := &config.Config{
-		Projects: []config.Project{
-			{ID: 1, Name: "backend", PublicKey: "backendkey0000000000000000000001"},
-			{ID: 2, Name: "frontend", PublicKey: "browserkey0000000000000000000002"},
-		},
+		Projects:       fixtures.Projects(),
 		AllowedOrigins: []string{"*"},
 	}
 
@@ -80,42 +74,12 @@ func newTestServer(t *testing.T, allowedIPs ...string) *testServer {
 func (server *testServer) ingestFixtures() {
 	server.t.Helper()
 
-	files, err := filepath.Glob(filepath.Join(fixturesDir, "*.request.json"))
-
-	if err != nil || len(files) == 0 {
-		server.t.Fatalf("no fixtures: %v", err)
-	}
-
-	for _, file := range files {
-		var recorded struct {
-			Method, Path string
-			Query        map[string]string
-		}
-
-		meta, _ := os.ReadFile(file)
-
-		if err := json.Unmarshal(meta, &recorded); err != nil {
-			server.t.Fatal(err)
-		}
-
-		body, err := os.ReadFile(strings.TrimSuffix(file, ".request.json") + ".envelope")
-
-		if err != nil {
-			server.t.Fatal(err)
-		}
-
-		query := url.Values{}
-
-		for key, value := range recorded.Query {
-			query.Set(key, value)
-		}
-
-		request := httptest.NewRequest(recorded.Method, recorded.Path+"?"+query.Encode(), bytes.NewReader(body))
+	for _, fixture := range fixtures.All(server.t) {
 		response := httptest.NewRecorder()
-		server.handler.ServeHTTP(response, request)
+		server.handler.ServeHTTP(response, fixture.HTTP())
 
 		if response.Code != http.StatusOK {
-			server.t.Fatalf("%s: ingest got %d %s", file, response.Code, response.Body)
+			server.t.Fatalf("%s: ingest got %d %s", fixture.Name, response.Code, response.Body)
 		}
 	}
 }

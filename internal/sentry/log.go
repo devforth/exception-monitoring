@@ -49,6 +49,11 @@ func ParseLogs(payload []byte, received time.Time) ([]Log, error) {
 		if record.Level == "" {
 			record.Level = "info"
 		}
+
+		// SDK 11 puts the span the log was written in into an attribute.
+		if record.SpanID == "" {
+			record.SpanID = record.Attributes["sentry.trace.parent_span_id"].String()
+		}
 	}
 
 	return batch.Items, nil

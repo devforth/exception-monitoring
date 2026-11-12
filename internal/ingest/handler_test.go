@@ -11,22 +11,14 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/devforth/exception-monitoring/internal/config"
+	"github.com/devforth/exception-monitoring/internal/fixtures"
 	"github.com/devforth/exception-monitoring/internal/sentry"
-)
-
-const (
-	fixturesDir = "../../testdata/envelopes"
-	backendKey  = "backendkey0000000000000000000001"
-	browserKey  = "browserkey0000000000000000000002"
 )
 
 // fakeSink records what the handler stores.
@@ -70,10 +62,7 @@ func (sink *fakeSink) StoreLogs(_ context.Context, project config.Project, logs 
 // Same keys and IDs as the fixtures and the sentry-playground DSNs.
 func testSettings() *config.Config {
 	return &config.Config{
-		Projects: []config.Project{
-			{ID: 1, Name: "backend", PublicKey: backendKey},
-			{ID: 2, Name: "frontend", PublicKey: browserKey},
-		},
+		Projects:           fixtures.Projects(),
 		AllowedOrigins:     []string{"*"},
 		RateLimitPerMinute: 0,
 	}
@@ -117,62 +106,12 @@ func envelopeURL(projectID, key string) string {
 
 const simpleEnvelope = "{\"event_id\":\"9ec79c33ec9942ab8353589fcb2e04dc\"}\n{\"type\":\"event\"}\n{\"message\":\"hello\"}\n"
 
-// recordedRequest is a <name>.request.json fixture: the request as the SDK sent it.
-type recordedRequest struct {
-	Method  string            `json:"method"`
-	Path    string            `json:"path"`
-	Query   map[string]string `json:"query"`
-	Headers map[string]string `json:"headers"`
-}
-
-func replayFixture(t *testing.T, server *testServer, name string) *httptest.ResponseRecorder {
-	t.Helper()
-
-	body, err := os.ReadFile(filepath.Join(fixturesDir, name+".envelope"))
-
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	meta, err := os.ReadFile(filepath.Join(fixturesDir, name+".request.json"))
-
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var recorded recordedRequest
-
-	if err := json.Unmarshal(meta, &recorded); err != nil {
-		t.Fatal(err)
-	}
-
-	query := url.Values{}
-
-	for key, value := range recorded.Query {
-		query.Set(key, value)
-	}
-
-	request := newRequest(recorded.Method, recorded.Path+"?"+query.Encode(), body)
-
-	for key, value := range recorded.Headers {
-		request.Header.Set(key, value)
-	}
-
-	return server.send(request)
-}
-
 func TestReplayRecordedSDKRequests(t *testing.T) {
-	files, err := filepath.Glob(filepath.Join(fixturesDir, "*.request.json"))
-
-	if err != nil || len(files) == 0 {
-		t.Fatalf("no fixtures: %v", err)
-	}
-
-	for _, file := range files {
-		name := strings.TrimSuffix(filepath.Base(file), ".request.json")
+	for _, fixture := range fixtures.All(t) {
+		name := fixture.Name
 		t.Run(name, func(t *testing.T) {
 			server := newTestServer(testSettings())
-			response := replayFixture(t, server, name)
+			response := server.send(fixture.HTTP())
 
 			if response.Code != http.StatusOK {
 				t.Fatalf("got %d %s", response.Code, response.Body)
@@ -180,7 +119,7 @@ func TestReplayRecordedSDKRequests(t *testing.T) {
 
 			wantProject := "backend"
 
-			if strings.HasPrefix(name, "browser-") {
+			if fixture.Browser() {
 				wantProject = "frontend"
 
 				if response.Header().Get("Access-Control-Allow-Origin") != "http://localhost:3500" {
@@ -225,42 +164,42 @@ func TestAuthentication(t *testing.T) {
 		wantStatus int
 	}{
 		{"key in query", func() *http.Request {
-			return newRequest(http.MethodPost, envelopeURL("1", backendKey), []byte(simpleEnvelope))
+			return newRequest(http.MethodPost, envelopeURL("1", fixtures.BackendKey), []byte(simpleEnvelope))
 		}, http.StatusOK},
 		{"key in X-Sentry-Auth", func() *http.Request {
 			request := newRequest(http.MethodPost, envelopeURL("1", ""), []byte(simpleEnvelope))
-			request.Header.Set("X-Sentry-Auth", "Sentry sentry_version=7, sentry_client=sentry.python/2.0, sentry_key="+backendKey)
+			request.Header.Set("X-Sentry-Auth", "Sentry sentry_version=7, sentry_client=sentry.python/2.0, sentry_key="+fixtures.BackendKey)
 
 			return request
 		}, http.StatusOK},
 		{"key in Authorization", func() *http.Request {
 			request := newRequest(http.MethodPost, envelopeURL("1", ""), []byte(simpleEnvelope))
-			request.Header.Set("Authorization", "sentry sentry_key="+backendKey)
+			request.Header.Set("Authorization", "sentry sentry_key="+fixtures.BackendKey)
 
 			return request
 		}, http.StatusOK},
 		{"key in envelope dsn (tunnel)", func() *http.Request {
-			body := "{\"dsn\":\"https://" + backendKey + "@errors.example.com/1\"}\n{\"type\":\"event\"}\n{}\n"
+			body := "{\"dsn\":\"https://" + fixtures.BackendKey + "@errors.example.com/1\"}\n{\"type\":\"event\"}\n{}\n"
 			return newRequest(http.MethodPost, envelopeURL("1", ""), []byte(body))
 		}, http.StatusOK},
 		{"envelope dsn for another project", func() *http.Request {
-			body := "{\"dsn\":\"https://" + backendKey + "@errors.example.com/2\"}\n{\"type\":\"event\"}\n{}\n"
+			body := "{\"dsn\":\"https://" + fixtures.BackendKey + "@errors.example.com/2\"}\n{\"type\":\"event\"}\n{}\n"
 			return newRequest(http.MethodPost, envelopeURL("1", ""), []byte(body))
 		}, http.StatusUnauthorized},
 		{"no key", func() *http.Request {
 			return newRequest(http.MethodPost, envelopeURL("1", ""), []byte(simpleEnvelope))
 		}, http.StatusUnauthorized},
 		{"wrong key", func() *http.Request {
-			return newRequest(http.MethodPost, envelopeURL("1", browserKey), []byte(simpleEnvelope))
+			return newRequest(http.MethodPost, envelopeURL("1", fixtures.BrowserKey), []byte(simpleEnvelope))
 		}, http.StatusForbidden},
 		{"unknown project", func() *http.Request {
-			return newRequest(http.MethodPost, envelopeURL("99", backendKey), []byte(simpleEnvelope))
+			return newRequest(http.MethodPost, envelopeURL("99", fixtures.BackendKey), []byte(simpleEnvelope))
 		}, http.StatusForbidden},
 		{"non-numeric project", func() *http.Request {
-			return newRequest(http.MethodPost, envelopeURL("abc", backendKey), []byte(simpleEnvelope))
+			return newRequest(http.MethodPost, envelopeURL("abc", fixtures.BackendKey), []byte(simpleEnvelope))
 		}, http.StatusNotFound},
 		{"wrong method", func() *http.Request {
-			return newRequest(http.MethodGet, envelopeURL("1", backendKey), nil)
+			return newRequest(http.MethodGet, envelopeURL("1", fixtures.BackendKey), nil)
 		}, http.StatusMethodNotAllowed},
 	}
 
@@ -286,7 +225,7 @@ func TestCORS(t *testing.T) {
 	server := newTestServer(settings)
 
 	t.Run("allowed origin", func(t *testing.T) {
-		request := newRequest(http.MethodPost, envelopeURL("2", browserKey), []byte(simpleEnvelope))
+		request := newRequest(http.MethodPost, envelopeURL("2", fixtures.BrowserKey), []byte(simpleEnvelope))
 		request.Header.Set("Origin", "https://App.example.com")
 		response := server.send(request)
 
@@ -296,7 +235,7 @@ func TestCORS(t *testing.T) {
 	})
 
 	t.Run("preflight", func(t *testing.T) {
-		request := newRequest(http.MethodOptions, envelopeURL("2", browserKey), nil)
+		request := newRequest(http.MethodOptions, envelopeURL("2", fixtures.BrowserKey), nil)
 		request.Header.Set("Origin", "https://app.example.com")
 		request.Header.Set("Access-Control-Request-Method", "POST")
 		response := server.send(request)
@@ -308,7 +247,7 @@ func TestCORS(t *testing.T) {
 
 	t.Run("other origin", func(t *testing.T) {
 		for _, method := range []string{http.MethodPost, http.MethodOptions} {
-			request := newRequest(method, envelopeURL("2", browserKey), []byte(simpleEnvelope))
+			request := newRequest(method, envelopeURL("2", fixtures.BrowserKey), []byte(simpleEnvelope))
 			request.Header.Set("Origin", "https://evil.example.com")
 			response := server.send(request)
 
@@ -319,7 +258,7 @@ func TestCORS(t *testing.T) {
 	})
 
 	t.Run("backend without origin", func(t *testing.T) {
-		response := server.send(newRequest(http.MethodPost, envelopeURL("1", backendKey), []byte(simpleEnvelope)))
+		response := server.send(newRequest(http.MethodPost, envelopeURL("1", fixtures.BackendKey), []byte(simpleEnvelope)))
 
 		if response.Code != http.StatusOK {
 			t.Fatalf("got %d", response.Code)
@@ -375,7 +314,7 @@ func TestBody(t *testing.T) {
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
 			server := newTestServer(testSettings())
-			request := newRequest(http.MethodPost, envelopeURL("1", backendKey), testCase.body(t))
+			request := newRequest(http.MethodPost, envelopeURL("1", fixtures.BackendKey), testCase.body(t))
 
 			if testCase.encoding != "" {
 				request.Header.Set("Content-Encoding", testCase.encoding)
@@ -393,7 +332,7 @@ func TestBody(t *testing.T) {
 func TestMalformedItemRejectsWholeEnvelope(t *testing.T) {
 	server := newTestServer(testSettings())
 	body := "{}\n{\"type\":\"event\"}\n{\"message\":\"ok\"}\n{\"type\":\"log\"}\nnot json\n"
-	response := server.send(newRequest(http.MethodPost, envelopeURL("1", backendKey), []byte(body)))
+	response := server.send(newRequest(http.MethodPost, envelopeURL("1", fixtures.BackendKey), []byte(body)))
 
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("got %d, want 400", response.Code)
@@ -407,7 +346,7 @@ func TestMalformedItemRejectsWholeEnvelope(t *testing.T) {
 func TestSinkFailure(t *testing.T) {
 	server := newTestServer(testSettings())
 	server.sink.err = errors.New("disk full")
-	response := server.send(newRequest(http.MethodPost, envelopeURL("1", backendKey), []byte(simpleEnvelope)))
+	response := server.send(newRequest(http.MethodPost, envelopeURL("1", fixtures.BackendKey), []byte(simpleEnvelope)))
 
 	if response.Code != http.StatusInternalServerError || strings.Contains(response.Body.String(), "disk full") {
 		t.Fatalf("got %d %s", response.Code, response.Body)
@@ -426,12 +365,12 @@ func TestRateLimit(t *testing.T) {
 	}
 
 	for range 2 {
-		if response := send("1", backendKey); response.Code != http.StatusOK {
+		if response := send("1", fixtures.BackendKey); response.Code != http.StatusOK {
 			t.Fatalf("got %d before the limit", response.Code)
 		}
 	}
 
-	response := send("1", backendKey)
+	response := send("1", fixtures.BackendKey)
 
 	if response.Code != http.StatusTooManyRequests {
 		t.Fatalf("got %d, want 429", response.Code)
@@ -442,17 +381,17 @@ func TestRateLimit(t *testing.T) {
 	}
 
 	// The limit is per project.
-	if response := send("2", browserKey); response.Code != http.StatusOK {
+	if response := send("2", fixtures.BrowserKey); response.Code != http.StatusOK {
 		t.Fatalf("other project: got %d", response.Code)
 	}
 	// Requests with a wrong key don't use up the project's limit.
-	if response := send("1", browserKey); response.Code != http.StatusForbidden {
+	if response := send("1", fixtures.BrowserKey); response.Code != http.StatusForbidden {
 		t.Fatalf("wrong key: got %d, want 403", response.Code)
 	}
 
 	now = now.Add(time.Minute)
 
-	if response := send("1", backendKey); response.Code != http.StatusOK {
+	if response := send("1", fixtures.BackendKey); response.Code != http.StatusOK {
 		t.Fatalf("next minute: got %d", response.Code)
 	}
 }

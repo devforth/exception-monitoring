@@ -19,7 +19,11 @@ fix:
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=$(VERSION)" -o bin/exception-monitoring ./cmd/exception-monitoring
 
+# Loads .env and then .env.local (both optional, gitignored; see .env.example).
+# Values from the files override the shell, so one-off variables like
+# `LOG_LEVEL=debug make run` work only for keys the files don't set.
 run:
+	set -a; [ -f .env ] && . ./.env; [ -f .env.local ] && . ./.env.local; set +a; \
 	go run ./cmd/exception-monitoring
 
 docker:

@@ -31,19 +31,23 @@ func (sink StoreSink) now() time.Time {
 }
 
 func (sink StoreSink) StoreEvent(ctx context.Context, project config.Project, event *sentry.Event) error {
+	trace := event.Trace()
+
 	result, err := sink.Store.SaveEvent(ctx, store.NewEvent{
-		ProjectID:   project.ID,
-		EventID:     event.EventID,
-		Fingerprint: grouping.Fingerprint(event),
-		Title:       event.Title(),
-		Culprit:     grouping.Culprit(event),
-		Level:       event.Level,
-		Environment: event.Environment,
-		Release:     event.Release,
-		TraceID:     event.TraceID(),
-		Timestamp:   event.Timestamp.Time,
-		ReceivedAt:  sink.now(),
-		Payload:     event.Raw,
+		ProjectID:    project.ID,
+		EventID:      event.EventID,
+		Fingerprint:  grouping.Fingerprint(event),
+		Title:        event.Title(),
+		Culprit:      grouping.Culprit(event),
+		Level:        event.Level,
+		Environment:  event.Environment,
+		Release:      event.Release,
+		TraceID:      trace.TraceID,
+		SpanID:       trace.SpanID,
+		ParentSpanID: trace.ParentSpanID,
+		Timestamp:    event.Timestamp.Time,
+		ReceivedAt:   sink.now(),
+		Payload:      event.Raw,
 	})
 
 	if err != nil {
@@ -83,6 +87,7 @@ func (sink StoreSink) StoreLogs(ctx context.Context, project config.Project, log
 			SeverityNumber: record.SeverityNumber,
 			Body:           record.Body,
 			TraceID:        record.TraceID,
+			SpanID:         record.SpanID,
 			Attributes:     attributes,
 		})
 	}

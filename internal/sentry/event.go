@@ -98,10 +98,10 @@ func ParseEvent(payload []byte, headerEventID string, received time.Time) (*Even
 
 	event.Raw = json.RawMessage(bytes.Clone(payload))
 
-	event.EventID = normalizeEventID(event.EventID)
+	event.EventID = NormalizeEventID(event.EventID)
 
 	if event.EventID == "" {
-		event.EventID = normalizeEventID(headerEventID)
+		event.EventID = NormalizeEventID(headerEventID)
 	}
 
 	if event.EventID == "" {
@@ -153,21 +153,25 @@ func (event *Event) MainException() *Exception {
 	return &event.Exception[len(event.Exception)-1]
 }
 
-// TraceID returns contexts.trace.trace_id, which links the event to logs.
-func (event *Event) TraceID() string {
-	raw, ok := event.Contexts["trace"]
+// EventTrace is contexts.trace of an event: where in a trace it happened.
+type EventTrace struct {
+	TraceID string `json:"trace_id"`
+	// SpanID is the span active when the error was captured (e.g. the route
+	// handler), ParentSpanID its parent (usually the HTTP request span).
+	SpanID       string `json:"span_id"`
+	ParentSpanID string `json:"parent_span_id"`
+}
 
-	if !ok {
-		return ""
+// Trace returns contexts.trace. A browser keeps one trace for the whole page
+// session, so the trace alone does not identify a request; the spans do.
+func (event *Event) Trace() EventTrace {
+	var trace EventTrace
+
+	if raw, ok := event.Contexts["trace"]; ok {
+		_ = json.Unmarshal(raw, &trace)
 	}
 
-	var trace struct {
-		TraceID string `json:"trace_id"`
-	}
-
-	_ = json.Unmarshal(raw, &trace)
-
-	return trace.TraceID
+	return trace
 }
 
 // NewEventID returns a random 32-character hex ID in Sentry's format.
@@ -179,9 +183,9 @@ func NewEventID() string {
 	return hex.EncodeToString(id[:])
 }
 
-// normalizeEventID accepts both "abcd..." and UUID form with dashes, and
+// NormalizeEventID accepts both "abcd..." and UUID form with dashes, and
 // returns 32 lowercase hex characters, or "" if the value is not a valid ID.
-func normalizeEventID(value string) string {
+func NormalizeEventID(value string) string {
 	value = strings.ToLower(strings.ReplaceAll(value, "-", ""))
 
 	if len(value) != 32 {

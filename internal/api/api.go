@@ -9,7 +9,6 @@ package api
 
 import (
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -19,6 +18,7 @@ import (
 	"time"
 
 	"github.com/devforth/exception-monitoring/internal/config"
+	"github.com/devforth/exception-monitoring/internal/httpjson"
 	"github.com/devforth/exception-monitoring/internal/store"
 )
 
@@ -30,10 +30,10 @@ const (
 type Handler struct {
 	logger   *slog.Logger
 	store    *store.Store
-	projects []config.Project
+	projects config.Projects
 }
 
-func New(logger *slog.Logger, database *store.Store, projects []config.Project) *Handler {
+func New(logger *slog.Logger, database *store.Store, projects config.Projects) *Handler {
 	return &Handler{logger: logger, store: database, projects: projects}
 }
 
@@ -78,23 +78,13 @@ func (handler *Handler) fail(w http.ResponseWriter, r *http.Request, err error) 
 
 	switch {
 	case errors.As(err, &userError):
-		writeError(w, http.StatusBadRequest, userError.message)
+		httpjson.Error(w, http.StatusBadRequest, userError.message)
 	case errors.Is(err, store.ErrNotFound):
-		writeError(w, http.StatusNotFound, "not found")
+		httpjson.Error(w, http.StatusNotFound, "not found")
 	default:
 		handler.logger.Error("api request failed", "method", r.Method, "path", r.URL.Path, "err", err)
-		writeError(w, http.StatusInternalServerError, "internal error")
+		httpjson.Error(w, http.StatusInternalServerError, "internal error")
 	}
-}
-
-func writeJSON(w http.ResponseWriter, status int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-func writeError(w http.ResponseWriter, status int, message string) {
-	writeJSON(w, status, map[string]string{"error": message})
 }
 
 type page[T any] struct {
@@ -154,23 +144,20 @@ func (handler *Handler) projectFromQuery(r *http.Request) (int, error) {
 		return 0, nil
 	}
 
-	for _, project := range handler.projects {
-		if strconv.Itoa(project.ID) == raw || project.Name == raw {
-			return project.ID, nil
-		}
+	project, ok := handler.projects.Find(raw)
+
+	if !ok {
+		return 0, invalid("unknown project %q", raw)
 	}
 
-	return 0, invalid("unknown project %q", raw)
+	return project.ID, nil
 }
 
+// projectName is empty for data of a project removed from PROJECTS: it stays readable.
 func (handler *Handler) projectName(projectID int) string {
-	for _, project := range handler.projects {
-		if project.ID == projectID {
-			return project.Name
-		}
-	}
-	// Data of a project removed from PROJECTS stays readable.
-	return ""
+	project, _ := handler.projects.ByID(projectID)
+
+	return project.Name
 }
 
 func pathID(r *http.Request, name string) (int64, error) {

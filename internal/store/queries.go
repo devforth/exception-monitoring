@@ -27,16 +27,18 @@ type Issue struct {
 
 // EventSummary is an event without its payload, for lists.
 type EventSummary struct {
-	ID          int64     `json:"-"`
-	ProjectID   int       `json:"project_id"`
-	IssueID     int64     `json:"issue_id"`
-	EventID     string    `json:"event_id"`
-	Timestamp   time.Time `json:"timestamp"`
-	ReceivedAt  time.Time `json:"received_at"`
-	Level       string    `json:"level"`
-	Environment string    `json:"environment"`
-	Release     string    `json:"release"`
-	TraceID     string    `json:"trace_id"`
+	ID           int64     `json:"-"`
+	ProjectID    int       `json:"project_id"`
+	IssueID      int64     `json:"issue_id"`
+	EventID      string    `json:"event_id"`
+	Timestamp    time.Time `json:"timestamp"`
+	ReceivedAt   time.Time `json:"received_at"`
+	Level        string    `json:"level"`
+	Environment  string    `json:"environment"`
+	Release      string    `json:"release"`
+	TraceID      string    `json:"trace_id"`
+	SpanID       string    `json:"span_id"`
+	ParentSpanID string    `json:"parent_span_id"`
 }
 
 // Event is a stored event with the full JSON the SDK sent.
@@ -53,6 +55,7 @@ type LogRecord struct {
 	SeverityNumber int             `json:"severity_number"`
 	Body           string          `json:"body"`
 	TraceID        string          `json:"trace_id"`
+	SpanID         string          `json:"span_id"`
 	Attributes     json.RawMessage `json:"attributes"`
 }
 
@@ -63,8 +66,70 @@ type IssueFilter struct {
 	Level     string
 	Query     string // substring of the title or culprit
 	Sort      string // "last_seen" (default), "first_seen" or "event_count"
+	// SeenSince and SeenUntil bound the date given by DateField to
+	// [SeenSince, SeenUntil). Zero means no bound.
+	SeenSince time.Time
+	SeenUntil time.Time
+	DateField string // DateAnyEvent (default), DateFirstSeen or DateLastSeen
 	Limit     int
 	Offset    int
+}
+
+// Which date of an issue a date range applies to.
+const (
+	// DateAnyEvent: the issue had at least one event in the range.
+	DateAnyEvent = "event"
+	// DateFirstSeen: the issue appeared in the range (new problems).
+	DateFirstSeen = "first_seen"
+	// DateLastSeen: the latest event of the issue is in the range.
+	DateLastSeen = "last_seen"
+)
+
+// ValidDateField reports whether field is a supported IssueFilter.DateField value.
+func ValidDateField(field string) bool {
+	return field == "" || field == DateAnyEvent || field == DateFirstSeen || field == DateLastSeen
+}
+
+// dateCondition is the WHERE condition for the filter's date range, or "" without one.
+func (filter IssueFilter) dateCondition() (string, []any) {
+	if filter.SeenSince.IsZero() && filter.SeenUntil.IsZero() {
+		return "", nil
+	}
+
+	// For "any event": first_seen/last_seen alone would miss an issue seen
+	// before and after the range but not in it; events_by_issue_time makes the
+	// subquery a range lookup.
+	var column string
+
+	switch filter.DateField {
+	case DateFirstSeen:
+		column = "first_seen"
+	case DateLastSeen:
+		column = "last_seen"
+	default:
+		column = "events.received_at"
+	}
+
+	var (
+		conditions []string
+		args       []any
+	)
+
+	if !filter.SeenSince.IsZero() {
+		conditions, args = append(conditions, column+" >= ?"), append(args, formatTime(filter.SeenSince))
+	}
+
+	if !filter.SeenUntil.IsZero() {
+		conditions, args = append(conditions, column+" < ?"), append(args, formatTime(filter.SeenUntil))
+	}
+
+	condition := strings.Join(conditions, " AND ")
+
+	if column == "events.received_at" {
+		condition = "EXISTS (SELECT 1 FROM events WHERE events.issue_id = issues.id AND " + condition + ")"
+	}
+
+	return condition, args
 }
 
 // Issue sort orders. The id tiebreaker keeps the order stable between pages.
@@ -104,6 +169,10 @@ func (store *Store) ListIssues(ctx context.Context, filter IssueFilter) ([]Issue
 		pattern := likePattern(filter.Query)
 
 		where, args = append(where, `(title LIKE ? ESCAPE '\' OR culprit LIKE ? ESCAPE '\')`), append(args, pattern, pattern)
+	}
+
+	if condition, dateArgs := filter.dateCondition(); condition != "" {
+		where, args = append(where, condition), append(args, dateArgs...)
 	}
 
 	order, ok := issueSorts[filter.Sort]
@@ -258,9 +327,10 @@ func (store *Store) ListEvents(ctx context.Context, filter EventFilter) ([]Event
 	return events, rows.Err()
 }
 
-// GetEvent returns an event by its SDK event_id, which is unique within a project.
+// GetEvent returns an event by its SDK event_id (32 lowercase hex, see
+// sentry.NormalizeEventID), which is unique within a project.
 func (store *Store) GetEvent(ctx context.Context, projectID int, eventID string) (Event, error) {
-	return store.getEvent(ctx, `project_id = ? AND event_id = ?`, projectID, strings.ToLower(strings.ReplaceAll(eventID, "-", "")))
+	return store.getEvent(ctx, `project_id = ? AND event_id = ?`, projectID, eventID)
 }
 
 // LatestEvent returns the most recent event of an issue.
@@ -292,6 +362,7 @@ type LogFilter struct {
 	Level     string
 	Query     string // substring of the body
 	TraceID   string
+	SpanIDs   []string // any of these spans (used with TraceID for one request)
 	Since     time.Time
 	Until     time.Time
 	BeforeID  int64
@@ -320,6 +391,14 @@ func (store *Store) ListLogs(ctx context.Context, filter LogFilter) ([]LogRecord
 		where, args = append(where, "trace_id = ?"), append(args, filter.TraceID)
 	}
 
+	if len(filter.SpanIDs) > 0 {
+		where = append(where, "span_id IN ("+placeholders(len(filter.SpanIDs))+")")
+
+		for _, spanID := range filter.SpanIDs {
+			args = append(args, spanID)
+		}
+	}
+
 	if !filter.Since.IsZero() {
 		where, args = append(where, "timestamp >= ?"), append(args, formatTime(filter.Since))
 	}
@@ -332,7 +411,7 @@ func (store *Store) ListLogs(ctx context.Context, filter LogFilter) ([]LogRecord
 		where, args = append(where, "id < ?"), append(args, filter.BeforeID)
 	}
 
-	query := `SELECT id, project_id, timestamp, level, severity_number, body, trace_id, attributes FROM logs`
+	query := `SELECT id, project_id, timestamp, level, severity_number, body, trace_id, span_id, attributes FROM logs`
 
 	if len(where) > 0 {
 		query += " WHERE " + strings.Join(where, " AND ")
@@ -359,7 +438,7 @@ func (store *Store) ListLogs(ctx context.Context, filter LogFilter) ([]LogRecord
 		)
 
 		if err := rows.Scan(&record.ID, &record.ProjectID, &timestamp, &record.Level, &record.SeverityNumber,
-			&record.Body, &record.TraceID, &attributes); err != nil {
+			&record.Body, &record.TraceID, &record.SpanID, &attributes); err != nil {
 			return nil, err
 		}
 
@@ -401,13 +480,13 @@ func scanIssue(row scanner) (Issue, error) {
 	return issue, nil
 }
 
-const eventSummaryColumns = `id, project_id, issue_id, event_id, timestamp, received_at, level, environment, release, trace_id`
+const eventSummaryColumns = `id, project_id, issue_id, event_id, timestamp, received_at, level, environment, release, trace_id, span_id, parent_span_id`
 
 func scanEventSummary(row scanner, event *EventSummary, extra ...any) error {
 	var timestamp, receivedAt string
 
 	destinations := append([]any{&event.ID, &event.ProjectID, &event.IssueID, &event.EventID, &timestamp, &receivedAt,
-		&event.Level, &event.Environment, &event.Release, &event.TraceID}, extra...)
+		&event.Level, &event.Environment, &event.Release, &event.TraceID, &event.SpanID, &event.ParentSpanID}, extra...)
 
 	if err := row.Scan(destinations...); err != nil {
 		return err
@@ -428,4 +507,97 @@ func parseTime(value string) time.Time {
 func likePattern(text string) string {
 	replacer := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 	return "%" + replacer.Replace(text) + "%"
+}
+
+// placeholders returns "?, ?, ?" for an IN (...) list of count values.
+func placeholders(count int) string {
+	return strings.TrimSuffix(strings.Repeat("?, ", count), ", ")
+}
+
+// LogIssue is the issue of the error raised in the same request as a log line.
+type LogIssue struct {
+	IssueID int64
+	Title   string
+}
+
+// IssuesForLogs finds, for each log, the issue of an error from the same
+// request: an event in the same trace whose span or parent span is the log's
+// span. Logs without a match are absent from the result.
+func (store *Store) IssuesForLogs(ctx context.Context, logs []LogRecord) (map[int64]LogIssue, error) {
+	result := map[int64]LogIssue{}
+	spans := map[string]bool{}
+
+	for _, record := range logs {
+		if record.SpanID != "" {
+			spans[record.SpanID] = true
+		}
+	}
+
+	if len(spans) == 0 {
+		return result, nil
+	}
+
+	args := make([]any, 0, 2*len(spans))
+
+	for span := range spans {
+		args = append(args, span)
+	}
+
+	args = append(args, args...)
+	list := placeholders(len(spans))
+
+	// Newest events first, so a request with several errors links to the latest one.
+	rows, err := store.DB.QueryContext(ctx, `
+		SELECT events.trace_id, events.span_id, events.parent_span_id, issues.id, issues.title
+		FROM events JOIN issues ON issues.id = events.issue_id
+		WHERE events.span_id IN (`+list+`) OR events.parent_span_id IN (`+list+`)
+		ORDER BY events.id DESC`, args...)
+
+	if err != nil {
+		return nil, err
+	}
+
+	defer rows.Close()
+
+	bySpan := map[string]LogIssue{} // key: trace_id + "/" + span_id
+
+	for rows.Next() {
+		var traceID, spanID, parentSpanID string
+
+		var issue LogIssue
+
+		if err := rows.Scan(&traceID, &spanID, &parentSpanID, &issue.IssueID, &issue.Title); err != nil {
+			return nil, err
+		}
+
+		for _, span := range []string{spanID, parentSpanID} {
+			key := traceID + "/" + span
+
+			if _, seen := bySpan[key]; !seen && span != "" {
+				bySpan[key] = issue
+			}
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	for _, record := range logs {
+		if issue, ok := bySpan[record.TraceID+"/"+record.SpanID]; ok && record.SpanID != "" {
+			result[record.ID] = issue
+		}
+	}
+
+	return result, nil
+}
+
+// Page trims rows fetched with one extra (Limit = limit+1) back to limit and
+// reports whether there are more: the extra row tells that a next page exists.
+func Page[T any](rows []T, limit int) (page []T, more bool) {
+	if len(rows) > limit {
+		return rows[:limit], true
+	}
+
+	return rows, false
 }

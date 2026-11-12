@@ -19,7 +19,8 @@ func TestLoadDefaults(t *testing.T) {
 	}
 
 	if config.Port != DefaultPort || config.DataDir != DefaultDataDir || config.LogLevel != DefaultLogLevel || config.Projects != nil || config.APIToken != "" || config.AllowedIPs != nil ||
-		len(config.AllowedOrigins) != 1 || config.AllowedOrigins[0] != DefaultAllowedOrigins || config.RateLimitPerMinute != DefaultRateLimitPerMinute {
+		len(config.AllowedOrigins) != 1 || config.AllowedOrigins[0] != DefaultAllowedOrigins || config.RateLimitPerMinute != DefaultRateLimitPerMinute ||
+		config.AdminUsername != DefaultAdminUsername || config.AdminPassword != "" {
 		t.Fatalf("unexpected defaults: %+v", config)
 	}
 }
@@ -34,6 +35,8 @@ func TestLoadValues(t *testing.T) {
 		"API_TOKEN":             "0123456789abcdef0123456789abcdef",
 		"ALLOWED_IPS":           "10.0.0.0/8, 203.0.113.7,::1",
 		"TRUSTED_PROXIES":       "172.17.0.1",
+		"ADMIN_USERNAME":        "root",
+		"ADMIN_PASSWORD":        "root-password",
 		// IDs are explicit, so they don't have to follow list order or be contiguous.
 		"PROJECTS": "3:frontend:0123456789abcdef0123, 1:backend:a1b2c3d4e5f6a7b8",
 	}))
@@ -56,6 +59,10 @@ func TestLoadValues(t *testing.T) {
 
 	if config.APIToken != "0123456789abcdef0123456789abcdef" {
 		t.Fatalf("api token = %q", config.APIToken)
+	}
+
+	if config.AdminUsername != "root" || config.AdminPassword != "root-password" {
+		t.Fatalf("admin = %q / %q", config.AdminUsername, config.AdminPassword)
 	}
 
 	if fmt.Sprint(config.AllowedIPs) != "[10.0.0.0/8 203.0.113.7/32 ::1/128]" || fmt.Sprint(config.TrustedProxies) != "[172.17.0.1/32]" {
@@ -100,6 +107,7 @@ func TestLoadErrors(t *testing.T) {
 		{"only commas in origins", "ALLOWED_ORIGINS", ",,", "no origins"},
 		{"negative rate limit", "RATE_LIMIT_PER_MINUTE", "-1", "RATE_LIMIT_PER_MINUTE"},
 		{"short api token", "API_TOKEN", "secret", "at least"},
+		{"short admin password", "ADMIN_PASSWORD", "short-pass", "at least 12"},
 		{"bad allowed ip", "ALLOWED_IPS", "10.0.0.300", "invalid address"},
 		{"bad network", "TRUSTED_PROXIES", "10.0.0.0/40", "invalid network"},
 		{"duplicate key", "PROJECTS", "1:backend:a1b2c3d4e5f6a7b8,2:frontend:a1b2c3d4e5f6a7b8", "already used"},
@@ -113,5 +121,27 @@ func TestLoadErrors(t *testing.T) {
 				t.Fatalf("got error %v, want it to contain %q", err, testCase.wantErr)
 			}
 		})
+	}
+}
+
+func TestProjectsLookup(t *testing.T) {
+	projects := Projects{{ID: 3, Name: "frontend"}, {ID: 1, Name: "backend"}}
+
+	for _, idOrName := range []string{"1", "backend"} {
+		if project, ok := projects.Find(idOrName); !ok || project.ID != 1 {
+			t.Errorf("Find(%q) = %+v, %v", idOrName, project, ok)
+		}
+	}
+
+	if _, ok := projects.Find("billing"); ok {
+		t.Error("Find of an unknown project must fail")
+	}
+
+	if project, ok := projects.ByID(3); !ok || project.Name != "frontend" {
+		t.Errorf("ByID(3) = %+v, %v", project, ok)
+	}
+
+	if _, ok := projects.ByID(2); ok {
+		t.Error("ByID of an unknown project must fail")
 	}
 }

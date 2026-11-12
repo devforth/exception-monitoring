@@ -64,6 +64,39 @@ CREATE TABLE logs (
 CREATE INDEX logs_by_project_time ON logs (project_id, timestamp DESC);
 CREATE INDEX logs_by_trace ON logs (trace_id) WHERE trace_id != '';
 `},
+	{2, `
+-- UI login sessions. Only a SHA-256 hash of the cookie token is stored, so a
+-- copy of the database file cannot be used to log in.
+CREATE TABLE sessions (
+	token_hash TEXT PRIMARY KEY,
+	created_at TEXT NOT NULL,
+	expires_at TEXT NOT NULL
+);
+CREATE INDEX sessions_by_expiry ON sessions (expires_at);
+`},
+	{3, `
+-- Ties each session to the admin credentials it was created with, so changing
+-- ADMIN_USERNAME or ADMIN_PASSWORD logs everyone out. Sessions created before
+-- this column existed get '' and stop working.
+ALTER TABLE sessions ADD COLUMN credentials TEXT NOT NULL DEFAULT '';
+`},
+	{4, `
+-- Spans tie logs to the request an error happened in. The trace alone is not
+-- enough: a browser keeps one trace for the whole page session, so every
+-- request from an open tab shares it. Existing rows are filled from the JSON.
+ALTER TABLE events ADD COLUMN span_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE events ADD COLUMN parent_span_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE logs ADD COLUMN span_id TEXT NOT NULL DEFAULT '';
+
+UPDATE events SET
+	span_id = COALESCE(json_extract(payload, '$.contexts.trace.span_id'), ''),
+	parent_span_id = COALESCE(json_extract(payload, '$.contexts.trace.parent_span_id'), '');
+UPDATE logs SET span_id = COALESCE(json_extract(attributes, '$."sentry.trace.parent_span_id".value'), '');
+
+CREATE INDEX events_by_span ON events (span_id) WHERE span_id != '';
+CREATE INDEX events_by_parent_span ON events (parent_span_id) WHERE parent_span_id != '';
+CREATE INDEX logs_by_span ON logs (span_id) WHERE span_id != '';
+`},
 }
 
 func migrate(ctx context.Context, db *sql.DB, migrationList []migration) error {

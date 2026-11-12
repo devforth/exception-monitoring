@@ -7,12 +7,13 @@
 //     "{{ default }}" inside it expands to the default components.
 //  2. Otherwise, for exceptions: each exception in the chain contributes its
 //     type and its stack frames (only in-app frames if there are any). A frame
-//     is the file (or module) plus the function, without line numbers, so a
-//     deploy that shifts code by a few lines does not create a new issue.
-//     Anonymous functions (e.g. Express route handlers) use the source line
-//     instead of the name, otherwise all of them in one file would merge.
-//     If no frame has source code (browser SDKs send none), the stack says
-//     little, so the normalized error text is added too.
+//     is the file (or module), the function and the source line of the call
+//     (context_line), without line numbers: a deploy that shifts code by a few
+//     lines does not create a new issue, while two throws in one function, or
+//     two functions with the same name (JS names `handler: () => {}` after the
+//     property), stay apart. Anonymous functions without source fall back to
+//     the line number. If no frame has source code (browser SDKs send none),
+//     the stack says little, so the normalized error text is added too.
 //  3. Events without a usable stack (messages, exceptions without frames) are
 //     grouped by their text with variable parts (numbers, IDs, hashes)
 //     replaced by placeholders, so "order 890" and "order 891" match.
@@ -123,25 +124,44 @@ func groupingFrames(stacktrace *sentry.Stacktrace) []sentry.Frame {
 	return stacktrace.Frames
 }
 
-func frameKey(frame sentry.Frame) string {
-	location := frame.Module
-
-	if location == "" {
-		location = normalizeFilename(frame.Filename)
+// frameLocation is the module, or the file if there is no module. Both are
+// normalized: SDKs build the module from the file path, so it carries the same
+// changing parts (e.g. tsx watch adds "?<timestamp>" to the path on every restart).
+func frameLocation(frame sentry.Frame) string {
+	if frame.Module != "" {
+		return normalizeFilename(frame.Module)
 	}
 
-	if isAnonymous(frame.Function) {
-		// The source line identifies an anonymous function. Without source code,
-		// fall back to the line number: less stable across deploys, but better
-		// than merging every anonymous function in the file.
-		if line := strings.TrimSpace(frame.ContextLine); line != "" {
-			return location + " " + line
+	return normalizeFilename(frame.Filename)
+}
+
+// maxSourceLineLength keeps minified one-line bundles from bloating the components.
+const maxSourceLineLength = 200
+
+func frameKey(frame sentry.Frame) string {
+	key := frameLocation(frame)
+
+	if !isAnonymous(frame.Function) {
+		key += " " + frame.Function
+	}
+
+	// Whitespace-only edits (indentation) must not split a group.
+	line := strings.Join(strings.Fields(frame.ContextLine), " ")
+
+	switch {
+	case line != "":
+		if len(line) > maxSourceLineLength {
+			line = line[:maxSourceLineLength]
 		}
 
-		return location + " line " + strconv.Itoa(frame.Lineno)
+		return key + " | " + line
+	case isAnonymous(frame.Function):
+		// No name and no source: the line number is less stable across deploys,
+		// but better than merging every anonymous function in the file.
+		return key + " line " + strconv.Itoa(frame.Lineno)
+	default:
+		return key
 	}
-
-	return location + " " + frame.Function
 }
 
 func isAnonymous(function string) bool {
@@ -211,11 +231,7 @@ func Culprit(event *sentry.Event) string {
 	}
 
 	frame := frames[len(frames)-1]
-	location := frame.Module
-
-	if location == "" {
-		location = normalizeFilename(frame.Filename)
-	}
+	location := frameLocation(frame)
 
 	if frame.Function == "" {
 		return location

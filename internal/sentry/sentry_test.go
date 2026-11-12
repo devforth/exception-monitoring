@@ -1,31 +1,16 @@
 package sentry
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/devforth/exception-monitoring/internal/fixtures"
 )
-
-// Real SDK captures from docs/sentry-protocol.md.
-const fixturesDir = "../../testdata/envelopes"
-
-func readFixture(t *testing.T, name string) []byte {
-	t.Helper()
-
-	data, err := os.ReadFile(filepath.Join(fixturesDir, name+".envelope"))
-
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	return data
-}
 
 func parseFixture(t *testing.T, name string) *Envelope {
 	t.Helper()
-	envelope, err := ParseEnvelope(readFixture(t, name))
+	envelope, err := ParseEnvelope(fixtures.Envelope(t, name))
 
 	if err != nil {
 		t.Fatalf("%s: %v", name, err)
@@ -52,16 +37,9 @@ func firstEvent(t *testing.T, name string) *Event {
 }
 
 func TestAllFixturesParse(t *testing.T) {
-	files, err := filepath.Glob(filepath.Join(fixturesDir, "*.envelope"))
-
-	if err != nil || len(files) == 0 {
-		t.Fatalf("no fixtures found: %v", err)
-	}
-
-	for _, file := range files {
-		name := strings.TrimSuffix(filepath.Base(file), ".envelope")
-		t.Run(name, func(t *testing.T) {
-			envelope := parseFixture(t, name)
+	for _, fixture := range fixtures.All(t) {
+		t.Run(fixture.Name, func(t *testing.T) {
+			envelope := parseFixture(t, fixture.Name)
 
 			if len(envelope.Items) == 0 {
 				t.Fatal("no items")
@@ -108,7 +86,7 @@ func TestNodeUnhandledEvent(t *testing.T) {
 		t.Fatalf("timestamp = %v", event.Timestamp)
 	}
 
-	if event.TraceID() == "" {
+	if event.Trace().TraceID == "" || event.Trace().SpanID == "" {
 		t.Fatal("no trace_id in contexts")
 	}
 }
@@ -186,7 +164,8 @@ func TestLogs(t *testing.T) {
 	}
 
 	for _, record := range logs {
-		if record.Body == "" || record.Level == "" || record.Timestamp.IsZero() {
+		// SpanID comes from the sentry.trace.parent_span_id attribute in SDK 11.
+		if record.Body == "" || record.Level == "" || record.Timestamp.IsZero() || record.SpanID == "" {
 			t.Fatalf("incomplete log: %+v", record)
 		}
 	}

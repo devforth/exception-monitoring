@@ -3,18 +3,23 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/netip"
 	"time"
 
 	"github.com/devforth/exception-monitoring/internal/access"
+	"github.com/devforth/exception-monitoring/internal/httpjson"
 )
 
 // Pinger reports whether the storage is reachable.
 type Pinger interface {
 	Ping(ctx context.Context) error
+}
+
+// Routes is a group of routes (API, UI) registered with a protection wrapper.
+type Routes interface {
+	Register(router *http.ServeMux, protect func(http.Handler) http.Handler)
 }
 
 // Options are the server's dependencies.
@@ -24,9 +29,9 @@ type Options struct {
 	// Ingest handles SDK envelopes (see package ingest). Open to everyone.
 	Ingest http.Handler
 	// API adds the admin REST API routes, wrapped with the given protection.
-	API interface {
-		Register(router *http.ServeMux, protect func(http.Handler) http.Handler)
-	}
+	API Routes
+	// UI adds the web interface; it handles its own login, the server adds the IP allowlist.
+	UI             Routes
 	APIToken       string
 	AllowedIPs     []netip.Prefix
 	TrustedProxies []netip.Prefix
@@ -52,7 +57,15 @@ func (server *Server) Handler() http.Handler {
 		server.API.Register(router, server.protectAPI)
 	}
 
+	if server.UI != nil {
+		server.UI.Register(router, server.protectUI)
+	}
+
 	return server.logRequests(router)
+}
+
+func (server *Server) protectUI(next http.Handler) http.Handler {
+	return access.RequireAllowedIP(server.AllowedIPs, server.TrustedProxies, next)
 }
 
 // protectAPI: the IP check runs first, so clients outside the allowlist
@@ -68,18 +81,12 @@ func (server *Server) health(w http.ResponseWriter, r *http.Request) {
 
 	if err := server.Database.Ping(ctx); err != nil {
 		server.Logger.Error("health check: database unavailable", "err", err)
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "error", "error": "database unavailable"})
+		httpjson.Write(w, http.StatusServiceUnavailable, map[string]string{"status": "error", "error": "database unavailable"})
 
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
-
-func writeJSON(w http.ResponseWriter, status int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
+	httpjson.Write(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 type statusRecorder struct {

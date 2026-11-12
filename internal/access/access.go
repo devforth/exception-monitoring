@@ -5,11 +5,12 @@ package access
 
 import (
 	"crypto/subtle"
-	"encoding/json"
 	"net"
 	"net/http"
 	"net/netip"
 	"strings"
+
+	"github.com/devforth/exception-monitoring/internal/httpjson"
 )
 
 // ClientIP returns the address of the client that made the request.
@@ -62,6 +63,12 @@ func remoteAddr(r *http.Request) netip.Addr {
 	return address.Unmap()
 }
 
+// FromTrustedProxy reports whether the request came directly from a trusted
+// reverse proxy, so its X-Forwarded-* headers can be believed.
+func FromTrustedProxy(r *http.Request, trustedProxies []netip.Prefix) bool {
+	return contains(trustedProxies, remoteAddr(r))
+}
+
 func contains(networks []netip.Prefix, address netip.Addr) bool {
 	if !address.IsValid() {
 		return false
@@ -84,7 +91,7 @@ func RequireAllowedIP(allowedIPs, trustedProxies []netip.Prefix, next http.Handl
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !contains(allowedIPs, ClientIP(r, trustedProxies)) {
-			writeError(w, http.StatusForbidden, "access from this address is not allowed")
+			httpjson.Error(w, http.StatusForbidden, "access from this address is not allowed")
 			return
 		}
 
@@ -98,7 +105,7 @@ func RequireAllowedIP(allowedIPs, trustedProxies []netip.Prefix, next http.Handl
 func RequireToken(token string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if token == "" {
-			writeError(w, http.StatusUnauthorized, "API is disabled: set API_TOKEN")
+			httpjson.Error(w, http.StatusUnauthorized, "API is disabled: set API_TOKEN")
 			return
 		}
 
@@ -109,17 +116,11 @@ func RequireToken(token string, next http.Handler) http.Handler {
 		if len(header) < len(prefix) || !strings.EqualFold(header[:len(prefix)], prefix) ||
 			subtle.ConstantTimeCompare([]byte(strings.TrimSpace(header[len(prefix):])), []byte(token)) != 1 {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="exception-monitoring"`)
-			writeError(w, http.StatusUnauthorized, "invalid or missing API token")
+			httpjson.Error(w, http.StatusUnauthorized, "invalid or missing API token")
 
 			return
 		}
 
 		next.ServeHTTP(w, r)
 	})
-}
-
-func writeError(w http.ResponseWriter, status int, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
