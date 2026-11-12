@@ -23,9 +23,10 @@ func (handler *Handler) listProjects(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	projects := make([]projectResponse, 0, len(handler.projects))
+	list := handler.projects.List()
+	projects := make([]projectResponse, 0, len(list))
 
-	for _, project := range handler.projects {
+	for _, project := range list {
 		projects = append(projects, projectResponse{ID: project.ID, Name: project.Name, UnresolvedIssues: counts[project.ID]})
 	}
 
@@ -82,7 +83,7 @@ func (handler *Handler) issueFilter(r *http.Request) (store.IssueFilter, error) 
 		err    error
 	)
 
-	if filter.ProjectID, err = handler.projectFromQuery(r); err != nil {
+	if filter.ProjectIDs, err = handler.projectsFromQuery(r); err != nil {
 		return filter, err
 	}
 
@@ -96,7 +97,7 @@ func (handler *Handler) issueFilter(r *http.Request) (store.IssueFilter, error) 
 		return filter, invalid("status must be unresolved, resolved, ignored or all")
 	}
 
-	filter.Level = query.Get("level")
+	filter.Levels = levelsFromQuery(query)
 	filter.Query = query.Get("query")
 	filter.Sort = query.Get("sort")
 
@@ -309,11 +310,11 @@ func (handler *Handler) listLogs(w http.ResponseWriter, r *http.Request) {
 
 func (handler *Handler) logFilter(r *http.Request) (store.LogFilter, error) {
 	query := r.URL.Query()
-	filter := store.LogFilter{Level: query.Get("level"), Query: query.Get("query"), TraceID: query.Get("trace_id")}
+	filter := store.LogFilter{Levels: levelsFromQuery(query), Query: query.Get("query"), TraceID: query.Get("trace_id")}
 
 	var err error
 
-	if filter.ProjectID, err = handler.projectFromQuery(r); err != nil {
+	if filter.ProjectIDs, err = handler.projectsFromQuery(r); err != nil {
 		return filter, err
 	}
 

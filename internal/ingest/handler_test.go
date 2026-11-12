@@ -77,7 +77,7 @@ type testServer struct {
 
 func newTestServer(settings *config.Config) *testServer {
 	sink := &fakeSink{}
-	handler := New(slog.New(slog.NewTextHandler(io.Discard, nil)), settings, sink)
+	handler := New(slog.New(slog.NewTextHandler(io.Discard, nil)), settings, settings.Projects, sink)
 	router := http.NewServeMux()
 	router.Handle("/api/{projectID}/envelope/{$}", handler)
 

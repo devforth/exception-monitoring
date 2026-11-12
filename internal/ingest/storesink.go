@@ -25,6 +25,12 @@ type StoreSink struct {
 	Notifier Notifier
 	// PublicURL is the UI address for links in notifications; empty means no link.
 	PublicURL string
+	// Retention gives RETENTION_LOGS_PER_MESSAGE (a project may override it):
+	// logs of a repeated message beyond it are replaced as new ones arrive.
+	Retention config.Retention
+	// Recording gives the levels stored (a project may set its own); events
+	// and logs of other levels are dropped. The zero value stores every level.
+	Recording config.Recording
 }
 
 // Notifier queues alerts without blocking ingest (see package notify).
@@ -41,6 +47,15 @@ func (sink StoreSink) now() time.Time {
 }
 
 func (sink StoreSink) StoreEvent(ctx context.Context, project config.Project, event *sentry.Event) error {
+	// Stored under its canonical name: filters and notifications know only those.
+	event.Level = config.EventLevel(event.Level)
+
+	if !config.Records(sink.Recording.EventLevelsFor(project.EventLevels), event.Level) {
+		sink.Logger.Debug("event of a level not recorded dropped", "project", project.Name, "level", event.Level, "event_id", event.EventID)
+
+		return nil
+	}
+
 	trace := event.Trace()
 
 	receivedAt := sink.now()
@@ -60,6 +75,7 @@ func (sink StoreSink) StoreEvent(ctx context.Context, project config.Project, ev
 		Timestamp:    event.Timestamp.Time,
 		ReceivedAt:   receivedAt,
 		Payload:      event.Raw,
+		KeepEvents:   sink.Retention.For(project.Retention).EventsPerIssue,
 	})
 
 	if err != nil {
@@ -96,25 +112,33 @@ func (sink StoreSink) notify(kind notify.Kind, project config.Project, issueID i
 	}
 
 	sink.Notifier.Notify(notify.Notification{
-		Kind:        kind,
-		ProjectID:   project.ID,
-		Project:     project.Name,
-		IssueID:     issueID,
-		IssueURL:    issueURL,
-		Title:       event.Title(),
-		Culprit:     grouping.Culprit(event),
-		Level:       event.Level,
-		Environment: event.Environment,
-		Release:     event.Release,
-		Time:        receivedAt,
-		Event:       event,
+		Kind:         kind,
+		ProjectID:    project.ID,
+		Project:      project.Name,
+		ProjectColor: project.Color,
+		IssueID:      issueID,
+		IssueURL:     issueURL,
+		Title:        event.Title(),
+		Culprit:      grouping.Culprit(event),
+		Level:        event.Level,
+		Environment:  event.Environment,
+		Release:      event.Release,
+		Time:         receivedAt,
+		Event:        event,
 	})
 }
 
 func (sink StoreSink) StoreLogs(ctx context.Context, project config.Project, logs []sentry.Log) error {
 	records := make([]store.NewLog, 0, len(logs))
+	levels := sink.Recording.LogLevelsFor(project.LogLevels)
 
 	for _, record := range logs {
+		level := config.LogLevel(record.Level)
+
+		if !config.Records(levels, level) {
+			continue
+		}
+
 		attributes, err := json.Marshal(record.Attributes)
 
 		if err != nil {
@@ -124,16 +148,23 @@ func (sink StoreSink) StoreLogs(ctx context.Context, project config.Project, log
 		records = append(records, store.NewLog{
 			ProjectID:      project.ID,
 			Timestamp:      record.Timestamp.Time,
-			Level:          record.Level,
+			Level:          level,
 			SeverityNumber: record.SeverityNumber,
 			Body:           record.Body,
 			TraceID:        record.TraceID,
 			SpanID:         record.SpanID,
 			Attributes:     attributes,
+			Fingerprint:    grouping.LogFingerprint(record.Body),
 		})
 	}
 
-	if err := sink.Store.SaveLogs(ctx, records); err != nil {
+	if len(records) == 0 {
+		return nil
+	}
+
+	keep := sink.Retention.For(project.Retention).LogsPerMessage
+
+	if err := sink.Store.SaveLogs(ctx, records, keep); err != nil {
 		return err
 	}
 

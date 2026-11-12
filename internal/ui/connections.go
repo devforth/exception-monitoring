@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -110,7 +111,8 @@ type connectionRow struct {
 	Name        string
 	TypeLabel   string
 	Destination string
-	Projects    string
+	AllProjects bool
+	Projects    []string // names, shown with their colors
 	Levels      string
 	Status      string
 	StatusClass string // active, inactive or awaiting
@@ -176,16 +178,10 @@ func (handler *Handler) connectionRow(connection store.Connection) connectionRow
 		row.Destination = "incoming webhook"
 	}
 
-	if connection.AllProjects {
-		row.Projects = "All projects"
-	} else {
-		var names []string
+	row.AllProjects = connection.AllProjects
 
-		for _, projectID := range connection.ProjectIDs {
-			names = append(names, handler.projectName(projectID))
-		}
-
-		row.Projects = strings.Join(names, ", ")
+	for _, projectID := range connection.ProjectIDs {
+		row.Projects = append(row.Projects, handler.projectName(projectID))
 	}
 
 	switch {
@@ -227,7 +223,7 @@ func (handler *Handler) newConnectionView(connection store.Connection) connectio
 		})
 	}
 
-	for _, project := range handler.projects {
+	for _, project := range handler.registry.List() {
 		view.Projects = append(view.Projects, choice{
 			Value: strconv.Itoa(project.ID), Label: project.Name, Checked: slices.Contains(connection.ProjectIDs, project.ID),
 		})
@@ -246,6 +242,23 @@ func (handler *Handler) newConnectionView(connection store.Connection) connectio
 	}
 
 	return view
+}
+
+// NamePlaceholder is what an empty name becomes for the shown type (app.js
+// updates it as the type or the address changes).
+func (view connectionView) NamePlaceholder() string {
+	switch view.Type {
+	case config.ChannelTelegram:
+		return "the name of the chat, from Telegram"
+	case config.ChannelSlack:
+		return "Slack"
+	}
+
+	if local := emailLocalPart(view.Email.Address); local != "" {
+		return local
+	}
+
+	return "team"
 }
 
 // RestLocked tells the template to disable everything after the address
@@ -320,10 +333,11 @@ func (handler *Handler) connectionPage(w http.ResponseWriter, r *http.Request) {
 func (handler *Handler) readConnectionForm(r *http.Request, connection *store.Connection) map[string]string {
 	problems := map[string]string{}
 
+	// An empty name is filled in on save (see defaultConnectionName).
 	connection.Name = strings.TrimSpace(r.PostFormValue("name"))
 
-	if connection.Name == "" || len([]rune(connection.Name)) > 100 {
-		problems["name"] = "Enter a name of up to 100 characters."
+	if len([]rune(connection.Name)) > maxConnectionName {
+		problems["name"] = fmt.Sprintf("Enter a name of up to %d characters, or leave it empty.", maxConnectionName)
 	}
 
 	connection.AllProjects = r.PostFormValue("all_projects") == "on"
@@ -333,7 +347,7 @@ func (handler *Handler) readConnectionForm(r *http.Request, connection *store.Co
 		for _, value := range r.PostForm["project"] {
 			projectID, err := strconv.Atoi(value)
 
-			if _, ok := handler.projects.ByID(projectID); err == nil && ok {
+			if _, ok := handler.registry.List().ByID(projectID); err == nil && ok {
 				connection.ProjectIDs = append(connection.ProjectIDs, projectID)
 			}
 		}
@@ -362,6 +376,49 @@ func (handler *Handler) readConnectionForm(r *http.Request, connection *store.Co
 	}
 
 	return problems
+}
+
+const maxConnectionName = 100
+
+// emailLocalPart is the part of an address before "@": the default name of
+// an email connection.
+func emailLocalPart(address string) string {
+	local, _, _ := strings.Cut(address, "@")
+
+	return local
+}
+
+// defaultConnectionName names a connection saved without a name: an email
+// address by its part before "@", a Telegram connection by its chat (asked
+// from Telegram), a Slack webhook "Slack" (a webhook does not tell its
+// channel). secret is the encrypted chat secret.
+func (handler *Handler) defaultConnectionName(ctx context.Context, connection store.Connection, secret string) string {
+	switch connection.Type {
+	case config.ChannelEmail:
+		return truncateRunes(emailLocalPart(connection.Address), maxConnectionName)
+	case config.ChannelTelegram:
+		var tokens notify.TelegramSecret
+
+		if handler.factory.DecryptSecret(secret, &tokens) != nil {
+			return "Telegram"
+		}
+
+		lookupCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+
+		defer cancel()
+
+		title, err := handler.factory.TelegramChatTitle(lookupCtx, tokens)
+
+		if err != nil || strings.TrimSpace(title) == "" {
+			handler.logger.Warn("telegram chat name not available", "err", err)
+
+			return "Telegram " + tokens.ChatID
+		}
+
+		return truncateRunes(strings.TrimSpace(title), maxConnectionName)
+	default:
+		return "Slack"
+	}
 }
 
 // readChatSecret reads the tokens of a chat. existing is the stored secret:
@@ -523,6 +580,10 @@ func (handler *Handler) createConnection(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	if connection.Name == "" {
+		connection.Name = handler.defaultConnectionName(r.Context(), connection, chatSecret)
+	}
+
 	if chatSecret != "" {
 		// Chats need no confirmation: whoever has the token owns the chat.
 		destinationID, err := handler.store.CreateDestination(r.Context(), store.Destination{Type: connection.Type, Secret: chatSecret, Verified: true, VerifiedAt: handler.now()}, handler.now())
@@ -578,6 +639,10 @@ func (handler *Handler) updateConnection(w http.ResponseWriter, r *http.Request)
 		handler.renderConnectionForm(w, r, connection, problems, "", existing)
 
 		return
+	}
+
+	if connection.Name == "" {
+		connection.Name = handler.defaultConnectionName(r.Context(), connection, cmp.Or(chatSecret, connection.Secret))
 	}
 
 	if chatSecret != "" && chatSecret != connection.Secret {

@@ -31,8 +31,9 @@ type Factory struct {
 	Box  *secret.Box // nil without SECRET_KEY: chat connections cannot be used
 	// HTTPClient is used by chat channels; nil means http.DefaultClient.
 	HTTPClient *http.Client
-	// telegramURL replaces the Telegram API in tests.
-	telegramURL string
+	// TelegramURL replaces the Telegram API (tests point it to a fake
+	// server); empty means https://api.telegram.org.
+	TelegramURL string
 }
 
 // ErrNoSecretKey means a chat connection exists but SECRET_KEY is not set.
@@ -68,6 +69,16 @@ func (factory Factory) DecryptSecret(encrypted string, target any) error {
 	return json.Unmarshal(plaintext, target)
 }
 
+func (factory Factory) telegram(tokens TelegramSecret) Telegram {
+	return Telegram{BotToken: tokens.BotToken, ChatID: tokens.ChatID, Client: factory.HTTPClient, apiURL: factory.TelegramURL}
+}
+
+// TelegramChatTitle asks Telegram for the name of the chat of these tokens,
+// to name a connection the user left unnamed.
+func (factory Factory) TelegramChatTitle(ctx context.Context, tokens TelegramSecret) (string, error) {
+	return factory.telegram(tokens).ChatTitle(ctx)
+}
+
 // Channel builds the channel that delivers to a connection.
 func (factory Factory) Channel(connection store.Connection) (Channel, error) {
 	switch connection.Type {
@@ -84,7 +95,7 @@ func (factory Factory) Channel(connection store.Connection) (Channel, error) {
 			return nil, err
 		}
 
-		return Telegram{BotToken: tokens.BotToken, ChatID: tokens.ChatID, Client: factory.HTTPClient, apiURL: factory.telegramURL}, nil
+		return factory.telegram(tokens), nil
 	case config.ChannelSlack:
 		var tokens SlackSecret
 
@@ -127,15 +138,5 @@ func matches(connection store.Connection, notification Notification) bool {
 		return false
 	}
 
-	return slices.Contains(connection.Levels, normalizeLevel(notification.Level))
-}
-
-// normalizeLevel maps levels SDKs may send beyond config.Levels ("log",
-// "critical") to "error": better one message too many than a missed crash.
-func normalizeLevel(level string) string {
-	if slices.Contains(config.Levels, level) {
-		return level
-	}
-
-	return "error"
+	return slices.Contains(connection.Levels, config.EventLevel(notification.Level))
 }

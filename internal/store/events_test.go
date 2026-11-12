@@ -222,7 +222,7 @@ func TestSaveLogs(t *testing.T) {
 	err := database.SaveLogs(context.Background(), []NewLog{
 		{ProjectID: 1, Timestamp: baseTime, Level: "info", Body: "started", TraceID: "abc", Attributes: []byte(`{"k":{"type":"string","value":"v"}}`)},
 		{ProjectID: 1, Timestamp: baseTime, Level: "warn", Body: "slow"},
-	})
+	}, 0)
 
 	if err != nil {
 		t.Fatal(err)
@@ -368,5 +368,95 @@ func TestIssueDateFields(t *testing.T) {
 				t.Fatalf("got issues %v, want %v", got, testCase.wantIssue)
 			}
 		})
+	}
+}
+
+// A message logged in a loop keeps only its newest copies: new logs replace
+// the oldest ones as they arrive. Other messages and projects are untouched.
+func TestSaveLogsKeepsNewestPerMessage(t *testing.T) {
+	database := openTestStore(t)
+	ctx := context.Background()
+
+	for batch := range 3 {
+		var logs []NewLog
+
+		for index := range 4 {
+			number := batch*4 + index
+			logs = append(logs, NewLog{ProjectID: 1, Timestamp: baseTime, Level: "info", Body: fmt.Sprintf("retry %d", number), Fingerprint: "loop"})
+		}
+
+		logs = append(logs, NewLog{ProjectID: 2, Timestamp: baseTime, Level: "info", Body: "retry", Fingerprint: "loop"})
+
+		if err := database.SaveLogs(ctx, logs, 5); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := database.SaveLogs(ctx, []NewLog{{ProjectID: 1, Timestamp: baseTime, Level: "info", Body: "other"}}, 5); err != nil {
+		t.Fatal(err)
+	}
+
+	var kept []string
+
+	rows, err := database.DB.Query(`SELECT body FROM logs WHERE project_id = 1 AND fingerprint = 'loop' ORDER BY id`)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer rows.Close()
+
+	for rows.Next() {
+		var body string
+
+		_ = rows.Scan(&body)
+		kept = append(kept, body)
+	}
+
+	if fmt.Sprint(kept) != "[retry 7 retry 8 retry 9 retry 10 retry 11]" {
+		t.Fatalf("kept %v, want the newest 5", kept)
+	}
+
+	var others int
+
+	_ = database.DB.QueryRow(`SELECT COUNT(*) FROM logs WHERE project_id = 2 OR body = 'other'`).Scan(&others)
+
+	if others != 4 {
+		t.Fatalf("other project and message: %d logs, want 4", others)
+	}
+}
+
+// An issue keeps only its newest KeepEvents events, trimmed as each is saved;
+// its event count still counts them all.
+func TestSaveEventKeepsNewestPerIssue(t *testing.T) {
+	database := openTestStore(t)
+
+	var issueID int64
+
+	for index := range 5 {
+		event := testEvent(fmt.Sprintf("e%d", index), "fp-busy", baseTime.Add(time.Duration(index)*time.Minute))
+		event.KeepEvents = 3
+		issueID = save(t, database, event).IssueID
+	}
+
+	var kept []string
+
+	rows, err := database.DB.Query(`SELECT event_id FROM events WHERE issue_id = ? ORDER BY received_at`, issueID)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer rows.Close()
+
+	for rows.Next() {
+		var eventID string
+
+		_ = rows.Scan(&eventID)
+		kept = append(kept, eventID)
+	}
+
+	if issue, _ := database.GetIssue(context.Background(), issueID); fmt.Sprint(kept) != "[e2 e3 e4]" || issue.EventCount != 5 {
+		t.Fatalf("kept %v, event count %d", kept, issue.EventCount)
 	}
 }

@@ -61,11 +61,11 @@ type LogRecord struct {
 
 // IssueFilter selects issues. Zero values mean "any".
 type IssueFilter struct {
-	ProjectID int
-	Status    string
-	Level     string
-	Query     string // substring of the title or culprit
-	Sort      string // "last_seen" (default), "first_seen" or "event_count"
+	ProjectIDs []int    // any of these projects (the UI filter takes several)
+	Levels     []string // any of these levels
+	Status     string
+	Query      string // substring of the title or culprit
+	Sort       string // "last_seen" (default), "first_seen" or "event_count"
 	// SeenSince and SeenUntil bound the date given by DateField to
 	// [SeenSince, SeenUntil). Zero means no bound.
 	SeenSince time.Time
@@ -145,24 +145,24 @@ func ValidIssueSort(sort string) bool {
 	return sort == "" || ok
 }
 
-// ListIssues returns issues matching the filter. Limit+1 rows are fetched by
-// callers that need to know whether there is a next page.
-func (store *Store) ListIssues(ctx context.Context, filter IssueFilter) ([]Issue, error) {
+// where is the WHERE clause of the filter (with a leading space, or empty)
+// and its arguments; ListIssues and CountIssues share it.
+func (filter IssueFilter) where() (string, []any) {
 	var (
 		where []string
 		args  []any
 	)
 
-	if filter.ProjectID != 0 {
-		where, args = append(where, "project_id = ?"), append(args, filter.ProjectID)
+	if condition, projectArgs := inCondition("project_id", filter.ProjectIDs); condition != "" {
+		where, args = append(where, condition), append(args, projectArgs...)
 	}
 
 	if filter.Status != "" {
 		where, args = append(where, "status = ?"), append(args, filter.Status)
 	}
 
-	if filter.Level != "" {
-		where, args = append(where, "level = ?"), append(args, filter.Level)
+	if condition, levelArgs := inCondition("level", filter.Levels); condition != "" {
+		where, args = append(where, condition), append(args, levelArgs...)
 	}
 
 	if filter.Query != "" {
@@ -175,17 +175,36 @@ func (store *Store) ListIssues(ctx context.Context, filter IssueFilter) ([]Issue
 		where, args = append(where, condition), append(args, dateArgs...)
 	}
 
+	if len(where) == 0 {
+		return "", args
+	}
+
+	return " WHERE " + strings.Join(where, " AND "), args
+}
+
+// CountIssues counts the issues matching the filter (Limit and Offset are ignored).
+func (store *Store) CountIssues(ctx context.Context, filter IssueFilter) (int, error) {
+	where, args := filter.where()
+
+	var count int
+
+	err := store.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM issues`+where, args...).Scan(&count)
+
+	return count, err
+}
+
+// ListIssues returns issues matching the filter. Limit+1 rows are fetched by
+// callers that need to know whether there is a next page.
+func (store *Store) ListIssues(ctx context.Context, filter IssueFilter) ([]Issue, error) {
+	where, args := filter.where()
+
 	order, ok := issueSorts[filter.Sort]
 
 	if !ok {
 		order = issueSorts["last_seen"]
 	}
 
-	query := `SELECT id, project_id, title, culprit, level, status, event_count, first_seen, last_seen, resolved_at FROM issues`
-
-	if len(where) > 0 {
-		query += " WHERE " + strings.Join(where, " AND ")
-	}
+	query := `SELECT id, project_id, title, culprit, level, status, event_count, first_seen, last_seen, resolved_at FROM issues` + where
 
 	query += " ORDER BY " + order + " LIMIT ? OFFSET ?"
 
@@ -358,29 +377,32 @@ func (store *Store) getEvent(ctx context.Context, where string, args ...any) (Ev
 
 // LogFilter selects log records, newest first, with keyset pagination like events.
 type LogFilter struct {
-	ProjectID int
-	Level     string
-	Query     string // substring of the body
-	TraceID   string
-	SpanIDs   []string // any of these spans (used with TraceID for one request)
-	Since     time.Time
-	Until     time.Time
-	BeforeID  int64
-	Limit     int
+	ProjectIDs []int    // any of these projects
+	Levels     []string // any of these levels
+	Query      string   // substring of the body
+	TraceID    string
+	SpanIDs    []string // any of these spans (used with TraceID for one request)
+	Since      time.Time
+	Until      time.Time
+	BeforeID   int64
+	Limit      int
+	Offset     int // page offset for the UI; the API uses BeforeID
 }
 
-func (store *Store) ListLogs(ctx context.Context, filter LogFilter) ([]LogRecord, error) {
+// where is the WHERE clause of the filter and its arguments, shared by
+// ListLogs and CountLogs.
+func (filter LogFilter) where() (string, []any) {
 	var (
 		where []string
 		args  []any
 	)
 
-	if filter.ProjectID != 0 {
-		where, args = append(where, "project_id = ?"), append(args, filter.ProjectID)
+	if condition, projectArgs := inCondition("project_id", filter.ProjectIDs); condition != "" {
+		where, args = append(where, condition), append(args, projectArgs...)
 	}
 
-	if filter.Level != "" {
-		where, args = append(where, "level = ?"), append(args, filter.Level)
+	if condition, levelArgs := inCondition("level", filter.Levels); condition != "" {
+		where, args = append(where, condition), append(args, levelArgs...)
 	}
 
 	if filter.Query != "" {
@@ -391,12 +413,8 @@ func (store *Store) ListLogs(ctx context.Context, filter LogFilter) ([]LogRecord
 		where, args = append(where, "trace_id = ?"), append(args, filter.TraceID)
 	}
 
-	if len(filter.SpanIDs) > 0 {
-		where = append(where, "span_id IN ("+placeholders(len(filter.SpanIDs))+")")
-
-		for _, spanID := range filter.SpanIDs {
-			args = append(args, spanID)
-		}
+	if condition, spanArgs := inCondition("span_id", filter.SpanIDs); condition != "" {
+		where, args = append(where, condition), append(args, spanArgs...)
 	}
 
 	if !filter.Since.IsZero() {
@@ -411,15 +429,31 @@ func (store *Store) ListLogs(ctx context.Context, filter LogFilter) ([]LogRecord
 		where, args = append(where, "id < ?"), append(args, filter.BeforeID)
 	}
 
-	query := `SELECT id, project_id, timestamp, level, severity_number, body, trace_id, span_id, attributes FROM logs`
-
-	if len(where) > 0 {
-		query += " WHERE " + strings.Join(where, " AND ")
+	if len(where) == 0 {
+		return "", args
 	}
 
-	query += " ORDER BY id DESC LIMIT ?"
+	return " WHERE " + strings.Join(where, " AND "), args
+}
 
-	args = append(args, filter.Limit)
+// CountLogs counts the logs matching the filter (Limit and Offset are ignored).
+func (store *Store) CountLogs(ctx context.Context, filter LogFilter) (int, error) {
+	where, args := filter.where()
+
+	var count int
+
+	err := store.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM logs`+where, args...).Scan(&count)
+
+	return count, err
+}
+
+func (store *Store) ListLogs(ctx context.Context, filter LogFilter) ([]LogRecord, error) {
+	where, args := filter.where()
+
+	query := `SELECT id, project_id, timestamp, level, severity_number, body, trace_id, span_id, attributes FROM logs` + where +
+		" ORDER BY id DESC LIMIT ? OFFSET ?"
+
+	args = append(args, filter.Limit, filter.Offset)
 
 	rows, err := store.DB.QueryContext(ctx, query, args...)
 
@@ -507,6 +541,22 @@ func parseTime(value string) time.Time {
 func likePattern(text string) string {
 	replacer := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 	return "%" + replacer.Replace(text) + "%"
+}
+
+// inCondition is "column IN (...)" for a list of values, or "" for an empty
+// list (no condition). column is a constant from the caller, never input.
+func inCondition[T any](column string, values []T) (string, []any) {
+	if len(values) == 0 {
+		return "", nil
+	}
+
+	args := make([]any, 0, len(values))
+
+	for _, value := range values {
+		args = append(args, value)
+	}
+
+	return column + " IN (" + placeholders(len(args)) + ")", args
 }
 
 // placeholders returns "?, ?, ?" for an IN (...) list of count values.

@@ -251,18 +251,18 @@ func TestRouting(t *testing.T) {
 		{ProjectID: 2, Title: "frontend warning", Level: "warning"},
 		{ProjectID: 1, Title: "backend info", Level: "info"},
 		// Unknown levels count as errors: better one message too many.
-		{ProjectID: 1, Title: "backend critical", Level: "critical"},
+		{ProjectID: 1, Title: "backend panic", Level: "panic"},
 	} {
 		notifier.Notify(notification)
 	}
 
 	closeNotifier(t, notifier)
 
-	if got := titles(backendErrors.sent); got != "backend error, backend critical" {
+	if got := titles(backendErrors.sent); got != "backend error, backend panic" {
 		t.Errorf("project 1, errors: %s", got)
 	}
 
-	if got := titles(everythingWarnings.sent); got != "backend error, frontend warning, backend critical" {
+	if got := titles(everythingWarnings.sent); got != "backend error, frontend warning, backend panic" {
 		t.Errorf("all projects, warnings and errors: %s", got)
 	}
 

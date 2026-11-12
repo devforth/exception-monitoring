@@ -213,3 +213,37 @@ func closeDatabase(t *testing.T, database *Store) {
 		t.Error(err)
 	}
 }
+
+// Retention gives deleted space back to the file system only with
+// incremental auto_vacuum; a database created without it is switched once.
+func TestOpenEnablesIncrementalVacuum(t *testing.T) {
+	ctx := context.Background()
+	dataDir := t.TempDir()
+	path := filepath.Join(dataDir, fileName)
+
+	plain, err := sql.Open("sqlite", "file:"+path)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := plain.Exec(`CREATE TABLE old_data (value TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+
+	_ = plain.Close()
+
+	database, err := Open(ctx, dataDir)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer closeDatabase(t, database)
+
+	var mode int
+
+	if err := database.DB.QueryRow(`PRAGMA auto_vacuum`).Scan(&mode); err != nil || mode != 2 {
+		t.Fatalf("auto_vacuum = %d (%v), want 2 (incremental)", mode, err)
+	}
+}

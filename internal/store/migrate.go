@@ -205,6 +205,53 @@ DROP TABLE old_connections;
 DROP TABLE old_connection_projects;
 `},
 	{8, `ALTER TABLE notification_connections ADD COLUMN hide_issue_link INTEGER NOT NULL DEFAULT 0;`},
+	{9, `
+-- Retention deletes the oldest events and logs across all projects.
+CREATE INDEX events_by_received ON events (received_at);
+CREATE INDEX logs_by_time ON logs (timestamp);
+`},
+	{10, `
+-- Projects move from the PROJECTS env variable into the database, so they can
+-- be added and given their own retention in the UI. The ones in PROJECTS are
+-- written here at every start with the same id, name and key (see
+-- SeedProjects), so DSNs stay the same. A NULL retention uses the global value.
+CREATE TABLE projects (
+	id                         INTEGER PRIMARY KEY,
+	name                       TEXT    NOT NULL UNIQUE,
+	public_key                 TEXT    NOT NULL UNIQUE,
+	retention_events           INTEGER, -- seconds
+	retention_logs             INTEGER,
+	retention_issues           INTEGER,
+	retention_events_per_issue INTEGER,
+	created_at                 TEXT    NOT NULL,
+	updated_at                 TEXT    NOT NULL
+);
+
+-- Retention runs per project.
+CREATE INDEX events_by_project_received ON events (project_id, received_at);
+`},
+	{11, `
+-- The color that marks a project in lists and emails; '' uses the palette.
+ALTER TABLE projects ADD COLUMN color TEXT NOT NULL DEFAULT '';
+`},
+	{12, `
+-- Logs of the same message (numbers and IDs aside) share a fingerprint, so a
+-- line repeated in a loop keeps only its newest RETENTION_LOGS_PER_MESSAGE
+-- occurrences. Older logs keep '' and are limited by time and size only.
+ALTER TABLE logs ADD COLUMN fingerprint TEXT NOT NULL DEFAULT '';
+CREATE INDEX logs_by_fingerprint ON logs (project_id, fingerprint, id) WHERE fingerprint != '';
+ALTER TABLE projects ADD COLUMN retention_logs_per_message INTEGER;
+`},
+	{13, `
+-- The levels a project records, comma-separated; NULL uses the defaults
+-- (RECORD_EVENT_LEVELS, RECORD_LOG_LEVELS), '' records none.
+ALTER TABLE projects ADD COLUMN event_levels TEXT;
+ALTER TABLE projects ADD COLUMN log_levels TEXT;
+`},
+	{14, `
+-- The log list is newest first (by id) for the chosen projects.
+CREATE INDEX logs_by_project_id ON logs (project_id, id);
+`},
 }
 
 func migrate(ctx context.Context, db *sql.DB, migrationList []migration) error {

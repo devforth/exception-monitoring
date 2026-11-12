@@ -23,6 +23,9 @@ var issueActions = map[string]string{
 
 var errUnknownAction = errors.New("unknown action")
 
+// maxBulkIssues: one page of the largest size, with room to spare.
+const maxBulkIssues = 1000
+
 // applyIssueAction runs action on each issue. An issue that no longer exists
 // (deleted from another tab) is skipped, the others are still processed.
 func (handler *Handler) applyIssueAction(ctx context.Context, action string, issueIDs []int64) error {
@@ -79,6 +82,14 @@ func (handler *Handler) issueAction(w http.ResponseWriter, r *http.Request) {
 func (handler *Handler) bulkIssueAction(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "invalid form", http.StatusBadRequest)
+
+		return
+	}
+
+	// The list shows at most 100 issues a page; a hand-made form with more
+	// would only hold the database for a long time.
+	if len(r.PostForm["issue"]) > maxBulkIssues {
+		http.Error(w, fmt.Sprintf("at most %d issues at once", maxBulkIssues), http.StatusBadRequest)
 
 		return
 	}

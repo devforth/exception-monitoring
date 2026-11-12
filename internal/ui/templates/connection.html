@@ -43,7 +43,12 @@
     </label>
     {{with index .Errors "chat_id"}}<p class="field-error">{{.}}</p>{{end}}
     {{if eq .Type "telegram"}}{{with .Duplicate}}{{template "duplicate" .}}{{end}}{{end}}
-    <p class="muted small">Create a bot with @BotFather and add it to the chat. Tokens are stored encrypted.</p>
+    <p class="muted small">
+      Create a bot with <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer">@BotFather</a> (send <code>/newbot</code>, it replies with the token) and add the bot to the chat.
+      The chat ID is in the answer of <code>https://api.telegram.org/bot&lt;token&gt;/getUpdates</code> after a message in the chat.
+      <a href="https://core.telegram.org/bots/tutorial#obtain-your-bot-token" target="_blank" rel="noopener noreferrer">Telegram's guide</a>.
+      Tokens are stored encrypted.
+    </p>
   </div>
   {{end}}
 
@@ -54,15 +59,21 @@
     </label>
     {{with index .Errors "webhook_url"}}<p class="field-error">{{.}}</p>{{end}}
     {{if eq .Type "slack"}}{{with .Duplicate}}{{template "duplicate" .}}{{end}}{{end}}
-    <p class="muted small">Slack → Apps → Incoming Webhooks. Mattermost and Rocket.Chat webhooks work too. Stored encrypted.</p>
+    <p class="muted small">
+      <a href="https://api.slack.com/apps?new_app=1" target="_blank" rel="noopener noreferrer">Create a Slack app</a>, turn on Incoming Webhooks and add one for the channel.
+      <a href="https://api.slack.com/messaging/webhooks" target="_blank" rel="noopener noreferrer">Slack's guide</a>.
+      Mattermost and Rocket.Chat webhooks work too. Stored encrypted.
+    </p>
   </div>
   {{end}}
 
   {{/* Locked until the email address is confirmed (app.js unlocks it when the step reports it). */}}
   <fieldset class="connection-rest" {{if .RestLocked}}disabled{{end}}>
     <label>Name
-      <input name="name" value="{{.Name}}" maxlength="100" required placeholder="Backend team">
+      <input name="name" value="{{.Name}}" maxlength="100" placeholder="{{.NamePlaceholder}}"
+             data-placeholder-telegram="the name of the chat, from Telegram" data-placeholder-slack="Slack">
     </label>
+    <p class="muted small">Optional: left empty, it is filled in when saved.</p>
     {{with index .Errors "name"}}<p class="field-error">{{.}}</p>{{end}}
 
     <fieldset>
@@ -76,7 +87,7 @@
 
     <fieldset>
       <legend>Levels</legend>
-      {{range .Levels}}<label class="option"><input type="checkbox" name="level" value="{{.Value}}" {{if .Checked}}checked{{end}}> {{template "level" .Label}}</label>{{end}}
+      {{range .Levels}}<label class="option"><input type="checkbox" name="level" value="{{.Value}}" {{if .Checked}}checked{{end}}> {{template "badge" (label "level" .Label)}}</label>{{end}}
     </fieldset>
     {{with index .Errors "levels"}}<p class="field-error">{{.}}</p>{{end}}
 

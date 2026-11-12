@@ -12,12 +12,64 @@ import (
 )
 
 // Project is a source of events (e.g. "backend", "frontend") with its own DSN.
-// ID is set explicitly in PROJECTS and is the number at the end of the DSN.
-// It identifies the project's stored data, so it must never change once in use.
+// ID is the number at the end of the DSN and identifies the project's stored
+// data, so it must never change once in use. Projects live in the database;
+// the ones in PROJECTS are written there at every start with the same values.
 type Project struct {
 	ID        int
 	Name      string
 	PublicKey string
+	// Retention overrides the global retention settings for this project.
+	Retention RetentionOverride
+	// EventLevels and LogLevels are the project's own lists of levels to
+	// record; nil uses Recording (an empty list records nothing).
+	EventLevels *[]string
+	LogLevels   *[]string
+	// Color marks the project in lists and emails: "#rrggbb", set in the UI
+	// or picked from ProjectPalette by id.
+	Color string
+}
+
+// ProjectPalette gives projects distinct colors until one is chosen in the
+// UI; all read well on light and dark backgrounds.
+var ProjectPalette = []string{
+	"#2563eb", "#db2777", "#16a34a", "#ea580c", "#7c3aed",
+	"#0891b2", "#ca8a04", "#dc2626", "#4f46e5", "#0d9488",
+}
+
+// DefaultProjectColor is the palette color of a project id.
+func DefaultProjectColor(id int) string {
+	return ProjectPalette[(max(id, 1)-1)%len(ProjectPalette)]
+}
+
+var colorRe = regexp.MustCompile(`^#[0-9a-f]{6}$`)
+
+// ValidColor: "#rrggbb" in lowercase, as the color input sends it. Colors go
+// into CSS and email styles, so nothing else is accepted.
+func ValidColor(color string) bool {
+	return colorRe.MatchString(color)
+}
+
+// ProjectList gives the current projects. Projects can be added and changed
+// in the UI while the server runs, so ingest, the API and the UI ask for the
+// list on every use instead of keeping a copy (see package projects).
+type ProjectList interface {
+	List() Projects
+}
+
+// List returns the projects; a fixed list serves where a changing one is expected.
+func (projects Projects) List() Projects {
+	return projects
+}
+
+// ValidProjectName: lowercase letters, digits, '-' and '_' (used in URLs and filters).
+func ValidProjectName(name string) bool {
+	return projectNameRe.MatchString(name)
+}
+
+// ValidPublicKey: 16-64 letters or digits (the DSN key).
+func ValidPublicKey(key string) bool {
+	return publicKeyRe.MatchString(key)
 }
 
 // Projects is the list from PROJECTS, in the order it was written.
@@ -72,6 +124,10 @@ type Config struct {
 	AdminPassword string
 	// Notifications: where to send alerts about new and regressed issues.
 	Notifications Notifications
+	// Retention: how long and how much data is kept.
+	Retention Retention
+	// Recording: which event and log levels are stored by default.
+	Recording Recording
 }
 
 // Defaults used when the corresponding environment variable is not set.
@@ -183,6 +239,22 @@ func loadFrom(getenv func(string) string) (*Config, error) {
 	}
 
 	config.Notifications = notifications
+
+	recording, err := parseRecording(getenv)
+
+	if err != nil {
+		return nil, err
+	}
+
+	config.Recording = recording
+
+	retention, err := parseRetention(getenv)
+
+	if err != nil {
+		return nil, err
+	}
+
+	config.Retention = retention
 
 	allowedIPs, err := parseNetworks(getenv("ALLOWED_IPS"))
 

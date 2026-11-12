@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/devforth/exception-monitoring/internal/compact"
 	"github.com/devforth/exception-monitoring/internal/config"
 	"github.com/devforth/exception-monitoring/internal/httpjson"
 	"github.com/devforth/exception-monitoring/internal/scrub"
@@ -29,20 +30,14 @@ type Sink interface {
 
 type Handler struct {
 	logger   *slog.Logger
-	projects map[int]config.Project
+	projects config.ProjectList // read per request: projects can change while running
 	sink     Sink
 	cors     cors
 	limiter  *rateLimiter // nil when rate limiting is disabled
 	now      func() time.Time
 }
 
-func New(logger *slog.Logger, settings *config.Config, sink Sink) *Handler {
-	projects := make(map[int]config.Project, len(settings.Projects))
-
-	for _, project := range settings.Projects {
-		projects[project.ID] = project
-	}
-
+func New(logger *slog.Logger, settings *config.Config, projects config.ProjectList, sink Sink) *Handler {
 	handler := &Handler{
 		logger:   logger,
 		projects: projects,
@@ -149,7 +144,7 @@ func (handler *Handler) ingest(w http.ResponseWriter, r *http.Request) (map[stri
 		return nil, reject(http.StatusUnauthorized, "missing sentry_key")
 	}
 
-	project, ok := handler.projects[projectID]
+	project, ok := handler.projects.List().ByID(projectID)
 
 	if !ok || key != project.PublicKey {
 		return nil, reject(http.StatusForbidden, "invalid project or key")
@@ -186,8 +181,9 @@ func (handler *Handler) process(ctx context.Context, project config.Project, env
 		switch item.Header.Type {
 		case sentry.ItemEvent:
 			// Credentials (cookies, Authorization, tokens) are removed before
-			// anything is parsed or stored; see package scrub.
-			event, err := sentry.ParseEvent(scrub.JSON(item.Payload), envelope.Header.EventID, received)
+			// anything is parsed or stored (package scrub), and so is what
+			// does not help a fix, such as library source (package compact).
+			event, err := sentry.ParseEvent(compact.Event(scrub.JSON(item.Payload)), envelope.Header.EventID, received)
 
 			if err != nil {
 				return nil, reject(http.StatusBadRequest, "item %d: %v", index+1, err)

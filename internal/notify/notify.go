@@ -57,17 +57,19 @@ const (
 
 // Notification is one alert about an issue.
 type Notification struct {
-	Kind        Kind
-	ProjectID   int
-	Project     string
-	IssueID     int64
-	IssueURL    string // link to the issue in the UI; empty without PUBLIC_URL
-	Title       string
-	Culprit     string
-	Level       string
-	Environment string
-	Release     string
-	Time        time.Time
+	Kind      Kind
+	ProjectID int
+	Project   string
+	// ProjectColor marks the project in emails ("#rrggbb"; may be empty).
+	ProjectColor string `json:",omitempty"`
+	IssueID      int64
+	IssueURL     string // link to the issue in the UI; empty without PUBLIC_URL
+	Title        string
+	Culprit      string
+	Level        string
+	Environment  string
+	Release      string
+	Time         time.Time
 	// Event is the full event, for formats with room for details (email). May
 	// be nil. In the outbox it is stored as the original JSON and parsed again.
 	Event *sentry.Event `json:"-"`

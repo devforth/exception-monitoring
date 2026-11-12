@@ -8,7 +8,7 @@
 <form class="filters" method="get" action="/issues"
       hx-get="/issues" hx-target="#issue-list" hx-swap="outerHTML"
       hx-trigger="input delay:300ms, submit" hx-push-url="true" hx-sync="this:replace">
-  {{template "project-select" .Projects}}
+  {{template "picker" .Projects}}
 
   <select name="status" aria-label="Status">
     <option value="unresolved" {{if eq .Status "unresolved"}}selected{{end}}>Unresolved</option>
@@ -17,11 +17,7 @@
     <option value="all" {{if eq .Status "all"}}selected{{end}}>All</option>
   </select>
 
-  <select name="level" aria-label="Level">
-    <option value="">All levels</option>
-    {{$level := .Level}}
-    {{range .Levels}}<option value="{{.}}" {{if eq . $level}}selected{{end}}>{{.}}</option>{{end}}
-  </select>
+  {{template "picker" .Levels}}
 
   <select name="sort" aria-label="Sort">
     <option value="last_seen" {{if or (eq .Sort "") (eq .Sort "last_seen")}}selected{{end}}>Last seen</option>
@@ -31,13 +27,8 @@
 
   <input type="search" name="query" value="{{.Query}}" placeholder="Search title or location" aria-label="Search">
 
-  <input type="date" name="from" value="{{.Dates.From}}" max="{{.Dates.FromMax}}" aria-label="From date" title="From (UTC)">
-  <input type="date" name="to" value="{{.Dates.To}}" min="{{.Dates.From}}" max="{{.Dates.Today}}" aria-label="To date" title="To, inclusive (UTC)">
-  <select name="date_by" aria-label="Date range applies to" title="Which date of an issue the range applies to">
-    <option value="event" {{if or (eq .DateBy "") (eq .DateBy "event")}}selected{{end}}>Any event in range</option>
-    <option value="first_seen" {{if eq .DateBy "first_seen"}}selected{{end}}>First seen in range</option>
-    <option value="last_seen" {{if eq .DateBy "last_seen"}}selected{{end}}>Last seen in range</option>
-  </select>
+  {{template "date-range" .Dates}}
+  {{template "per-page" .Pager}}
 </form>
 
 {{template "issue-list" $}}
@@ -62,7 +53,7 @@
       <thead>
         <tr>
           <th class="check"><input type="checkbox" class="select-all" aria-label="Select all issues"></th>
-          <th>Issue</th><th>Project</th><th class="number">Events</th><th>Last seen</th><th>First seen</th>
+          <th>Issue</th><th>Project</th><th class="number">Events</th><th>Last seen</th><th>First seen</th>{{if .ShowResolved}}<th>Resolved</th>{{end}}
         </tr>
       </thead>
       <tbody>
@@ -70,6 +61,7 @@
       </tbody>
     </table>
   </form>
+  {{template "pager" .Pager}}
   {{else}}
   <p class="empty">No issues match these filters.</p>
   {{end}}
@@ -77,27 +69,20 @@
 {{end}}
 {{end}}
 
-{{/* Rows plus a "load more" row that replaces itself with the next page. */}}
 {{define "issue-rows"}}
 {{with .Data}}
 {{range .Issues}}
 <tr>
   <td class="check"><label class="pick"><input type="checkbox" name="issue" value="{{.ID}}" aria-label="Select issue">{{template "status-icon" .Status}}</label></td>
   <td>
-    {{template "level-filter" (filterBy $.Data.Filter "Level" .Level)}} <a class="issue-title" href="/issues/{{.ID}}">{{.Title}}</a>
+    {{template "badge" (levelBadge .Level $.Data.Filter)}} <a class="issue-title" href="/issues/{{.ID}}">{{.Title}}</a>
     <div class="muted small">{{.Culprit}}</div>
   </td>
-  <td>{{template "project-filter" (filterBy $.Data.Filter "Name" .ProjectName)}}</td>
+  <td>{{template "badge" (projectBadge .ProjectName $.Data.Filter)}}</td>
   <td class="number">{{.EventCount}}</td>
   <td>{{template "time" .LastSeen}}</td>
   <td>{{template "time" .FirstSeen}}</td>
-</tr>
-{{end}}
-{{if .MoreURL}}
-<tr class="more">
-  <td colspan="6">
-    <button type="button" class="link" hx-get="{{.MoreURL}}" hx-target="closest tr" hx-swap="outerHTML">Load more</button>
-  </td>
+  {{if $.Data.ShowResolved}}<td>{{if .ResolvedAt}}{{template "time" .Resolved}}{{else}}<span class="muted">—</span>{{end}}</td>{{end}}
 </tr>
 {{end}}
 {{end}}

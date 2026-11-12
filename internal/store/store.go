@@ -49,6 +49,11 @@ func openWithMigrations(ctx context.Context, path string, migrationList []migrat
 		return nil, fmt.Errorf("open database %s: %w", path, err)
 	}
 
+	if err := enableIncrementalVacuum(ctx, db); err != nil {
+		_ = db.Close() // the open error is the one to report
+		return nil, err
+	}
+
 	if err := migrate(ctx, db, migrationList); err != nil {
 		_ = db.Close() // the open error is the one to report
 		return nil, err
@@ -63,4 +68,40 @@ func (store *Store) Ping(ctx context.Context) error {
 
 func (store *Store) Close() error {
 	return store.DB.Close()
+}
+
+// enableIncrementalVacuum lets retention give deleted space back to the file
+// system (see ReleaseFreeSpace); without it the file never shrinks. The mode
+// of an existing database changes only with a full VACUUM, done once.
+func enableIncrementalVacuum(ctx context.Context, db *sql.DB) error {
+	const incremental = 2
+
+	var mode int
+
+	if err := db.QueryRowContext(ctx, `PRAGMA auto_vacuum`).Scan(&mode); err != nil {
+		return fmt.Errorf("read auto_vacuum: %w", err)
+	}
+
+	if mode == incremental {
+		return nil
+	}
+
+	// One connection: the pragma applies to it, and VACUUM runs outside a transaction.
+	connection, err := db.Conn(ctx)
+
+	if err != nil {
+		return err
+	}
+
+	defer func() { _ = connection.Close() }() // returns it to the pool; nothing to report
+
+	if _, err := connection.ExecContext(ctx, `PRAGMA auto_vacuum = INCREMENTAL`); err != nil {
+		return fmt.Errorf("set auto_vacuum: %w", err)
+	}
+
+	if _, err := connection.ExecContext(ctx, `VACUUM`); err != nil {
+		return fmt.Errorf("vacuum to enable auto_vacuum: %w", err)
+	}
+
+	return nil
 }

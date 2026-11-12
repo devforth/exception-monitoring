@@ -8,6 +8,7 @@
   <title>{{template "title" .}} · Exception Monitoring</title>
   <link rel="stylesheet" href="{{asset "flatpickr.min.css"}}">
   <link rel="stylesheet" href="{{asset "app.css"}}">
+  {{with .ProjectColors}}<link rel="stylesheet" href="{{.}}">{{end}}
   <script src="{{asset "htmx.min.js"}}" defer></script>
   <script src="{{asset "flatpickr.min.js"}}" defer></script>
   <script src="{{asset "app.js"}}" defer></script>
@@ -19,7 +20,7 @@
     <nav>
       <a href="/issues" {{if eq .Page "issues" "issue"}}class="active"{{end}}>Issues</a>
       <a href="/logs" {{if eq .Page "logs"}}class="active"{{end}}>Logs</a>
-      <a href="/projects" {{if eq .Page "projects"}}class="active"{{end}}>Projects</a>
+      <a href="/projects" {{if eq .Page "projects" "project"}}class="active"{{end}}>Projects</a>
       <a href="/notifications" {{if eq .Page "notifications" "connection"}}class="active"{{end}}>Notifications</a>
     </nav>
     <form method="post" action="/logout">

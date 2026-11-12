@@ -7,19 +7,15 @@
 <form class="filters" method="get" action="/logs"
       hx-get="/logs" hx-target="#log-list" hx-swap="outerHTML"
       hx-trigger="input delay:300ms, submit" hx-push-url="true" hx-sync="this:replace">
-  {{template "project-select" .Projects}}
+  {{template "picker" .Projects}}
 
-  <select name="level" aria-label="Level">
-    <option value="">All levels</option>
-    {{$level := .Level}}
-    {{range .Levels}}<option value="{{.}}" {{if eq . $level}}selected{{end}}>{{.}}</option>{{end}}
-  </select>
+  {{template "picker" .Levels}}
 
   <input type="search" name="query" value="{{.Query}}" placeholder="Search text" aria-label="Search">
   <input type="search" name="trace_id" value="{{.TraceID}}" placeholder="Trace ID" aria-label="Trace ID">
 
-  <input type="date" name="from" value="{{.Dates.From}}" max="{{.Dates.FromMax}}" aria-label="From date" title="From (UTC)">
-  <input type="date" name="to" value="{{.Dates.To}}" min="{{.Dates.From}}" max="{{.Dates.Today}}" aria-label="To date" title="To, inclusive (UTC)">
+  {{template "date-range" .Dates}}
+  {{template "per-page" .Pager}}
 </form>
 
 {{template "log-list" $}}
@@ -37,6 +33,7 @@
       {{template "log-rows" $}}
     </tbody>
   </table>
+  {{template "pager" .Pager}}
   {{else}}
   <p class="empty">No logs match these filters.</p>
   {{end}}
@@ -49,21 +46,14 @@
 {{range .Logs}}
 <tr>
   <td class="nowrap">{{template "time" .Timestamp}}</td>
-  <td class="nowrap">{{template "level-filter" (filterBy $.Data.Filter "Level" .Level)}}</td>
-  <td>{{template "project-filter" (filterBy $.Data.Filter "Name" .ProjectName)}}</td>
+  <td class="nowrap">{{template "badge" (levelBadge .Level $.Data.Filter)}}</td>
+  <td>{{template "badge" (projectBadge .ProjectName $.Data.Filter)}}</td>
   <td>
     {{template "log-body" .Body}}
     <div class="log-meta small">
       {{with .Issue}}<a href="/issues/{{.IssueID}}">Issue: {{.Title}}</a>{{end}}
       {{with .TraceID}}<a class="muted" href="/logs?trace_id={{.}}">trace {{short . 8}}</a>{{end}}
     </div>
-  </td>
-</tr>
-{{end}}
-{{if .MoreURL}}
-<tr class="more">
-  <td colspan="4">
-    <button type="button" class="link" hx-get="{{.MoreURL}}" hx-target="closest tr" hx-swap="outerHTML">Load more</button>
   </td>
 </tr>
 {{end}}

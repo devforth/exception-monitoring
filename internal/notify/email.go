@@ -27,7 +27,19 @@ import (
 //go:embed templates/email.html
 var emailTemplateFiles embed.FS
 
-var emailTemplates = template.Must(template.ParseFS(emailTemplateFiles, "templates/email.html"))
+var emailTemplates = template.Must(template.New("email.html").Funcs(template.FuncMap{
+	"projectColor": projectColor,
+}).ParseFS(emailTemplateFiles, "templates/email.html"))
+
+// projectColor is the color of a project badge in an email; anything other
+// than "#rrggbb" (an old outbox row, a missing color) falls back to grey.
+func projectColor(color string) string {
+	if config.ValidColor(color) {
+		return color
+	}
+
+	return "#555560"
+}
 
 // Email sends the long format, with the stack trace and context, through any
 // SMTP server. Port 465 uses implicit TLS; other ports upgrade with STARTTLS

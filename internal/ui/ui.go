@@ -23,6 +23,7 @@ import (
 
 	"github.com/devforth/exception-monitoring/internal/config"
 	"github.com/devforth/exception-monitoring/internal/notify"
+	"github.com/devforth/exception-monitoring/internal/projects"
 	"github.com/devforth/exception-monitoring/internal/store"
 )
 
@@ -35,13 +36,15 @@ var staticFiles embed.FS
 type Handler struct {
 	logger        *slog.Logger
 	store         *store.Store
-	projects      config.Projects
+	registry      *projects.Registry
 	adminUsername string
 	adminPassword string
 	// credentials fingerprints the admin username and password; sessions are
 	// valid only with the fingerprint they were created with.
 	credentials    string
 	notifications  config.Notifications
+	retention      config.Retention
+	recording      config.Recording
 	factory        notify.Factory
 	trustedProxies []netip.Prefix
 	limiter        *loginLimiter
@@ -49,7 +52,7 @@ type Handler struct {
 	now            func() time.Time
 }
 
-func New(ctx context.Context, logger *slog.Logger, database *store.Store, settings *config.Config, factory notify.Factory) (*Handler, error) {
+func New(ctx context.Context, logger *slog.Logger, database *store.Store, settings *config.Config, registry *projects.Registry, factory notify.Factory) (*Handler, error) {
 	pages, err := parseTemplates()
 
 	if err != nil {
@@ -71,12 +74,14 @@ func New(ctx context.Context, logger *slog.Logger, database *store.Store, settin
 	return &Handler{
 		logger:         logger,
 		store:          database,
-		projects:       settings.Projects,
+		registry:       registry,
 		adminUsername:  settings.AdminUsername,
 		adminPassword:  settings.AdminPassword,
 		credentials:    credentials,
 		trustedProxies: settings.TrustedProxies,
 		notifications:  settings.Notifications,
+		retention:      settings.Retention,
+		recording:      settings.Recording,
 		factory:        factory,
 		limiter:        newLoginLimiter(),
 		pages:          pages,
@@ -86,7 +91,7 @@ func New(ctx context.Context, logger *slog.Logger, database *store.Store, settin
 
 // pageNames are the templates in templates/ that are full pages. Each is
 // parsed together with layout.html and partials.html.
-var pageNames = []string{"login", "issues", "issue", "logs", "projects", "notifications", "connection"}
+var pageNames = []string{"login", "issues", "issue", "logs", "projects", "project", "notifications", "connection"}
 
 func parseTemplates() (map[string]*template.Template, error) {
 	pages := map[string]*template.Template{}
@@ -110,16 +115,21 @@ func (handler *Handler) Register(router *http.ServeMux, protect func(http.Handle
 	static, _ := fs.Sub(staticFiles, "static")
 
 	routes := map[string]http.HandlerFunc{
-		"GET /{$}":                      handler.requireLogin(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/issues", http.StatusSeeOther) }),
-		"GET /login":                    handler.loginPage,
-		"POST /login":                   sameOrigin(handler.login),
-		"POST /logout":                  sameOrigin(handler.logout),
-		"GET /issues":                   handler.requireLogin(handler.issuesPage),
-		"GET /issues/{issueID}":         handler.requireLogin(handler.issuePage),
-		"POST /issues/{issueID}/action": handler.requireLogin(sameOrigin(handler.issueAction)),
-		"POST /issues/bulk":             handler.requireLogin(sameOrigin(handler.bulkIssueAction)),
-		"GET /logs":                     handler.requireLogin(handler.logsPage),
-		"GET /projects":                 handler.requireLogin(handler.projectsPage),
+		"GET /{$}":                          handler.requireLogin(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/issues", http.StatusSeeOther) }),
+		"GET /login":                        handler.loginPage,
+		"POST /login":                       sameOrigin(handler.login),
+		"POST /logout":                      sameOrigin(handler.logout),
+		"GET /issues":                       handler.requireLogin(handler.issuesPage),
+		"GET /issues/{issueID}":             handler.requireLogin(handler.issuePage),
+		"POST /issues/{issueID}/action":     handler.requireLogin(sameOrigin(handler.issueAction)),
+		"POST /issues/bulk":                 handler.requireLogin(sameOrigin(handler.bulkIssueAction)),
+		"GET /logs":                         handler.requireLogin(handler.logsPage),
+		"GET /projects":                     handler.requireLogin(handler.projectsPage),
+		"GET /projects/new":                 handler.requireLogin(handler.newProjectPage),
+		"POST /projects":                    handler.requireLogin(sameOrigin(handler.createProject)),
+		"GET /projects/{projectID}":         handler.requireLogin(handler.projectPage),
+		"POST /projects/{projectID}":        handler.requireLogin(sameOrigin(handler.updateProject)),
+		"POST /projects/{projectID}/delete": handler.requireLogin(sameOrigin(handler.deleteProject)),
 
 		"GET /notifications":                        handler.requireLogin(handler.connectionsPage),
 		"GET /notifications/new":                    handler.requireLogin(handler.newConnectionPage),
@@ -133,6 +143,7 @@ func (handler *Handler) Register(router *http.ServeMux, protect func(http.Handle
 		"POST /notifications/{connectionID}/test":   handler.requireLogin(sameOrigin(handler.testConnection)),
 		"POST /notifications/{connectionID}/active": handler.requireLogin(sameOrigin(handler.setConnectionActive)),
 		"POST /notifications/{connectionID}/delete": handler.requireLogin(sameOrigin(handler.deleteConnection)),
+		"GET /project-colors.css":                   handler.requireLogin(handler.projectColors), // names projects
 		"GET /static/":                              http.StripPrefix("/static/", staticCache(http.FileServerFS(static))).ServeHTTP,
 	}
 
@@ -199,16 +210,41 @@ func securityHeaders(next http.Handler) http.Handler {
 	})
 }
 
+// projectColors serves the colors of project badges. Inline styles are
+// blocked by the CSP, so colors chosen in the UI come as a stylesheet; its
+// URL carries a version of the content, so it can be cached for good.
+func (handler *Handler) projectColors(w http.ResponseWriter, r *http.Request) {
+	colors := handler.registry.Colors()
+
+	w.Header().Set("Content-Type", "text/css; charset=utf-8")
+
+	if r.URL.Query().Get("v") == colors.Version {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	} else {
+		w.Header().Set("Cache-Control", "no-cache")
+	}
+
+	_, _ = w.Write([]byte(colors.CSS))
+}
+
 // view is what every page template receives.
 type view struct {
 	Page     string // active menu item
 	LoggedIn bool
 	Data     any
+	// ProjectColors is the URL of the stylesheet with the project colors.
+	ProjectColors string
 }
 
 // render executes a full page (the "layout" template around the page's "content").
 func (handler *Handler) render(w http.ResponseWriter, r *http.Request, status int, page string, data any) {
-	handler.execute(w, r, status, page, "layout", view{Page: page, LoggedIn: page != "login", Data: data})
+	pageView := view{Page: page, LoggedIn: page != "login", Data: data}
+
+	if pageView.LoggedIn {
+		pageView.ProjectColors = "/project-colors.css?v=" + handler.registry.Colors().Version
+	}
+
+	handler.execute(w, r, status, page, "layout", pageView)
 }
 
 // renderFragment executes one named template of a page, for htmx swaps.

@@ -22,6 +22,7 @@ import (
 	"github.com/devforth/exception-monitoring/internal/fixtures"
 	"github.com/devforth/exception-monitoring/internal/ingest"
 	"github.com/devforth/exception-monitoring/internal/notify"
+	"github.com/devforth/exception-monitoring/internal/projects"
 	"github.com/devforth/exception-monitoring/internal/secret"
 	"github.com/devforth/exception-monitoring/internal/server"
 	"github.com/devforth/exception-monitoring/internal/store"
@@ -89,6 +90,8 @@ func startServer(t *testing.T, database *store.Store, adminUsername, adminPasswo
 		AdminPassword:  adminPassword,
 		// Every connection type is available: SMTP for email, a key for chat tokens.
 		Notifications: config.Notifications{ChannelTypes: config.AllChannelTypes, SecretKey: secretKey, SMTP: smtp},
+		// Shown on the Projects page; nothing is deleted by the UI.
+		Retention: config.Retention{Events: 30 * 24 * time.Hour, Logs: 24 * time.Hour, MaxDatabaseBytes: 2 << 30, Issues: 365 * 24 * time.Hour},
 	}
 
 	box, err := secret.New(secretKey)
@@ -97,7 +100,25 @@ func startServer(t *testing.T, database *store.Store, adminUsername, adminPasswo
 		t.Fatal(err)
 	}
 
-	webUI, err := ui.New(context.Background(), logger, database, settings, notify.Factory{SMTP: smtp, Box: box})
+	registry, err := projects.Open(context.Background(), logger, database, settings.Projects)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A fake Telegram API: tests never reach the real one.
+	telegram := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/getChat") {
+			_, _ = w.Write([]byte(`{"ok":true,"result":{"id":-100,"type":"group","title":"Ops chat"}}`))
+
+			return
+		}
+
+		_, _ = w.Write([]byte(`{"ok":true,"result":{}}`))
+	}))
+	t.Cleanup(telegram.Close)
+
+	webUI, err := ui.New(context.Background(), logger, database, settings, registry, notify.Factory{SMTP: smtp, Box: box, TelegramURL: telegram.URL})
 
 	if err != nil {
 		t.Fatal(err)
@@ -106,7 +127,7 @@ func startServer(t *testing.T, database *store.Store, adminUsername, adminPasswo
 	handler := server.New(server.Options{
 		Logger:   logger,
 		Database: database,
-		Ingest:   ingest.New(logger, settings, ingest.StoreSink{Store: database, Logger: logger}),
+		Ingest:   ingest.New(logger, settings, registry, ingest.StoreSink{Store: database, Logger: logger}),
 		UI:       webUI,
 	}).Handler()
 
@@ -486,6 +507,13 @@ func TestLogsAndProjectsPages(t *testing.T) {
 	if !strings.Contains(projects, "http://"+fixtures.BackendKey+"@example.com/1") {
 		t.Fatalf("projects page must show the DSN:\n%s", projects)
 	}
+
+	// The storage section: size against the limit and what retention keeps.
+	for _, want := range []string{" of 2.0 GB", "<meter", "By default events are kept 30 days, logs 1 day; all events per issue.", "has not happened for 365 days"} {
+		if !strings.Contains(projects, want) {
+			t.Errorf("projects page is missing %q", want)
+		}
+	}
 }
 
 func TestEventTextIsEscaped(t *testing.T) {
@@ -826,34 +854,111 @@ func TestIssueRowsShowStatus(t *testing.T) {
 	}
 }
 
+// Several projects can be chosen: the list has the issues of each, and each
+// project has its own chip that removes only it.
+func TestSeveralProjectsFilter(t *testing.T) {
+	server := newTestServer(t, password)
+	server.ingestFixtures()
+	server.login()
+
+	both := server.page("/issues?project=backend&project=frontend")
+	backendOnly := server.page("/issues?project=backend")
+	frontendOnly := server.page("/issues?project=frontend")
+
+	if count := len(issueIDs(both)); count == 0 || count != len(issueIDs(backendOnly))+len(issueIDs(frontendOnly)) {
+		t.Fatalf("both projects: %d issues, backend %d, frontend %d", count, len(issueIDs(backendOnly)), len(issueIDs(frontendOnly)))
+	}
+
+	for _, want := range []string{
+		// One chip for all chosen projects; each × removes only its project.
+		`Project: <span class="project" data-project="backend">backend<a class="badge-remove" href="/issues?project=frontend"`,
+		`<span class="project" data-project="frontend">frontend<a class="badge-remove" href="/issues?project=backend"`,
+		`name="project" value="backend" checked`, `name="project" value="frontend" checked`,
+	} {
+		if !strings.Contains(both, want) {
+			t.Errorf("missing %s", want)
+		}
+	}
+
+	if chips := strings.Count(both, `<span class="chip">Project:`); chips != 1 {
+		t.Errorf("%d project chips, want one for all chosen projects", chips)
+	}
+
+	// "All" is checked only while nothing is chosen.
+	// With projects chosen only "All levels" is checked.
+	if strings.Count(both, `class="picker-clear" checked`) != 1 {
+		t.Error("All projects must not be checked with projects chosen")
+	}
+
+	if plain := server.page("/issues"); strings.Count(plain, `class="picker-clear" checked`) != 2 {
+		t.Error("All projects and All levels must be checked without filters")
+	}
+
+	// The field says how many are chosen; the values are in the chip.
+	if !strings.Contains(both, `data-name="Projects">Projects: 2</summary>`) || !strings.Contains(both, `data-name="Levels">All levels</summary>`) {
+		t.Error("picker summaries")
+	}
+
+	// The log list filters by several levels too.
+	logs := server.page("/logs?level=warn&level=info")
+
+	if !strings.Contains(logs, `<a class="badge level-warning"`) || !strings.Contains(logs, `<a class="badge level-info"`) ||
+		strings.Contains(logs, `<a class="badge level-error"`) || strings.Contains(logs, `<a class="badge level-debug"`) {
+		t.Error("logs filtered by warn and info show other levels or miss these")
+	}
+
+	// Levels work the same way.
+	levels := server.page("/issues?level=error&level=info&status=all")
+	errorOnly := server.page("/issues?level=error&status=all")
+	infoOnly := server.page("/issues?level=info&status=all")
+
+	if count := len(issueIDs(levels)); count == 0 || count != len(issueIDs(errorOnly))+len(issueIDs(infoOnly)) || len(issueIDs(infoOnly)) == 0 {
+		t.Errorf("error and info: %d issues, error %d, info %d", count, len(issueIDs(errorOnly)), len(issueIDs(infoOnly)))
+	}
+
+	for _, want := range []string{
+		`Level: <span class="badge level-error">error<a class="badge-remove" href="/issues?level=info&amp;status=all"`,
+		`name="level" value="error" checked`, `name="level" value="info" checked`,
+	} {
+		if !strings.Contains(levels, want) {
+			t.Errorf("missing %s", want)
+		}
+	}
+}
+
 func TestActiveFilterChips(t *testing.T) {
 	server := newTestServer(t, password)
 	server.ingestFixtures()
 	server.login()
 
-	body := server.page("/issues?project=backend&level=error&status=unresolved&date_by=last_seen&sort=event_count&offset=0")
+	body := server.page("/issues?project=backend&level=error&status=unresolved&sort=event_count&per_page=50&page=2")
 
 	// Applied filters, each with a link that removes only it (and restarts pagination).
 	for _, want := range []string{
-		`Project: <strong>backend</strong><a class="chip-remove" href="/issues?date_by=last_seen&amp;level=error&amp;sort=event_count&amp;status=unresolved"`,
-		`Level: <strong>error</strong><a class="chip-remove" href="/issues?date_by=last_seen&amp;project=backend&amp;sort=event_count&amp;status=unresolved"`,
-		// Clear all keeps the sort order: it is not a filter.
-		`<a class="clear-filters" href="/issues?sort=event_count">Clear all</a>`,
+		`Project: <span class="project" data-project="backend">backend<a class="badge-remove" href="/issues?level=error&amp;per_page=50&amp;sort=event_count&amp;status=unresolved"`,
+		`Level: <span class="badge level-error">error<a class="badge-remove" href="/issues?per_page=50&amp;project=backend&amp;sort=event_count&amp;status=unresolved"`,
+		// The sort order is shown and removed like a filter.
+		`Sort: <strong>most events</strong><a class="chip-remove" href="/issues?level=error&amp;per_page=50&amp;project=backend&amp;status=unresolved"`,
+		// Clear all keeps only the page size: it is not a filter.
+		`<a class="clear-filters" href="/issues?per_page=50">Clear all</a>`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing %s", want)
 		}
 	}
 
-	// Defaults are not filters, and "Dates by" means nothing without dates.
-	for _, unwanted := range []string{"Status: <strong>", "Dates by: <strong>"} {
+	// Defaults are not filters.
+	for _, unwanted := range []string{"Status: <strong>", "Dates: <strong>"} {
 		if strings.Contains(body, unwanted) {
 			t.Errorf("chip %q must not be shown", unwanted)
 		}
 	}
 
-	if !strings.Contains(server.page("/issues?from=2026-11-01&date_by=first_seen"), "Dates by: <strong>first seen</strong>") {
-		t.Error("Dates by chip with a date range")
+	// Both ends of the range are one chip, removed together.
+	dates := server.page("/issues?from=2026-11-01&to=2026-11-10&level=error")
+
+	if !strings.Contains(dates, `Dates: <strong>2026-11-01 – 2026-11-10</strong><a class="chip-remove" href="/issues?level=error"`) || strings.Count(dates, `<span class="chip">`) != 2 {
+		t.Errorf("dates chip:\n%s", dates)
 	}
 
 	if strings.Contains(server.page("/issues"), `class="active-filters"`) {

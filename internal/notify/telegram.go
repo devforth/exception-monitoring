@@ -59,12 +59,44 @@ func (telegram Telegram) SendSummary(ctx context.Context, summary Summary) error
 }
 
 func (telegram Telegram) send(ctx context.Context, text string) error {
-	body, err := json.Marshal(map[string]any{
+	return telegram.call(ctx, "sendMessage", map[string]any{
 		"chat_id":                  telegram.ChatID,
 		"text":                     text,
 		"parse_mode":               "HTML",
 		"disable_web_page_preview": true,
-	})
+	}, nil)
+}
+
+// ChatTitle asks Telegram for the name of the chat
+// (https://core.telegram.org/bots/api#getchat): the title of a group or
+// channel, or the name of a person.
+func (telegram Telegram) ChatTitle(ctx context.Context) (string, error) {
+	var chat struct {
+		Title     string `json:"title"`
+		FirstName string `json:"first_name"`
+		LastName  string `json:"last_name"`
+		Username  string `json:"username"`
+	}
+
+	if err := telegram.call(ctx, "getChat", map[string]any{"chat_id": telegram.ChatID}, &chat); err != nil {
+		return "", err
+	}
+
+	if chat.Title != "" {
+		return chat.Title, nil
+	}
+
+	if name := strings.TrimSpace(chat.FirstName + " " + chat.LastName); name != "" {
+		return name, nil
+	}
+
+	return chat.Username, nil
+}
+
+// call runs a Bot API method; the "result" of the answer goes into result
+// when it is not nil.
+func (telegram Telegram) call(ctx context.Context, method string, payload, result any) error {
+	body, err := json.Marshal(payload)
 
 	if err != nil {
 		return err
@@ -76,7 +108,7 @@ func (telegram Telegram) send(ctx context.Context, text string) error {
 		apiURL = "https://api.telegram.org"
 	}
 
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL+"/bot"+telegram.BotToken+"/sendMessage", bytes.NewReader(body))
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL+"/bot"+telegram.BotToken+"/"+method, bytes.NewReader(body))
 
 	if err != nil {
 		return err
@@ -100,25 +132,30 @@ func (telegram Telegram) send(ctx context.Context, text string) error {
 	defer func() { _ = response.Body.Close() }()
 
 	// Errors come as {"ok": false, "description": ..., "parameters": {"retry_after": N}}.
-	var result struct {
-		OK          bool   `json:"ok"`
-		Description string `json:"description"`
+	var answer struct {
+		OK          bool            `json:"ok"`
+		Description string          `json:"description"`
+		Result      json.RawMessage `json:"result"`
 		Parameters  struct {
 			RetryAfter int `json:"retry_after"`
 		} `json:"parameters"`
 	}
 
-	data, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
-	_ = json.Unmarshal(data, &result)
+	data, _ := io.ReadAll(io.LimitReader(response.Body, 64<<10))
+	_ = json.Unmarshal(data, &answer)
 
-	if response.StatusCode == http.StatusOK && result.OK {
+	if response.StatusCode == http.StatusOK && answer.OK {
+		if result != nil {
+			return json.Unmarshal(answer.Result, result)
+		}
+
 		return nil
 	}
 
-	err = fmt.Errorf("telegram: %d %s", response.StatusCode, result.Description)
+	err = fmt.Errorf("telegram: %d %s", response.StatusCode, answer.Description)
 
 	if response.StatusCode == http.StatusTooManyRequests {
-		return &RetryAfterError{Delay: time.Duration(result.Parameters.RetryAfter) * time.Second, Err: err}
+		return &RetryAfterError{Delay: time.Duration(answer.Parameters.RetryAfter) * time.Second, Err: err}
 	}
 
 	return err

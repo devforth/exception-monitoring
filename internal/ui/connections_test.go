@@ -115,7 +115,7 @@ func TestSlackConnection(t *testing.T) {
 
 	list = server.page("/notifications")
 
-	if !strings.Contains(list, "Backend chat") || !strings.Contains(list, "<td>backend</td>") || !strings.Contains(list, "<td>warning</td>") {
+	if !strings.Contains(list, "Backend chat") || !strings.Contains(list, `data-project="backend"`) || !strings.Contains(list, "<td>warning</td>") {
 		t.Fatalf("after edit:\n%s", list)
 	}
 
@@ -140,7 +140,7 @@ func TestSlackConnection(t *testing.T) {
 
 		list = server.page("/notifications")
 
-		for _, want := range []string{"Backend chat", "<td>backend</td>", "<td>warning</td>", "connection-" + state.status, `aria-label="` + state.button + ` Backend chat"`, `aria-label="Edit Backend chat"`, `action="/notifications/` + id + `/delete"`, "data-confirm="} {
+		for _, want := range []string{"Backend chat", `data-project="backend"`, "<td>warning</td>", "connection-" + state.status, `aria-label="` + state.button + ` Backend chat"`, `aria-label="Edit Backend chat"`, `action="/notifications/` + id + `/delete"`, "data-confirm="} {
 			if !strings.Contains(list, want) {
 				t.Errorf("after setting active %s, missing %q", state.value, want)
 			}
@@ -454,7 +454,7 @@ func TestConnectionFormValidation(t *testing.T) {
 		form url.Values
 		want string
 	}{
-		{"no name", url.Values{"type": {"slack"}, "webhook_url": {"https://hooks.slack.com/x"}, "all_projects": {"on"}, "level": {"error"}}, "Enter a name"},
+		{"name too long", url.Values{"name": {strings.Repeat("x", 101)}, "type": {"slack"}, "webhook_url": {"https://hooks.slack.com/x"}, "all_projects": {"on"}, "level": {"error"}}, "Enter a name"},
 		{"email without confirmation", url.Values{"name": {"x"}, "type": {"email"}, "destination_id": {"999"}, "all_projects": {"on"}, "level": {"error"}}, "Confirm the email address first"},
 		{"bad telegram token", url.Values{"name": {"x"}, "type": {"telegram"}, "bot_token": {"nope"}, "chat_id": {"42"}, "all_projects": {"on"}, "level": {"error"}}, "bot token"},
 		{"bad slack url", url.Values{"name": {"x"}, "type": {"slack"}, "webhook_url": {"hooks.slack.com"}, "all_projects": {"on"}, "level": {"error"}}, "webhook URL"},
@@ -475,5 +475,59 @@ func TestConnectionFormValidation(t *testing.T) {
 
 	if connectionLink.MatchString(server.page("/notifications")) {
 		t.Fatal("an invalid form must not create a connection")
+	}
+}
+
+// A connection saved without a name gets one: the part of the address before
+// "@", the name of the Telegram chat, or "Slack".
+func TestConnectionDefaultNames(t *testing.T) {
+	database := openDatabase(t)
+	server := startServer(t, database, "admin", password)
+	server.login()
+
+	step := server.post("/notifications/email/start", url.Values{"address": {"Ops.Team@example.com"}}).Body.String()
+	destinationID := destinationInput.FindStringSubmatch(step)[1]
+	code, _ := receiveCode(t, server)
+	server.post("/notifications/email/confirm", url.Values{"destination_id": {destinationID}, "code": {code}})
+
+	_, webhookURL := newWebhook(t)
+
+	for _, form := range []url.Values{
+		{"type": {"email"}, "destination_id": {destinationID}},
+		{"type": {"telegram"}, "bot_token": {"123456:ABCDEFGHIJKLMNOPQRSTUVWXYZ"}, "chat_id": {"-100"}},
+		{"type": {"slack"}, "webhook_url": {webhookURL}},
+	} {
+		form.Set("name", "")
+		form.Set("all_projects", "on")
+		form.Set("level", "error")
+
+		if response := server.post("/notifications", form); response.Code != http.StatusSeeOther {
+			t.Fatalf("%s without a name: %d\n%s", form.Get("type"), response.Code, response.Body)
+		}
+	}
+
+	var names []string
+
+	rows, err := database.DB.Query(`SELECT name FROM notification_connections ORDER BY id`)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer rows.Close()
+
+	for rows.Next() {
+		var name string
+
+		_ = rows.Scan(&name)
+		names = append(names, name)
+	}
+
+	if strings.Join(names, "|") != "ops.team|Ops chat|Slack" {
+		t.Fatalf("names: %q", names)
+	}
+
+	if page := server.page("/notifications/new"); !strings.Contains(page, `placeholder="team"`) || strings.Contains(page, `name="name" value="" maxlength="100" required`) {
+		t.Error("the name must be optional, with a placeholder")
 	}
 }

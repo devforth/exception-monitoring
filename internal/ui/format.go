@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/devforth/exception-monitoring/internal/config"
 
 	"github.com/devforth/exception-monitoring/internal/sentry"
 )
@@ -23,10 +26,49 @@ var templateFuncs = template.FuncMap{
 	"parseRequest": parseRequest,
 	"short":        short,
 	"asset":        assetURL,
-	// filterBy passes a filter link and one value to the level-filter / project-filter partials.
-	"filterBy": func(links filterLinks, field, value string) map[string]any {
-		return map[string]any{"Filter": links, field: value}
-	},
+	"projectBadge": projectBadge,
+	"levelBadge":   levelBadge,
+	"statusBadge":  statusBadge,
+	// label is a badge that is not a link (inside checkboxes): {{template "badge" (label "level" .Name)}}.
+	"label": func(kind, name string) badgeView { return badgeView{Kind: kind, Name: name} },
+}
+
+// badgeView is a project or level badge, the one "badge" partial for both:
+// a link when URL is set, a plain label otherwise (inside checkboxes and
+// chips), with a × when RemoveURL is set (chips).
+type badgeView struct {
+	Kind      string // "project", "level" or "status"
+	Name      string
+	URL       string
+	RemoveURL string
+}
+
+// projectBadge, levelBadge and statusBadge make badge links: within a list
+// (its filterLinks given) they filter that list, elsewhere they open the
+// issues with that project, level (a log level named as the event level) or
+// status.
+func projectBadge(name string, links ...filterLinks) badgeView {
+	return linkBadge("project", name, name, links)
+}
+
+func levelBadge(level string, links ...filterLinks) badgeView {
+	return linkBadge("level", level, config.EventLevel(level), links)
+}
+
+func statusBadge(status string, links ...filterLinks) badgeView {
+	return linkBadge("status", status, status, links)
+}
+
+// linkBadge: kind is also the query parameter; issueValue is the value for
+// the issue list.
+func linkBadge(kind, name, issueValue string, links []filterLinks) badgeView {
+	badge := badgeView{Kind: kind, Name: name, URL: "/issues?" + url.Values{kind: {issueValue}}.Encode()}
+
+	if len(links) > 0 {
+		badge.URL = links[0].With(kind, name)
+	}
+
+	return badge
 }
 
 // short returns the first n characters, for IDs shown in tables.

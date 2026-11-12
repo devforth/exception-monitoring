@@ -61,7 +61,7 @@ func newTestServer(t *testing.T, allowedIPs ...string) *testServer {
 	handler := server.New(server.Options{
 		Logger:     logger,
 		Database:   database,
-		Ingest:     ingest.New(logger, settings, ingest.StoreSink{Store: database, Logger: logger}),
+		Ingest:     ingest.New(logger, settings, settings.Projects, ingest.StoreSink{Store: database, Logger: logger}),
 		API:        api.New(logger, database, settings.Projects),
 		APIToken:   token,
 		AllowedIPs: allowed,

@@ -41,6 +41,9 @@ type NewEvent struct {
 	Timestamp    time.Time // when it happened, by the SDK's clock
 	ReceivedAt   time.Time // when the server got it
 	Payload      []byte    // full event JSON
+	// KeepEvents > 0 keeps only the newest KeepEvents events of the issue:
+	// older ones are deleted as this one is saved (RETENTION_EVENTS_PER_ISSUE).
+	KeepEvents int
 }
 
 // SaveResult tells what storing an event changed. Notifications (stage 6) use it.
@@ -152,6 +155,18 @@ func (store *Store) SaveEvent(ctx context.Context, event NewEvent) (SaveResult, 
 		return result, fmt.Errorf("insert event: %w", err)
 	}
 
+	if event.KeepEvents > 0 {
+		// Through events_by_issue_time: only this issue's events are read.
+		_, err = transaction.ExecContext(ctx, `
+			DELETE FROM events WHERE id IN (
+				SELECT id FROM events WHERE issue_id = ? ORDER BY received_at DESC LIMIT -1 OFFSET ?
+			)`, result.IssueID, event.KeepEvents)
+
+		if err != nil {
+			return result, fmt.Errorf("trim issue events: %w", err)
+		}
+	}
+
 	return result, transaction.Commit()
 }
 
@@ -193,10 +208,15 @@ type NewLog struct {
 	TraceID        string
 	SpanID         string // the span the log was written in
 	Attributes     []byte // JSON object
+	// Fingerprint groups repeats of the same message (grouping.LogFingerprint).
+	Fingerprint string
 }
 
-// SaveLogs stores a batch of log records in one transaction.
-func (store *Store) SaveLogs(ctx context.Context, logs []NewLog) error {
+// SaveLogs stores a batch of log records in one transaction. With
+// keepPerMessage > 0, each message of the batch then keeps only its newest
+// keepPerMessage logs, so a line logged in a loop replaces its old copies
+// instead of filling the database.
+func (store *Store) SaveLogs(ctx context.Context, logs []NewLog, keepPerMessage int) error {
 	if len(logs) == 0 {
 		return nil
 	}
@@ -210,8 +230,8 @@ func (store *Store) SaveLogs(ctx context.Context, logs []NewLog) error {
 	defer transaction.Rollback()
 
 	statement, err := transaction.PrepareContext(ctx, `
-		INSERT INTO logs (project_id, timestamp, level, severity_number, body, trace_id, span_id, attributes)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+		INSERT INTO logs (project_id, timestamp, level, severity_number, body, trace_id, span_id, attributes, fingerprint)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 
 	if err != nil {
 		return err
@@ -227,12 +247,64 @@ func (store *Store) SaveLogs(ctx context.Context, logs []NewLog) error {
 		}
 
 		if _, err := statement.ExecContext(ctx, record.ProjectID, formatTime(record.Timestamp), record.Level,
-			record.SeverityNumber, record.Body, record.TraceID, record.SpanID, attributes); err != nil {
+			record.SeverityNumber, record.Body, record.TraceID, record.SpanID, attributes, record.Fingerprint); err != nil {
 			return fmt.Errorf("insert log: %w", err)
 		}
 	}
 
+	if keepPerMessage > 0 {
+		if err := trimMessages(ctx, transaction, logs, keepPerMessage); err != nil {
+			return err
+		}
+	}
+
 	return transaction.Commit()
+}
+
+// trimMessages keeps the newest keep logs of each message in the batch.
+func trimMessages(ctx context.Context, transaction *sql.Tx, logs []NewLog, keep int) error {
+	seen := map[logMessage]bool{}
+
+	for _, record := range logs {
+		message := logMessage{record.ProjectID, record.Fingerprint}
+
+		if message.fingerprint == "" || seen[message] {
+			continue
+		}
+
+		seen[message] = true
+
+		if _, err := trimMessage(ctx, transaction, message, keep); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// logMessage is one repeated message: its project and fingerprint.
+type logMessage struct {
+	projectID   int
+	fingerprint string
+}
+
+// trimMessage keeps the newest keep logs of one message. "fingerprint != ”"
+// is repeated in both conditions: SQLite uses the partial index
+// logs_by_fingerprint only when the query states its condition.
+func trimMessage(ctx context.Context, db interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}, message logMessage, keep int,
+) (int64, error) {
+	result, err := db.ExecContext(ctx, `
+		DELETE FROM logs WHERE project_id = ? AND fingerprint = ? AND fingerprint != '' AND id < (
+			SELECT id FROM logs WHERE project_id = ? AND fingerprint = ? AND fingerprint != '' ORDER BY id DESC LIMIT 1 OFFSET ?
+		)`, message.projectID, message.fingerprint, message.projectID, message.fingerprint, keep-1)
+
+	if err != nil {
+		return 0, fmt.Errorf("trim repeated logs: %w", err)
+	}
+
+	return result.RowsAffected()
 }
 
 // truncate cuts text to at most limit characters (not bytes), adding "…".

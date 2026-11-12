@@ -23,7 +23,7 @@
       <td><a class="issue-title" href="/notifications/{{.ID}}">{{.Name}}</a></td>
       <td>{{.TypeLabel}}</td>
       <td class="muted">{{.Destination}}</td>
-      <td>{{.Projects}}</td>
+      <td>{{if .AllProjects}}All projects{{else}}{{range .Projects}}{{template "badge" (projectBadge .)}} {{end}}{{end}}</td>
       <td>{{.Levels}}</td>
       <td>
         <form method="post" action="/notifications/{{.ID}}/active">

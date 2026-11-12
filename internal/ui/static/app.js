@@ -211,6 +211,16 @@ function updateConnectionForm(form) {
     emailLinkOption.hidden = type !== "email";
   }
 
+  // The name placeholder shows what an empty name becomes.
+  const name = form.querySelector('input[name="name"]');
+
+  if (name && type) {
+    const address = form.querySelector('input[name="address"]');
+    const local = address ? address.value.split("@")[0].trim() : "";
+
+    name.placeholder = type === "email" ? local || "team" : name.dataset[`placeholder${type[0].toUpperCase()}${type.slice(1)}`] || "";
+  }
+
   // An email connection is filled in only after its address is confirmed.
   const rest = form.querySelector(".connection-rest");
 
@@ -225,6 +235,61 @@ function updateConnectionForm(form) {
     projectChoices.hidden = allProjects.checked;
   }
 }
+
+// Multi-select filters: the field says how many values are checked ("All
+// levels", "Levels: 2"). The form is not swapped by htmx, so it is kept in
+// sync here.
+function updatePicker(picker) {
+  const summary = picker.querySelector(".picker-summary");
+
+  if (!summary) {
+    return;
+  }
+
+  const count = picker.querySelectorAll("input[name]:checked").length;
+
+  summary.textContent = count ? `${summary.dataset.name}: ${count}` : summary.dataset.all;
+}
+
+document.addEventListener("change", (event) => {
+  const picker = event.target.closest(".picker");
+
+  if (!picker) {
+    return;
+  }
+
+  // "All" and the values exclude each other; with nothing chosen, "All" is on.
+  const all = picker.querySelector(".picker-clear");
+  const values = [...picker.querySelectorAll("input[name]")];
+
+  if (all && event.target === all) {
+    values.forEach((input) => {
+      input.checked = false;
+    });
+    all.checked = true;
+  } else if (all) {
+    all.checked = !values.some((input) => input.checked);
+  }
+
+  updatePicker(picker);
+});
+
+// Close an open dropdown on a click outside it or on Escape.
+document.addEventListener("click", (event) => {
+  document.querySelectorAll(".picker[open]").forEach((picker) => {
+    if (!picker.contains(event.target)) {
+      picker.open = false;
+    }
+  });
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    document.querySelectorAll(".picker[open]").forEach((picker) => {
+      picker.open = false;
+    });
+  }
+});
 
 function enhance() {
   localizeTimes(document);
@@ -246,12 +311,16 @@ document.addEventListener("change", (event) => {
 });
 
 document.addEventListener("input", (event) => {
+  if (event.target.matches('form.connection-form input[name="address"]')) {
+    updateConnectionForm(event.target.form);
+  }
+
   if (event.target.matches('form.filters input[type="date"]')) {
     linkDateRange(event.target.form);
   }
 });
 
-// Checkboxes of the issues list ("load more" rows included, they are in the same form).
+// Checkboxes of the issues list.
 document.addEventListener("change", (event) => {
   const form = event.target.closest("form.bulk");
 

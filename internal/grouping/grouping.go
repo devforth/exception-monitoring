@@ -210,6 +210,16 @@ func NormalizeMessage(message string) string {
 	return numberRe.ReplaceAllString(message, "<n>")
 }
 
+// LogFingerprint groups log lines that are the same message with different
+// values ("order 17 failed" and "order 42 failed"), so a line repeated in a
+// loop can be limited to its newest occurrences. Short: it is stored with
+// every log and indexed.
+func LogFingerprint(body string) string {
+	sum := sha256.Sum256([]byte(NormalizeMessage(strings.TrimSpace(body))))
+
+	return hex.EncodeToString(sum[:8])
+}
+
 // Culprit is a short "where did it happen" label for the issue list: the
 // transaction (e.g. "GET /api/orders") if set, else the function and file of
 // the frame that threw.

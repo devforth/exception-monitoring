@@ -18,6 +18,8 @@ import (
 	"github.com/devforth/exception-monitoring/internal/config"
 	"github.com/devforth/exception-monitoring/internal/ingest"
 	"github.com/devforth/exception-monitoring/internal/notify"
+	"github.com/devforth/exception-monitoring/internal/projects"
+	"github.com/devforth/exception-monitoring/internal/retention"
 	"github.com/devforth/exception-monitoring/internal/secret"
 	"github.com/devforth/exception-monitoring/internal/server"
 	"github.com/devforth/exception-monitoring/internal/store"
@@ -84,14 +86,22 @@ func run() error {
 		return err
 	}
 
-	webUI, err := ui.New(ctx, logger, database, settings, factory)
+	// Projects live in the database; the ones in PROJECTS are written there
+	// with the same values at every start.
+	registry, err := projects.Open(ctx, logger, database, settings.Projects)
 
 	if err != nil {
 		return err
 	}
 
-	if len(settings.Projects) == 0 {
-		logger.Warn("no projects configured, events will be rejected; set PROJECTS=id:name:public_key,...")
+	webUI, err := ui.New(ctx, logger, database, settings, registry, factory)
+
+	if err != nil {
+		return err
+	}
+
+	if len(registry.List()) == 0 {
+		logger.Warn("no projects yet, events will be rejected; add one on the Projects page or set PROJECTS=id:name:public_key,...")
 	}
 
 	notifier := notify.New(notify.Options{
@@ -114,7 +124,27 @@ func run() error {
 		}
 	}()
 
-	sink := ingest.StoreSink{Store: database, Logger: logger, Notifier: notifier, PublicURL: settings.Notifications.PublicURL}
+	// Retention runs in the background until shutdown; it stops before the
+	// database closes (defers run in reverse order).
+	retentionCtx, stopRetention := context.WithCancel(ctx)
+	retentionDone := make(chan struct{})
+
+	go func() {
+		defer close(retentionDone)
+
+		cleaner := retention.Cleaner{Store: database, Settings: settings.Retention, Projects: registry, Logger: logger}
+		cleaner.Run(retentionCtx)
+	}()
+
+	defer func() {
+		stopRetention()
+		<-retentionDone
+	}()
+
+	logRetention(logger, settings.Retention)
+
+	sink := ingest.StoreSink{Store: database, Logger: logger, Notifier: notifier, PublicURL: settings.Notifications.PublicURL,
+		Retention: settings.Retention, Recording: settings.Recording}
 
 	// Bind before logging "started" so a busy port fails here, not after a false start message.
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", settings.Port))
@@ -127,8 +157,8 @@ func run() error {
 		Handler: server.New(server.Options{
 			Logger:         logger,
 			Database:       database,
-			Ingest:         ingest.New(logger, settings, sink),
-			API:            api.New(logger, database, settings.Projects),
+			Ingest:         ingest.New(logger, settings, registry, sink),
+			API:            api.New(logger, database, registry),
 			UI:             webUI,
 			APIToken:       settings.APIToken,
 			AllowedIPs:     settings.AllowedIPs,
@@ -140,7 +170,7 @@ func run() error {
 		IdleTimeout:       120 * time.Second,
 	}
 
-	logger.Info("server started", "version", version, "addr", listener.Addr().String(), "data_dir", settings.DataDir, "projects", len(settings.Projects))
+	logger.Info("server started", "version", version, "addr", listener.Addr().String(), "data_dir", settings.DataDir, "projects", len(registry.List()))
 
 	serveResult := make(chan error, 1)
 
@@ -166,6 +196,16 @@ func run() error {
 	}
 
 	return nil
+}
+
+// logRetention says at startup what is kept, so a surprising deletion can be
+// traced to the settings.
+func logRetention(logger *slog.Logger, settings config.Retention) {
+	// Written as the settings take them; 0 means no limit.
+	logger.Info("retention",
+		"events", config.FormatDuration(settings.Events), "logs", config.FormatDuration(settings.Logs),
+		"issues", config.FormatDuration(settings.Issues), "events_per_issue", settings.EventsPerIssue,
+		"logs_per_message", settings.LogsPerMessage, "max_database_size", config.FormatSize(settings.MaxDatabaseBytes))
 }
 
 // notificationFactory builds channels for the connections set up in the UI.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
 	"slices"
@@ -12,45 +13,46 @@ import (
 	"time"
 
 	"github.com/devforth/exception-monitoring/internal/agentprompt"
+	"github.com/devforth/exception-monitoring/internal/config"
 	"github.com/devforth/exception-monitoring/internal/sentry"
 	"github.com/devforth/exception-monitoring/internal/store"
 )
 
-const pageSize = 50
-
-// Level filters. Sentry events and logs name levels differently: events use
-// "warning", logs "warn" and also have "trace".
+// The level lists of the filters, highest first.
 var (
-	eventLevels = []string{"fatal", "error", "warning", "info", "debug"}
-	logLevels   = []string{"fatal", "error", "warn", "info", "debug", "trace"}
+	eventLevels = highestFirst(config.Levels)
+	logLevels   = highestFirst(config.LogLevels)
 )
 
-type projectOption struct {
-	ID       int
-	Name     string
-	Selected bool
-}
+// projectNames lists the current projects for the project filter.
+func (handler *Handler) projectNames() []string {
+	list := handler.registry.List()
+	names := make([]string, 0, len(list))
 
-func (handler *Handler) projectOptions(selectedID int) []projectOption {
-	options := make([]projectOption, 0, len(handler.projects))
-
-	for _, project := range handler.projects {
-		options = append(options, projectOption{ID: project.ID, Name: project.Name, Selected: project.ID == selectedID})
+	for _, project := range list {
+		names = append(names, project.Name)
 	}
 
-	return options
+	return names
 }
 
-// projectID resolves a project given as an ID or a name; 0 (all projects) if unknown.
-func (handler *Handler) projectID(value string) int {
-	project, _ := handler.projects.Find(value)
+// projectIDs gives the ids of the ?project= names; cleanListQuery has kept
+// only known projects, by name, each once. None means all projects.
+func (handler *Handler) projectIDs(names []string) []int {
+	var ids []int
 
-	return project.ID
+	for _, name := range names {
+		if project, ok := handler.registry.List().Find(name); ok {
+			ids = append(ids, project.ID)
+		}
+	}
+
+	return ids
 }
 
 // projectName labels data of a project removed from PROJECTS by its ID.
 func (handler *Handler) projectName(projectID int) string {
-	if project, ok := handler.projects.ByID(projectID); ok {
+	if project, ok := handler.registry.List().ByID(projectID); ok {
 		return project.Name
 	}
 
@@ -64,8 +66,10 @@ type filterLinks struct {
 	query url.Values
 }
 
-func newFilterLinks(r *http.Request) filterLinks {
-	return filterLinks{path: r.URL.Path, query: r.URL.Query()}
+// newFilterLinks builds the links of a list from its cleaned query (see
+// cleanListQuery), never from the raw URL.
+func newFilterLinks(r *http.Request, query url.Values) filterLinks {
+	return filterLinks{path: r.URL.Path, query: query}
 }
 
 // With returns the current list URL with key set to value: {{.Filter.With "level" .Level}}.
@@ -76,20 +80,16 @@ func (links filterLinks) With(key, value string) string {
 	return links.path + "?" + query.Encode()
 }
 
-// Current is the list URL with the current filters, from the first page:
-// where bulk actions return to.
+// Current is the list URL with the current filters and page: where bulk
+// actions return to.
 func (links filterLinks) Current() string {
-	return links.path + "?" + links.firstPage().Encode()
+	return links.url(links.query)
 }
 
+// firstPage is a copy of the query without the page.
 func (links filterLinks) firstPage() url.Values {
-	query := url.Values{}
-
-	for name, values := range links.query {
-		if name != "offset" && name != "before" {
-			query[name] = values
-		}
-	}
+	query := maps.Clone(links.query)
+	delete(query, "page")
 
 	return query
 }
@@ -109,69 +109,108 @@ type filterField struct {
 	unset string
 	// names shows a value in words; values not listed are shown as is.
 	names map[string]string
-	// needs hides the chip unless this other filter is set too.
-	needs []string
+	// dates: the date range (from, to) as one chip.
+	dates bool
+	// badges: several values, shown as badges ("project" or "level") in one
+	// chip, each removable on its own.
+	badges string
 }
 
 var issueFilterFields = []filterField{
-	{key: "project", label: "Project"},
-	{key: "status", label: "Status", unset: "unresolved"},
-	{key: "level", label: "Level"},
+	{key: "project", label: "Project", badges: "project"},
+	{key: "status", label: "Status", unset: "unresolved", badges: "status"},
+	{key: "level", label: "Level", badges: "level"},
 	{key: "query", label: "Search"},
-	{key: "from", label: "From"},
-	{key: "to", label: "To"},
-	{
-		key: "date_by", label: "Dates by", unset: "event", needs: []string{"from", "to"},
-		names: map[string]string{"first_seen": "first seen", "last_seen": "last seen"},
-	},
+	{label: "Dates", dates: true},
+	{key: "sort", label: "Sort", unset: "last_seen", names: map[string]string{"first_seen": "first seen", "event_count": "most events"}},
 }
 
 var logFilterFields = []filterField{
-	{key: "project", label: "Project"},
-	{key: "level", label: "Level"},
+	{key: "project", label: "Project", badges: "project"},
+	{key: "level", label: "Level", badges: "level"},
 	{key: "query", label: "Search"},
 	{key: "trace_id", label: "Trace"},
-	{key: "from", label: "From"},
-	{key: "to", label: "To"},
+	{label: "Dates", dates: true},
 }
 
 type activeFilter struct {
 	Label, Value string
 	RemoveURL    string // the list without this filter
+	// Badges: several chosen values in one chip, each with its own × (RemoveURL).
+	Badges []badgeView
 }
 
 type activeFilters struct {
 	Items    []activeFilter
-	ClearURL string // the list without any filter; the sort order stays
+	ClearURL string // the list without any filter; the page size stays
 }
 
 // active lists the filters applied to the current list, in fields order.
 func (links filterLinks) active(fields []filterField) activeFilters {
+	// The page size is not a filter: "Clear all" keeps it.
 	result := activeFilters{ClearURL: links.path}
 
-	if sort := links.query.Get("sort"); sort != "" {
-		result.ClearURL = links.url(url.Values{"sort": {sort}})
+	if perPage := links.query.Get("per_page"); perPage != "" {
+		result.ClearURL = links.url(url.Values{"per_page": {perPage}})
 	}
 
 	for _, field := range fields {
-		value := strings.TrimSpace(links.query.Get(field.key))
+		if field.badges != "" {
+			result.Items = append(result.Items, links.badgeChips(field)...)
 
-		if value == "" || value == field.unset || !links.hasAny(field.needs) {
 			continue
 		}
 
-		shown := value
+		if field.dates {
+			result.Items = append(result.Items, links.datesChip(field)...)
+
+			continue
+		}
+
+		value := strings.TrimSpace(links.query.Get(field.key))
+
+		if value == "" || value == field.unset {
+			continue
+		}
 
 		if name, ok := field.names[value]; ok {
-			shown = name
+			value = name
 		}
 
 		without := links.firstPage()
 		without.Del(field.key)
-		result.Items = append(result.Items, activeFilter{Label: field.label, Value: shown, RemoveURL: links.url(without)})
+		result.Items = append(result.Items, activeFilter{Label: field.label, Value: value, RemoveURL: links.url(without)})
 	}
 
 	return result
+}
+
+// badgeChips gives one chip with every chosen value; the × of a value
+// removes just that one.
+func (links filterLinks) badgeChips(field filterField) []activeFilter {
+	chip := activeFilter{Label: field.label}
+	selected := links.query[field.key]
+
+	// The default (e.g. unresolved issues) is not a filter.
+	if field.unset != "" && len(selected) == 1 && selected[0] == field.unset {
+		return nil
+	}
+
+	for _, value := range selected {
+		if strings.TrimSpace(value) == "" {
+			continue
+		}
+
+		without := links.firstPage()
+		without[field.key] = slices.DeleteFunc(slices.Clone(selected), func(other string) bool { return other == value })
+		chip.Badges = append(chip.Badges, badgeView{Kind: field.badges, Name: value, RemoveURL: links.url(without)})
+	}
+
+	if len(chip.Badges) == 0 {
+		return nil
+	}
+
+	return []activeFilter{chip}
 }
 
 // IssueFilters and LogFilters are the active filters of each list, for templates.
@@ -179,15 +218,31 @@ func (links filterLinks) IssueFilters() activeFilters { return links.active(issu
 
 func (links filterLinks) LogFilters() activeFilters { return links.active(logFilterFields) }
 
-// hasAny reports whether one of keys is set; an empty list means no requirement.
-func (links filterLinks) hasAny(keys []string) bool {
-	for _, key := range keys {
-		if links.query.Get(key) != "" {
-			return true
-		}
+// datesChip shows the date range as one chip ("2026-11-01 – 2026-11-10"),
+// and × removes both ends.
+func (links filterLinks) datesChip(field filterField) []activeFilter {
+	from, to := strings.TrimSpace(links.query.Get("from")), strings.TrimSpace(links.query.Get("to"))
+
+	var value string
+
+	switch {
+	case from != "" && to != "":
+		value = from + " – " + to
+	case from != "":
+		value = "from " + from
+	case to != "":
+		value = "until " + to
+	default:
+		return nil
 	}
 
-	return len(keys) == 0
+	without := links.firstPage()
+
+	for _, key := range []string{"from", "to"} {
+		without.Del(key)
+	}
+
+	return []activeFilter{{Label: field.label, Value: value, RemoveURL: links.url(without)}}
 }
 
 // dateRange is the ?from= and ?to= filter: days as YYYY-MM-DD in UTC, both
@@ -235,67 +290,77 @@ type issueRow struct {
 	ProjectName string
 }
 
+// Resolved is when the issue was resolved; zero while it is not (a
+// regression clears it).
+func (row issueRow) Resolved() time.Time {
+	if row.ResolvedAt == nil {
+		return time.Time{}
+	}
+
+	return *row.ResolvedAt
+}
+
 type issuesData struct {
-	Projects []projectOption
+	Projects pickerView
 	Status   string
-	Level    string
-	Levels   []string
+	Levels   pickerView
 	Query    string
 	Dates    dateRange
-	DateBy   string // which issue date the range applies to, see store.DateAnyEvent
 	Sort     string
 	Filter   filterLinks
 	Issues   []issueRow
-	MoreURL  string // the next page, "" on the last one
+	Pager    pager
 }
 
-// issuesPage lists issues. htmx requests get only the part they replace:
-// "issue-list" when filters change, "issue-rows" for "load more".
+// ShowResolved: the "Resolved" column is shown when resolved issues are listed.
+func (data issuesData) ShowResolved() bool {
+	return data.Status == store.StatusResolved || data.Status == "all"
+}
+
+// issuesPage lists issues. htmx requests (filters, page links) get only the
+// "issue-list" part they replace.
 func (handler *Handler) issuesPage(w http.ResponseWriter, r *http.Request) {
-	query := r.URL.Query()
+	query := handler.cleanListQuery(r.URL.Query(), issueListParams)
 	data := issuesData{
 		Status: query.Get("status"),
-		Level:  query.Get("level"),
-		Levels: eventLevels,
+		Levels: newPicker("level", "level", "All levels", "Levels", eventLevels, query["level"]),
 		Query:  query.Get("query"),
 		Dates:  parseDateRange(query),
-		DateBy: query.Get("date_by"),
 		Sort:   query.Get("sort"),
-		Filter: newFilterLinks(r),
+		Filter: newFilterLinks(r, query),
 	}
-	projectID := handler.projectID(query.Get("project"))
-	data.Projects = handler.projectOptions(projectID)
+	projectIDs := handler.projectIDs(query["project"])
+	data.Projects = newPicker("project", "project", "All projects", "Projects", handler.projectNames(), query["project"])
 
 	if data.Status == "" {
 		data.Status = store.StatusUnresolved
 	}
 
-	if !store.ValidIssueSort(data.Sort) {
-		data.Sort = ""
-	}
-
-	if !store.ValidDateField(data.DateBy) {
-		data.DateBy = ""
-	}
-
-	offset, _ := strconv.Atoi(query.Get("offset"))
-	offset = max(offset, 0)
-
+	page, perPage := readPaging(query)
 	filter := store.IssueFilter{
-		ProjectID: projectID,
-		Level:     data.Level,
-		Query:     data.Query,
-		SeenSince: data.Dates.Since,
-		SeenUntil: data.Dates.Until,
-		DateField: data.DateBy,
-		Sort:      data.Sort,
-		Limit:     pageSize + 1,
-		Offset:    offset,
+		ProjectIDs: projectIDs,
+		Levels:     query["level"],
+		Query:      data.Query,
+		SeenSince:  data.Dates.Since,
+		SeenUntil:  data.Dates.Until,
+		Sort:       data.Sort,
 	}
 
 	if data.Status != "all" {
 		filter.Status = data.Status
 	}
+
+	total, err := handler.store.CountIssues(r.Context(), filter)
+
+	if err != nil {
+		handler.serverError(w, r, err)
+
+		return
+	}
+
+	// A page past the end (fewer results after a filter or a delete) shows the last one.
+	data.Pager = newPager(data.Filter, page, perPage, total, "issue-list")
+	filter.Limit, filter.Offset = perPage, (data.Pager.Page-1)*perPage
 
 	issues, err := handler.store.ListIssues(r.Context(), filter)
 
@@ -305,14 +370,6 @@ func (handler *Handler) issuesPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	issues, more := store.Page(issues, pageSize)
-
-	if more {
-		next := r.URL.Query()
-		next.Set("offset", strconv.Itoa(offset+pageSize))
-		data.MoreURL = "/issues?" + next.Encode()
-	}
-
 	for _, issue := range issues {
 		data.Issues = append(data.Issues, issueRow{Issue: issue, ProjectName: handler.projectName(issue.ProjectID)})
 	}
@@ -320,8 +377,6 @@ func (handler *Handler) issuesPage(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case isHTMX(r) && r.Header.Get("HX-Target") == "issue-list":
 		handler.renderFragment(w, r, "issues", "issue-list", data)
-	case isHTMX(r) && offset > 0:
-		handler.renderFragment(w, r, "issues", "issue-rows", data)
 	default:
 		handler.render(w, r, http.StatusOK, "issues", data)
 	}
@@ -336,8 +391,10 @@ type issueData struct {
 	// the same trace around the time of the error when spans do not match.
 	RelatedLogs     []store.LogRecord
 	LogsFromRequest bool
-	AgentPrompt     string
-	SelectedID      string
+	// TraceLogs is how many logs the event's trace has.
+	TraceLogs   int
+	AgentPrompt string
+	SelectedID  string
 }
 
 // loadIssue reads the issue from the {issueID} path value. When it fails it
@@ -430,6 +487,10 @@ func (handler *Handler) issuePage(w http.ResponseWriter, r *http.Request) {
 
 		data.RelatedLogs, data.LogsFromRequest, err = handler.relatedLogs(r.Context(), data.Event)
 
+		if err == nil {
+			data.TraceLogs, err = handler.traceLogs(r.Context(), data.Event)
+		}
+
 		if err != nil {
 			handler.serverError(w, r, err)
 
@@ -440,6 +501,16 @@ func (handler *Handler) issuePage(w http.ResponseWriter, r *http.Request) {
 	data.AgentPrompt = agentPrompt(issue.ProjectName, issue.Issue, data.Parsed, data.RelatedLogs, data.LogsFromRequest)
 
 	handler.render(w, r, http.StatusOK, "issue", data)
+}
+
+// traceLogs counts the logs of the event's trace: its trace ID links to
+// them only when there are some.
+func (handler *Handler) traceLogs(ctx context.Context, event store.Event) (int, error) {
+	if event.TraceID == "" {
+		return 0, nil
+	}
+
+	return handler.store.CountLogs(ctx, store.LogFilter{TraceID: event.TraceID})
 }
 
 // relatedLogsWindow bounds the fallback by time: logs of the same trace this
@@ -487,15 +558,14 @@ func (handler *Handler) relatedLogs(ctx context.Context, event store.Event) (log
 }
 
 type logsData struct {
-	Projects []projectOption
-	Level    string
+	Projects pickerView
 	Query    string
 	Dates    dateRange
 	TraceID  string
-	Levels   []string
+	Levels   pickerView
 	Filter   filterLinks
 	Logs     []logRow
-	MoreURL  string
+	Pager    pager
 }
 
 type logRow struct {
@@ -505,33 +575,31 @@ type logRow struct {
 	Issue *store.LogIssue
 }
 
-// logsPage searches logs, newest first. Like issuesPage, htmx gets "log-list"
-// when filters change and "log-rows" for "load more".
+// logsPage searches logs, newest first. Like issuesPage, htmx gets only
+// "log-list" for filters and page links.
 func (handler *Handler) logsPage(w http.ResponseWriter, r *http.Request) {
-	query := r.URL.Query()
-	projectID := handler.projectID(query.Get("project"))
+	query := handler.cleanListQuery(r.URL.Query(), logListParams)
+	projectIDs := handler.projectIDs(query["project"])
 	data := logsData{
-		Projects: handler.projectOptions(projectID),
-		Level:    query.Get("level"),
+		Projects: newPicker("project", "project", "All projects", "Projects", handler.projectNames(), query["project"]),
 		Query:    query.Get("query"),
 		Dates:    parseDateRange(query),
 		TraceID:  strings.TrimSpace(query.Get("trace_id")),
-		Levels:   logLevels,
-		Filter:   newFilterLinks(r),
+		Levels:   newPicker("level", "level", "All levels", "Levels", logLevels, query["level"]),
+		Filter:   newFilterLinks(r, query),
 	}
 
-	beforeID, _ := strconv.ParseInt(query.Get("before"), 10, 64)
+	page, perPage := readPaging(query)
+	filter := store.LogFilter{
+		ProjectIDs: projectIDs,
+		Levels:     query["level"],
+		Query:      data.Query,
+		TraceID:    data.TraceID,
+		Since:      data.Dates.Since,
+		Until:      data.Dates.Until,
+	}
 
-	logs, err := handler.store.ListLogs(r.Context(), store.LogFilter{
-		ProjectID: projectID,
-		Level:     data.Level,
-		Query:     data.Query,
-		TraceID:   data.TraceID,
-		Since:     data.Dates.Since,
-		Until:     data.Dates.Until,
-		BeforeID:  max(beforeID, 0),
-		Limit:     pageSize + 1,
-	})
+	total, err := handler.store.CountLogs(r.Context(), filter)
 
 	if err != nil {
 		handler.serverError(w, r, err)
@@ -539,12 +607,15 @@ func (handler *Handler) logsPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logs, more := store.Page(logs, pageSize)
+	data.Pager = newPager(data.Filter, page, perPage, total, "log-list")
+	filter.Limit, filter.Offset = perPage, (data.Pager.Page-1)*perPage
 
-	if more {
-		next := r.URL.Query()
-		next.Set("before", strconv.FormatInt(logs[len(logs)-1].ID, 10))
-		data.MoreURL = "/logs?" + next.Encode()
+	logs, err := handler.store.ListLogs(r.Context(), filter)
+
+	if err != nil {
+		handler.serverError(w, r, err)
+
+		return
 	}
 
 	issues, err := handler.store.IssuesForLogs(r.Context(), logs)
@@ -568,50 +639,9 @@ func (handler *Handler) logsPage(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case isHTMX(r) && r.Header.Get("HX-Target") == "log-list":
 		handler.renderFragment(w, r, "logs", "log-list", data)
-	case isHTMX(r) && beforeID > 0:
-		handler.renderFragment(w, r, "logs", "log-rows", data)
 	default:
 		handler.render(w, r, http.StatusOK, "logs", data)
 	}
-}
-
-type projectInfo struct {
-	ID               int
-	Name             string
-	DSN              string
-	UnresolvedIssues int
-}
-
-// projectsPage lists projects with the DSN to put into the SDK config. The DSN
-// uses the address the admin opened the UI with; behind a proxy that is the
-// public address.
-func (handler *Handler) projectsPage(w http.ResponseWriter, r *http.Request) {
-	counts, err := handler.store.UnresolvedCounts(r.Context())
-
-	if err != nil {
-		handler.serverError(w, r, err)
-
-		return
-	}
-
-	scheme := "http"
-
-	if handler.isHTTPS(r) {
-		scheme = "https"
-	}
-
-	projects := make([]projectInfo, 0, len(handler.projects))
-
-	for _, project := range handler.projects {
-		projects = append(projects, projectInfo{
-			ID:               project.ID,
-			Name:             project.Name,
-			DSN:              fmt.Sprintf("%s://%s@%s/%d", scheme, project.PublicKey, r.Host, project.ID),
-			UnresolvedIssues: counts[project.ID],
-		})
-	}
-
-	handler.render(w, r, http.StatusOK, "projects", projects)
 }
 
 // agentPrompt is the text of the "Prompt" button: what a coding agent needs

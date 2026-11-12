@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/devforth/exception-monitoring/internal/config"
 	"github.com/devforth/exception-monitoring/internal/fixtures"
 	"github.com/devforth/exception-monitoring/internal/notify"
 	"github.com/devforth/exception-monitoring/internal/sentry"
@@ -31,7 +33,7 @@ func TestFixturesEndToEnd(t *testing.T) {
 	}()
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	handler := New(logger, testSettings(), StoreSink{Store: database, Logger: logger})
+	handler := New(logger, testSettings(), fixtures.Projects(), StoreSink{Store: database, Logger: logger})
 	router := http.NewServeMux()
 	router.Handle("/api/{projectID}/envelope/{$}", handler)
 	server := &testServer{handler: handler, router: router}
@@ -158,5 +160,104 @@ func TestStoreSinkNotifies(t *testing.T) {
 
 	if len(notifier.notifications) != 2 || notifier.notifications[1].Kind != notify.Regression {
 		t.Fatalf("after the resolved issue happened again: %+v", notifier.notifications)
+	}
+}
+
+// A message logged in a loop keeps its newest RETENTION_LOGS_PER_MESSAGE
+// copies; a project can set its own number.
+func TestStoreSinkLimitsRepeatedLogs(t *testing.T) {
+	database, err := store.Open(context.Background(), t.TempDir())
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer func() { _ = database.Close() }()
+
+	sink := StoreSink{Store: database, Logger: slog.New(slog.DiscardHandler), Retention: config.Retention{LogsPerMessage: 50}}
+	three := 3
+	projects := []config.Project{{ID: 1, Name: "backend"}, {ID: 2, Name: "frontend", Retention: config.RetentionOverride{LogsPerMessage: &three}}}
+
+	for _, project := range projects {
+		for batch := range 4 {
+			var logs []sentry.Log
+
+			for index := range 25 {
+				logs = append(logs, sentry.Log{Level: "warn", Body: fmt.Sprintf("retry %d of order %d", index, batch)})
+			}
+
+			if err := sink.StoreLogs(context.Background(), project, logs); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	for projectID, want := range map[int]int{1: 50, 2: 3} {
+		var count int
+
+		if err := database.DB.QueryRow(`SELECT COUNT(*) FROM logs WHERE project_id = ?`, projectID).Scan(&count); err != nil || count != want {
+			t.Errorf("project %d: %d logs (%v), want %d", projectID, count, err, want)
+		}
+	}
+}
+
+// Events and logs of levels a project does not record are dropped: not
+// stored and no notification.
+func TestStoreSinkRecordsChosenLevels(t *testing.T) {
+	database, err := store.Open(context.Background(), t.TempDir())
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer func() { _ = database.Close() }()
+
+	notifier := &recordingNotifier{}
+	sink := StoreSink{Store: database, Logger: slog.New(slog.DiscardHandler), Notifier: notifier,
+		Recording: config.Recording{EventLevels: config.DefaultRecordEventLevels}}
+	warnOnly := []string{"warn"}
+	projects := []config.Project{{ID: 1, Name: "backend"}, {ID: 2, Name: "frontend", LogLevels: &warnOnly}}
+
+	for _, project := range projects {
+		for index, level := range []string{"error", "warning", "info", "fatal", ""} {
+			event := &sentry.Event{EventID: fmt.Sprintf("%031d%d", project.ID, index), Level: level, Message: sentry.Message("message " + level)}
+
+			if err := sink.StoreEvent(context.Background(), project, event); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		logs := []sentry.Log{{Level: "info", Body: "a"}, {Level: "warn", Body: "b"}, {Level: "error", Body: "c"}}
+
+		if err := sink.StoreLogs(context.Background(), project, logs); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	count := func(query string, args ...any) int {
+		var value int
+
+		if err := database.DB.QueryRow(query, args...).Scan(&value); err != nil {
+			t.Fatal(err)
+		}
+
+		return value
+	}
+
+	// error, fatal and an event without a level (an error) of each project.
+	if events := count(`SELECT COUNT(*) FROM events`); events != 6 {
+		t.Errorf("%d events stored, want 6", events)
+	}
+
+	if notified := len(notifier.notifications); notified != 6 {
+		t.Errorf("%d notifications, want 6: a dropped event must not notify", notified)
+	}
+
+	if logs := count(`SELECT COUNT(*) FROM logs WHERE project_id = 1`); logs != 3 {
+		t.Errorf("backend: %d logs, want every level", logs)
+	}
+
+	if logs := count(`SELECT COUNT(*) FROM logs WHERE project_id = 2 AND level = 'warn'`); logs != 1 || count(`SELECT COUNT(*) FROM logs WHERE project_id = 2`) != 1 {
+		t.Error("frontend records only warn logs")
 	}
 }

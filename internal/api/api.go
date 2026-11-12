@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -30,10 +31,10 @@ const (
 type Handler struct {
 	logger   *slog.Logger
 	store    *store.Store
-	projects config.Projects
+	projects config.ProjectList
 }
 
-func New(logger *slog.Logger, database *store.Store, projects config.Projects) *Handler {
+func New(logger *slog.Logger, database *store.Store, projects config.ProjectList) *Handler {
 	return &Handler{logger: logger, store: database, projects: projects}
 }
 
@@ -144,7 +145,7 @@ func (handler *Handler) projectFromQuery(r *http.Request) (int, error) {
 		return 0, nil
 	}
 
-	project, ok := handler.projects.Find(raw)
+	project, ok := handler.projects.List().Find(raw)
 
 	if !ok {
 		return 0, invalid("unknown project %q", raw)
@@ -153,9 +154,29 @@ func (handler *Handler) projectFromQuery(r *http.Request) (int, error) {
 	return project.ID, nil
 }
 
-// projectName is empty for data of a project removed from PROJECTS: it stays readable.
+// projectsFromQuery is projectFromQuery as a filter list: none when absent.
+func (handler *Handler) projectsFromQuery(r *http.Request) ([]int, error) {
+	id, err := handler.projectFromQuery(r)
+
+	if err != nil || id == 0 {
+		return nil, err
+	}
+
+	return []int{id}, nil
+}
+
+// levelsFromQuery is ?level= as a filter list: none when absent.
+func levelsFromQuery(query url.Values) []string {
+	if level := query.Get("level"); level != "" {
+		return []string{level}
+	}
+
+	return nil
+}
+
+// projectName is empty for data of a deleted project: it stays readable.
 func (handler *Handler) projectName(projectID int) string {
-	project, _ := handler.projects.ByID(projectID)
+	project, _ := handler.projects.List().ByID(projectID)
 
 	return project.Name
 }

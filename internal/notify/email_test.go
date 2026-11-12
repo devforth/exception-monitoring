@@ -37,16 +37,17 @@ func TestEmail(t *testing.T) {
 	event := fixtureEvent(t, "node-event-cause-chain")
 
 	notification := Notification{
-		Kind:        NewIssue,
-		Project:     "backend",
-		IssueID:     5,
-		IssueURL:    "https://errors.example.com/issues/5",
-		Title:       event.Title(),
-		Culprit:     "GET /api/debug-sentry/cause",
-		Level:       "error",
-		Environment: event.Environment,
-		Time:        time.Date(2026, 11, 12, 10, 0, 0, 0, time.UTC),
-		Event:       event,
+		Kind:         NewIssue,
+		Project:      "backend",
+		ProjectColor: "#db2777",
+		IssueID:      5,
+		IssueURL:     "https://errors.example.com/issues/5",
+		Title:        event.Title(),
+		Culprit:      "GET /api/debug-sentry/cause",
+		Level:        "error",
+		Environment:  event.Environment,
+		Time:         time.Date(2026, 11, 12, 10, 0, 0, 0, time.UTC),
+		Event:        event,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -83,6 +84,11 @@ func TestEmail(t *testing.T) {
 
 	if strings.Contains(html, "## Exception") || strings.Contains(text, "## Exception") || !strings.Contains(html, "backend-error-5.md") || !strings.Contains(text, "backend-error-5.md") {
 		t.Error("the body must mention the attached prompt, not contain it")
+	}
+
+	// The project is marked with its color.
+	if !strings.Contains(html, "border:1px solid #db2777;") {
+		t.Error("the project badge is missing")
 	}
 
 	// The long format: cause chain, source line of the throw, link, environment.

@@ -258,3 +258,15 @@ func TestCulprit(t *testing.T) {
 		t.Fatalf("culprit = %q, want the frame that threw", got)
 	}
 }
+
+func TestLogFingerprint(t *testing.T) {
+	same := LogFingerprint("order 17 failed for 0b7c9a3e-1d2f-4a5b-8c6d-7e8f9a0b1c2d")
+
+	if same != LogFingerprint("order 42 failed for 9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d") {
+		t.Error("the same message with other values must share a fingerprint")
+	}
+
+	if same == LogFingerprint("payment failed") {
+		t.Error("different messages must not share a fingerprint")
+	}
+}
