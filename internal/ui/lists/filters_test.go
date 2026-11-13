@@ -47,3 +47,35 @@ func TestActiveFilterChips(t *testing.T) {
 		t.Errorf("chips = %+v, want only the open date range (default sort is no filter)", chips)
 	}
 }
+
+// One sort at a time: a column sorts in its natural direction first, the
+// next click reverses it; the page starts over and the default is no ?sort=.
+func TestSortHeader(t *testing.T) {
+	for _, test := range []struct {
+		sort, field, direction, next string
+	}{
+		{"", "last_seen", "desc", "last_seen_asc"},
+		{"last_seen_asc", "last_seen", "asc", ""},
+		{"", "event_count", "", "event_count"},
+		{"event_count", "event_count", "desc", "event_count_asc"},
+		{"event_count", "last_seen", "", ""},
+		{"", "project", "", "project"},
+		{"project", "project", "asc", "project_desc"},
+		{"project_desc", "project", "desc", "project"},
+		{"", "id", "", "id"},
+		{"id", "id", "desc", "id_asc"},
+	} {
+		query := url.Values{"page": {"3"}, "level": {"error"}}
+
+		if test.sort != "" {
+			query.Set("sort", test.sort)
+		}
+
+		header := testLinks(query).SortHeader(test.field, "Label", "")
+		link, _ := url.Parse(header.URL)
+
+		if header.Direction != test.direction || link.Query().Get("sort") != test.next || link.Query().Has("page") || link.Query().Get("level") != "error" {
+			t.Errorf("sort %q, column %s: direction %q, link %s", test.sort, test.field, header.Direction, header.URL)
+		}
+	}
+}

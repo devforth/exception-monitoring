@@ -429,6 +429,16 @@ document.addEventListener("change", (event) => {
   updateConnectionForm(form);
 });
 
+// A field outside its form (form= attribute, like the page size under a
+// list): its events do not reach the form, so submit the form for it.
+document.addEventListener("change", (event) => {
+  const field = event.target;
+
+  if (field.form && field.hasAttribute("form") && !field.form.contains(field)) {
+    field.form.requestSubmit();
+  }
+});
+
 document.addEventListener("input", (event) => {
   if (event.target.matches("form.connection-form input")) {
     updateConnectionForm(event.target.form);

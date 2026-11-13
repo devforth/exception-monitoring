@@ -4,7 +4,7 @@
 {{with .Data}}
 <h1>Logs</h1>
 
-<form class="filters" method="get" action="/logs"
+<form class="filters" id="log-filters" method="get" action="/logs"
       hx-get="/logs" hx-target="#log-list" hx-swap="outerHTML"
       hx-trigger="input delay:300ms, submit" hx-push-url="true" hx-sync="this:replace">
   {{template "picker" .Projects}}
@@ -15,7 +15,6 @@
   <input type="search" name="trace_id" value="{{.TraceID}}" placeholder="Trace ID" aria-label="Trace ID">
 
   {{template "date-range" .Dates}}
-  {{template "per-page" .Pager}}
 </form>
 
 {{template "log-list" $}}

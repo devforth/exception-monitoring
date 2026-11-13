@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -458,5 +459,58 @@ func TestSaveEventKeepsNewestPerIssue(t *testing.T) {
 
 	if issue, _ := database.GetIssue(context.Background(), issueID); fmt.Sprint(kept) != "[e2 e3 e4]" || issue.EventCount != 5 {
 		t.Fatalf("kept %v, event count %d", kept, issue.EventCount)
+	}
+}
+
+// Every sort has a reverse; the project sorts by name, the newest issue of
+// a project first.
+func TestIssueSorts(t *testing.T) {
+	database := openTestStore(t)
+	ctx := context.Background()
+
+	for _, project := range []Project{{ID: 1, Name: "web", PublicKey: "aaaaaaaaaaaaaaaa"}, {ID: 2, Name: "Api", PublicKey: "bbbbbbbbbbbbbbbb"}} {
+		if err := database.SeedProject(ctx, project, baseTime); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	event := func(eventID, fingerprint string, projectID int, at time.Time) int64 {
+		newEvent := testEvent(eventID, fingerprint, at)
+		newEvent.ProjectID = projectID
+
+		return save(t, database, newEvent).IssueID
+	}
+	webOld := event("w1", "web-old", 1, baseTime)
+	webNew := event("w2", "web-new", 1, baseTime.Add(2*time.Hour))
+	api := event("a1", "api", 2, baseTime.Add(time.Hour))
+	event("a2", "api", 2, baseTime.Add(3*time.Hour)) // api: 2 events, seen last
+
+	for sort, want := range map[string][]int64{
+		"":                {api, webNew, webOld},
+		"last_seen_asc":   {webOld, webNew, api},
+		"first_seen":      {webNew, api, webOld},
+		"first_seen_asc":  {webOld, api, webNew},
+		"event_count":     {api, webNew, webOld},
+		"event_count_asc": {webOld, webNew, api},
+		"project":         {api, webNew, webOld}, // "Api" before "web": case does not matter
+		"project_desc":    {webNew, webOld, api},
+		"id":              {api, webNew, webOld},
+		"id_asc":          {webOld, webNew, api},
+	} {
+		issues, err := database.ListIssues(ctx, IssueFilter{Sort: sort, Limit: 10})
+
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var got []int64
+
+		for _, issue := range issues {
+			got = append(got, issue.ID)
+		}
+
+		if !slices.Equal(got, want) {
+			t.Errorf("sort %q: %v, want %v", sort, got, want)
+		}
 	}
 }

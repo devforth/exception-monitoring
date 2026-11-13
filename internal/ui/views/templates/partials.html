@@ -9,6 +9,10 @@
   {{with .Label}}<span>{{.}}</span>{{end}}
 </button>{{end}}
 
+{{/* A sortable column heading (lists.SortHeader): arrows up and down, the
+     current direction highlighted; it swaps the issue list. */}}
+{{define "sort-header"}}<th class="sortable{{with .Class}} {{.}}{{end}}"{{with .AriaSort}} aria-sort="{{.}}"{{end}}><a href="{{.URL}}" hx-get="{{.URL}}" hx-target="#issue-list" hx-swap="outerHTML" hx-push-url="true" title="{{.Title}}">{{.Label}}<svg class="sort-arrows {{.Direction}}" viewBox="0 0 10 16" aria-hidden="true"><path class="up" d="M5 1 9 6H1Z"/><path class="down" d="M5 15 1 10h8Z"/></svg></a></th>{{end}}
+
 {{/* The link back to the page above (back "/projects" "Projects"); Esc
      follows it too (app.js, data-back). */}}
 {{define "back"}}<p class="back"><a href="{{.URL}}" data-back title="Back (Esc)">← {{.Label}}</a></p>{{end}}
@@ -28,8 +32,10 @@
 {{define "badge-class"}}{{if eq .Kind "project"}}class="project" data-project="{{.Name}}"{{else if eq .Kind "status"}}class="status status-{{.Name}}"{{else}}class="badge {{levelClass .Name}}"{{end}}{{end}}
 {{define "badge-text"}}{{if eq .Kind "status"}}{{template "status-icon" .Name}} {{end}}{{.Name}}{{end}}
 
-{{/* Status icon: ● unresolved, ✓ resolved, ⊘ ignored; the name is in the tooltip and for screen readers. */}}
-{{define "status-icon"}}<span class="status-icon status-{{.}}" title="{{.}}" role="img" aria-label="{{.}}">{{if eq . "resolved"}}✓{{else if eq . "ignored"}}⊘{{else}}●{{end}}</span>{{end}}
+{{/* What an issue status means: the tooltip of its icon and of an issue row. */}}
+{{define "status-title"}}{{if eq . "resolved"}}Resolved: fixed, reopens if the error happens again{{else if eq . "ignored"}}Ignored: no notifications, stays ignored{{else}}Unresolved: still happening or not looked at yet{{end}}{{end}}
+{{/* Status icon: ● unresolved, ✓ resolved, ⊘ ignored; hovering it says what the status means, the name is for screen readers. */}}
+{{define "status-icon"}}<span class="status-icon status-{{.}}" title="{{template "status-title" .}}" role="img" aria-label="{{.}}">{{if eq . "resolved"}}✓{{else if eq . "ignored"}}⊘{{else}}●{{end}}</span>{{end}}
 
 
 
@@ -56,15 +62,17 @@
 <input type="date" name="to" value="{{.To}}" min="{{.From}}" max="{{.Today}}" aria-label="To date" title="To, inclusive (UTC)">
 {{end}}
 
-{{/* Rows per page, in the filter form (changing it starts from page 1). */}}
+{{/* The page size, under the list next to the pages. It belongs to the
+     filter form (form=), so it is sent with the filters, and app.js submits
+     the form when it changes. */}}
 {{define "per-page"}}
-<select name="per_page" aria-label="Rows per page">
+<select name="per_page" aria-label="Rows per page" form="{{.Form}}">
   {{range .PerPageChoices}}<option value="{{.}}" {{if eq . $.PerPage}}selected{{end}}>{{.}} per page</option>{{end}}
 </select>
 {{end}}
 
-{{/* Under a list: "21–40 of 134" and page links; htmx swaps only the list
-     (.Target) and keeps the page in the URL. */}}
+{{/* Under a list: "21–40 of 134", page links and the page size; htmx swaps
+     only the list (.Target) and keeps the page in the URL. */}}
 {{define "pager"}}
 {{if gt .Total 0}}
 <nav class="pager" aria-label="Pages">
@@ -76,6 +84,7 @@
     {{if .NextURL}}<a href="{{.NextURL}}" hx-get="{{.NextURL}}" hx-target="#{{.Target}}" hx-swap="outerHTML show:top" hx-push-url="true" rel="next">Next →</a>{{else}}<span class="disabled">Next →</span>{{end}}
   </span>
   {{end}}
+  {{template "per-page" .}}
 </nav>
 {{end}}
 {{end}}

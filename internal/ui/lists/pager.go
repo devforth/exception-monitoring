@@ -4,6 +4,7 @@ import (
 	"net/url"
 	"slices"
 	"strconv"
+	"strings"
 )
 
 // Pagination of the issue and log lists: ?page=N, ?per_page=20|50|100. Both
@@ -38,6 +39,7 @@ type Pager struct {
 	NextURL        string
 	Links          []PageLink
 	Target         string // the element htmx replaces ("issue-list", "log-list")
+	Form           string // the filter form the page size belongs to ("issue-filters", "log-filters")
 }
 
 type PageLink struct {
@@ -57,6 +59,7 @@ func NewPager(links FilterLinks, page, perPage, total int, target string) Pager 
 	page = min(page, pages)
 	result := Pager{
 		Page: page, Pages: pages, Total: total, PerPage: perPage, PerPageChoices: PerPageChoices, Target: target,
+		Form:  strings.TrimSuffix(target, "-list") + "-filters",
 		First: min(total, (page-1)*perPage+1), Last: min(total, page*perPage),
 	}
 

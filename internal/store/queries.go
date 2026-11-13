@@ -65,7 +65,7 @@ type IssueFilter struct {
 	Levels     []string // any of these levels
 	Status     string
 	Query      string // substring of the title or culprit
-	Sort       string // "last_seen" (default), "first_seen" or "event_count"
+	Sort       string // a key of issueSorts; "" is last_seen
 	// SeenSince and SeenUntil bound the date given by DateField to
 	// [SeenSince, SeenUntil). Zero means no bound.
 	SeenSince time.Time
@@ -132,11 +132,24 @@ func (filter IssueFilter) dateCondition() (string, []any) {
 	return condition, args
 }
 
-// Issue sort orders. The id tiebreaker keeps the order stable between pages.
+// projectName orders issues by the name of their project.
+const projectName = "(SELECT name FROM projects WHERE projects.id = issues.project_id) COLLATE NOCASE"
+
+// Issue sort orders: dates and counts newest or most first, "_asc" reverses
+// them; the project A to Z, "project_desc" reverses it (the newest issues of
+// a project first either way). The id tiebreaker keeps the order stable
+// between pages.
 var issueSorts = map[string]string{
-	"last_seen":   "last_seen DESC, id DESC",
-	"first_seen":  "first_seen DESC, id DESC",
-	"event_count": "event_count DESC, id DESC",
+	"id":              "id DESC",
+	"id_asc":          "id ASC",
+	"project":         projectName + " ASC, last_seen DESC, id DESC",
+	"project_desc":    projectName + " DESC, last_seen DESC, id DESC",
+	"last_seen":       "last_seen DESC, id DESC",
+	"last_seen_asc":   "last_seen ASC, id ASC",
+	"first_seen":      "first_seen DESC, id DESC",
+	"first_seen_asc":  "first_seen ASC, id ASC",
+	"event_count":     "event_count DESC, id DESC",
+	"event_count_asc": "event_count ASC, id ASC",
 }
 
 // ValidIssueSort reports whether sort is a supported IssueFilter.Sort value.

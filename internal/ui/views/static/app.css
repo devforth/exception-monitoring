@@ -10,6 +10,8 @@
   --current-line: #fff3c4;
   --error: #c62828;
   --error-bg: #fdecea;
+  --success-bg: #e8f5e9;
+  --stripe: rgb(0 0 0 / .035); /* every second table row, over any row color */
   --warning: #9a6700;
   --warning-bg: #fff4d6;
   --info: #1f5fbf;
@@ -33,6 +35,8 @@
     --current-line: #3d3517;
     --error: #ff8a80;
     --error-bg: #3b1f1f;
+    --success-bg: #1d3323;
+    --stripe: rgb(255 255 255 / .04);
     --warning: #ffd166;
     --warning-bg: #3a3118;
     --info: #8ab4ff;
@@ -142,6 +146,9 @@ table.list { width: 100%; border-collapse: collapse; background: var(--surface);
 table.list th, table.list td { padding: 10px 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
 table.list th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }
 table.list tr:last-child td { border-bottom: none; }
+/* Every second row a shade darker, so rows do not blend; an overlay, so it
+   works over the row's own color (status, selection). */
+table.list tbody tr:nth-child(even) > td { background-image: linear-gradient(var(--stripe), var(--stripe)); }
 table.list.compact th, table.list.compact td { padding: 6px 10px; }
 table.list.kv th { width: 30%; text-transform: none; font-size: 13px; letter-spacing: 0; word-break: break-all; }
 table.list td { word-break: break-word; }
@@ -160,12 +167,14 @@ a.badge, a.project { text-decoration: none; }
 a.badge:hover, a.project:hover { filter: brightness(.92); }
 
 .issue-title { color: var(--text); font-weight: 600; }
+.issue-id { color: var(--text); }
 .muted { color: var(--muted); }
 .small { font-size: 12px; }
 .empty { color: var(--muted); padding: 32px; text-align: center; background: var(--surface); border: 1px dashed var(--border); border-radius: 8px; }
 
 .badge { display: inline-block; white-space: nowrap; padding: 1px 7px; border-radius: 10px; font-size: 11px; font-weight: 600; vertical-align: 2px; text-transform: lowercase; }
-.level-error { color: var(--error); background: var(--error-bg); }
+/* A shade deeper than --error-bg, so it stands out on the red rows of unresolved issues. */
+.level-error { color: var(--error); background: color-mix(in srgb, var(--error-bg) 90%, var(--error)); }
 .level-warning { color: var(--warning); background: var(--warning-bg); }
 .level-info { color: var(--info); background: var(--info-bg); }
 .level-debug { color: var(--debug); background: var(--debug-bg); }
@@ -176,7 +185,15 @@ a.badge:hover, a.project:hover { filter: brightness(.92); }
 .status-unresolved { color: var(--error); }
 .status-icon { display: inline-block; width: 1.1em; text-align: center; font-weight: 700; line-height: 1; }
 .status-icon.status-unresolved { font-size: .8em; }
-label.pick { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; white-space: nowrap; }
+/* Issue rows by status: unresolved on a red tint, resolved on a green one,
+   ignored faded. The tints alternate (a bit lighter than the badge color,
+   then lighter still) instead of the grey stripe of other tables. */
+tr.issue-unresolved { --row-tint: var(--error-bg); --row-light: 60%; --row-dark: 75%; }
+tr.issue-resolved { --row-tint: var(--success-bg); --row-light: 55%; --row-dark: 85%; }
+tr.issue-unresolved, tr.issue-resolved { background: color-mix(in srgb, var(--row-tint) var(--row-light), var(--surface)); }
+tr.issue-unresolved:nth-child(even), tr.issue-resolved:nth-child(even) { background: color-mix(in srgb, var(--row-tint) var(--row-dark), var(--surface)); }
+table.list tbody tr.issue-unresolved > td, table.list tbody tr.issue-resolved > td { background-image: none; }
+tr.issue-ignored { opacity: .5; }
 
 /* A project badge: text and outline in the project color, no fill, so it is
    told apart from the filled level badges at a glance. The color comes from
@@ -208,8 +225,13 @@ label.pick { display: inline-flex; align-items: center; gap: 6px; cursor: pointe
 .issue-header .actions { flex-wrap: wrap; }
 .actions .copy-button { margin-left: auto; }
 .actions .copy-button + .copy-button { margin-left: 0; }
+/* In list rows the labelled copy button (MCP) looks as on the issue page, sized to its label. */
+.connection-actions .copy-button { margin-left: 0; width: auto; height: 34px; padding: 7px 10px; }
 .copy-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 36px; padding: 8px 12px; background: var(--info-bg); color: var(--info); border-color: var(--info); }
 .copy-button:hover { background: var(--info); color: var(--surface); border-color: var(--info); }
+/* An accent link button: opening the issue, next to the blue copy button in the list. */
+a.button.accent { background: color-mix(in srgb, var(--accent) 12%, var(--surface)); color: var(--accent); border-color: var(--accent); }
+a.button.accent:hover { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 .copy-button svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .copy-toast { position: fixed; right: 20px; bottom: 20px; z-index: 1000; max-width: min(360px, calc(100vw - 40px)); padding: 12px 16px; border: 1px solid var(--info); border-radius: 8px; background: var(--info-bg); color: var(--info); box-shadow: 0 4px 20px rgb(0 0 0 / .15); }
 .copy-toast:empty { display: none; }
@@ -449,3 +471,12 @@ pre.snippet { background: var(--code-bg); padding: 10px; border-radius: 6px; ove
   .mcp-token-row { flex-wrap: wrap; }
   .mcp-token-row > input { flex-basis: calc(100% - 140px); }
 }
+
+/* Sortable column headings: both arrows dim, the current direction strong. */
+th.sortable a { display: inline-flex; align-items: center; gap: 4px; color: inherit; text-decoration: none; }
+th.sortable a:hover { color: var(--text); }
+th.number.sortable a { flex-direction: row-reverse; }
+.sort-arrows { width: 8px; height: 13px; flex-shrink: 0; fill: currentColor; }
+.sort-arrows path { opacity: .3; }
+.sort-arrows.asc .up, .sort-arrows.desc .down { opacity: 1; }
+th[aria-sort] { color: var(--text); }

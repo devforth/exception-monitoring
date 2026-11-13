@@ -64,6 +64,25 @@ func TestIssueDetails(t *testing.T) {
 		t.Fatal("copy prompt button must not submit the issue action form")
 	}
 
+	// The issue's ID and the MCP request of notifications, on the list and the page.
+	reference := `data-copy-text="Exception Monitoring MCP: get_issue {"issue_id":` + ids[0] + `}"`
+
+	for name, page := range map[string]string{"list": list, "issue page": body} {
+		if !strings.Contains(html.UnescapeString(page), reference) {
+			t.Errorf("%s lacks the MCP request copy button", name)
+		}
+	}
+
+	// Columns: checkbox, ID, then the issue; the row shows the status (its
+	// meaning on hover).
+	row := `<tr class="issue-unresolved" title="Unresolved: still happening or not looked at yet">
+  <td class="check"><input type="checkbox" name="issue" value="` + ids[0] + `" aria-label="Select issue ` + ids[0] + `"></td>
+  <td class="number"><a class="issue-id" href="/issues/` + ids[0] + `">` + ids[0] + `</a></td>`
+
+	if !strings.Contains(list, row) || !strings.Contains(body, "<dt>ID</dt><dd>"+ids[0]+"</dd>") {
+		t.Error("the issue ID is not shown")
+	}
+
 	for _, want := range []string{
 		"Caused by",            // cause chain
 		"connect ECONNREFUSED", // inner error
@@ -174,7 +193,7 @@ func TestIssueOpenButton(t *testing.T) {
 	list := server.page("/issues")
 	id := issueIDs(list)[0]
 
-	if !strings.Contains(list, `<a class="button" href="/issues/`+id+`" title="Open the issue"`) {
+	if !strings.Contains(list, `<a class="button accent" href="/issues/`+id+`" title="Open the issue"`) {
 		t.Fatal("the open button is missing")
 	}
 }
@@ -413,12 +432,18 @@ func TestIssueRowsShowStatus(t *testing.T) {
 			t.Fatalf("issue %s not in the list", id)
 		}
 
-		return list[start : start+300]
+		// The row starts before the checkbox.
+		return list[strings.LastIndex(list[:start], "<tr"):start]
 	}
 
-	for id, want := range map[string]string{ids[0]: `aria-label="ignored">⊘`, ids[1]: `aria-label="resolved">✓`, ids[2]: `aria-label="unresolved">●`} {
+	// The status is the row's look, explained on hover.
+	for id, want := range map[string]string{
+		ids[0]: `<tr class="issue-ignored" title="Ignored: no notifications, stays ignored">`,
+		ids[1]: `<tr class="issue-resolved" title="Resolved: fixed, reopens if the error happens again">`,
+		ids[2]: `<tr class="issue-unresolved" title="Unresolved: still happening or not looked at yet">`,
+	} {
 		if !strings.Contains(row(id), want) {
-			t.Errorf("issue %s: status icon %q missing in %q", id, want, row(id))
+			t.Errorf("issue %s: %q missing in %q", id, want, row(id))
 		}
 	}
 }

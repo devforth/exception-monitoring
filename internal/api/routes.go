@@ -102,7 +102,7 @@ func (handler *Handler) issueFilter(r *http.Request) (store.IssueFilter, error) 
 	filter.Sort = query.Get("sort")
 
 	if !store.ValidIssueSort(filter.Sort) {
-		return filter, invalid("sort must be last_seen, first_seen or event_count")
+		return filter, invalid("sort must be id, last_seen, first_seen or event_count (optionally with _asc), project or project_desc")
 	}
 
 	// since/until bound the date chosen by date_by: "event" (default, any event

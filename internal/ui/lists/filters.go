@@ -76,7 +76,11 @@ var issueFilterFields = []filterField{
 	{key: "level", label: "Level", badges: "level"},
 	{key: "query", label: "Search"},
 	{label: "Dates", dates: true},
-	{key: "sort", label: "Sort", unset: "last_seen", names: map[string]string{"first_seen": "first seen", "event_count": "most events"}},
+	{key: "sort", label: "Sort", unset: "last_seen", names: map[string]string{
+		"last_seen_asc": "last seen, oldest first", "first_seen": "first seen, newest first", "first_seen_asc": "first seen, oldest first",
+		"event_count": "most events", "event_count_asc": "fewest events", "project": "project A–Z", "project_desc": "project Z–A",
+		"id": "newest issues", "id_asc": "oldest issues",
+	}},
 }
 
 var logFilterFields = []filterField{
@@ -197,4 +201,76 @@ func (links FilterLinks) datesChip(field filterField) []ActiveFilter {
 	}
 
 	return []ActiveFilter{{Label: field.label, Value: value, RemoveURL: links.url(without)}}
+}
+
+// DefaultIssueSort is the order of the issue list without ?sort=.
+const DefaultIssueSort = "last_seen"
+
+// SortHeader is a sortable column heading of the issue list.
+type SortHeader struct {
+	Label, Class string
+	URL          string // the list sorted by this column, or reversed when it already is
+	Direction    string // "desc" or "asc" when the list is sorted by this column
+	Title        string
+}
+
+// AriaSort is the column's aria-sort value, empty when it is not sorted by.
+func (header SortHeader) AriaSort() string {
+	switch header.Direction {
+	case "asc":
+		return "ascending"
+	case "desc":
+		return "descending"
+	}
+
+	return ""
+}
+
+// sortColumns are the sortable columns of the issue list by their ?sort=
+// value in the natural direction (first): dates and counts newest or most
+// first, the project A to Z. reversed is the value of the other direction.
+var sortColumns = map[string]struct{ reversed, first string }{
+	"id":          {"id_asc", "desc"},
+	"last_seen":   {"last_seen_asc", "desc"},
+	"first_seen":  {"first_seen_asc", "desc"},
+	"event_count": {"event_count_asc", "desc"},
+	"project":     {"project_desc", "asc"},
+}
+
+// SortHeader builds the heading of the column sorted by field: one sort at
+// a time; the first click sorts in the column's natural direction, the next
+// reverses it. The page starts over, the other filters stay.
+func (links FilterLinks) SortHeader(field, label, class string) SortHeader {
+	current := links.query.Get("sort")
+
+	if current == "" {
+		current = DefaultIssueSort
+	}
+
+	column := sortColumns[field]
+	header := SortHeader{Label: label, Class: class, Title: "Sort by " + strings.ToLower(label)}
+	next := field
+
+	switch current {
+	case field:
+		header.Direction, next = column.first, column.reversed
+	case column.reversed:
+		header.Direction = map[string]string{"asc": "desc", "desc": "asc"}[column.first]
+	}
+
+	if header.Direction != "" {
+		header.Title = "Reverse the order"
+	}
+
+	query := links.firstPage()
+
+	if next == DefaultIssueSort {
+		query.Del("sort")
+	} else {
+		query.Set("sort", next)
+	}
+
+	header.URL = links.url(query)
+
+	return header
 }

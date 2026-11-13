@@ -2,6 +2,7 @@ package ui_test
 
 import (
 	"fmt"
+	"html"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -50,6 +51,14 @@ func TestPagination(t *testing.T) {
 	// A bigger page size keeps the filters; with one page there are no links.
 	all := server.page("/issues?per_page=50&level=error")
 
+	// The page size sits with the pages under the list and belongs to the
+	// filter form, so it is sent with the filters.
+	pager := all[strings.Index(all, `<nav class="pager"`):]
+
+	if !strings.Contains(pager, `<select name="per_page" aria-label="Rows per page" form="issue-filters">`) || !strings.Contains(pager, `<option value="50" selected>`) {
+		t.Error("the page size is not under the issue list")
+	}
+
 	if count := len(issueIDs(all)); count != 45 || strings.Contains(all, `rel="next"`) || !strings.Contains(all, `<option value="50" selected>`) {
 		t.Errorf("per_page=50: %d issues", count)
 	}
@@ -78,6 +87,10 @@ func TestLogPagination(t *testing.T) {
 	server.sendEnvelope(fixtures.BackendEnvelopeURL, []byte(`{}`+"\n"+`{"type":"log","item_count":25,"content_type":"application/vnd.sentry.items.log+json"}`+"\n"+`{"items":[`+strings.Join(items, ",")+`]}`))
 
 	first := server.page("/logs")
+
+	if !strings.Contains(first, `<form class="filters" id="log-filters"`) || !strings.Contains(first, `form="log-filters">`) {
+		t.Error("the log page size does not belong to the log filters")
+	}
 
 	if !strings.Contains(first, "1–20 of 25") || !strings.Contains(first, "paged log 24") || strings.Contains(first, "paged log 4<") {
 		t.Fatal("first page of logs")
@@ -425,5 +438,37 @@ func TestLogsPage(t *testing.T) {
 
 	if !strings.Contains(server.page("/logs?level=warn"), "slow query") {
 		t.Fatal("level filter")
+	}
+}
+
+// The issue list is sorted by its column headings, one sort at a time; the
+// chosen sort belongs to the filter form, so changing a filter keeps it.
+func TestIssueSortHeadings(t *testing.T) {
+	server := newTestServer(t, password)
+	server.login()
+	server.ingestFixtures()
+
+	page := html.UnescapeString(server.page("/issues"))
+
+	for _, want := range []string{
+		`<th class="sortable number"><a href="/issues?sort=event_count"`,
+		`<th class="sortable" aria-sort="descending"><a href="/issues?sort=last_seen_asc"`,
+		`<th class="sortable"><a href="/issues?sort=project"`,
+		`<th class="sortable number"><a href="/issues?sort=id"`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("missing %s", want)
+		}
+	}
+
+	if strings.Contains(page, `<select name="sort"`) || strings.Contains(page, `name="sort" value=`) {
+		t.Error("the default sort needs no field")
+	}
+
+	sorted := html.UnescapeString(server.page("/issues?sort=event_count&page=1"))
+
+	if !strings.Contains(sorted, `<input type="hidden" name="sort" value="event_count" form="issue-filters">`) ||
+		!strings.Contains(sorted, `aria-sort="descending"><a href="/issues?sort=event_count_asc"`) {
+		t.Errorf("sorted by events:\n%s", sorted)
 	}
 }
