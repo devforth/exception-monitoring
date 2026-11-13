@@ -118,6 +118,7 @@ type connectionRow struct {
 	StatusClass string // active, inactive or awaiting
 	Active      bool
 	Verified    bool
+	Delivery    store.DeliveryHealth
 }
 
 type connectionsView struct {
@@ -144,10 +145,20 @@ func (handler *Handler) connectionsPage(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	health, err := handler.store.DeliveryHealthByChannel(r.Context())
+
+	if err != nil {
+		handler.serverError(w, r, err)
+
+		return
+	}
+
 	view := connectionsView{Notice: notices[r.URL.Query().Get("notice")]}
 
 	for _, connection := range connections {
-		view.Rows = append(view.Rows, handler.connectionRow(connection))
+		row := handler.connectionRow(connection)
+		row.Delivery = health[strconv.FormatInt(connection.ID, 10)]
+		view.Rows = append(view.Rows, row)
 	}
 
 	for _, channelType := range config.AllChannelTypes {

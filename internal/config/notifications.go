@@ -16,8 +16,10 @@ import (
 // allowed and provides what they need: SMTP for email, SECRET_KEY to encrypt
 // tokens in the database.
 type Notifications struct {
-	// PublicURL is where the UI is reachable (e.g. https://errors.example.com),
-	// used for links in notifications. Empty means messages carry no link.
+	// PublicURL is where the server is reachable (e.g. https://errors.example.com),
+	// used for links in notifications and for the DSNs shown on the Projects
+	// page. Empty means messages carry no link and DSNs use the address the
+	// UI was opened with.
 	PublicURL string
 
 	// ChannelTypes are the connection types allowed (NOTIFY_CHANNEL_TYPES).

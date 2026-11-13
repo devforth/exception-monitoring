@@ -53,7 +53,7 @@
       <thead>
         <tr>
           <th class="check"><input type="checkbox" class="select-all" aria-label="Select all issues"></th>
-          <th>Issue</th><th>Project</th><th class="number">Events</th><th>Last seen</th><th>First seen</th>{{if .ShowResolved}}<th>Resolved</th>{{end}}
+          <th>Issue</th><th>Project</th><th class="number">Events</th><th>Last seen</th><th>First seen</th>{{if .ShowResolved}}<th>Resolved</th>{{end}}<th class="actions-column"><span class="visually-hidden">Actions</span></th>
         </tr>
       </thead>
       <tbody>
@@ -83,6 +83,13 @@
   <td>{{template "time" .LastSeen}}</td>
   <td>{{template "time" .FirstSeen}}</td>
   {{if $.Data.ShowResolved}}<td>{{if .ResolvedAt}}{{template "time" .Resolved}}{{else}}<span class="muted">—</span>{{end}}</td>{{end}}
+  <td class="actions-column">
+    <div class="actions connection-actions">
+      <a class="button" href="/issues/{{.ID}}" title="Open the issue" aria-label="Open the issue {{.Title}}">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z"/></svg>
+      </a>
+    </div>
+  </td>
 </tr>
 {{end}}
 {{end}}

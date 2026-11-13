@@ -2,7 +2,7 @@
 
 {{define "content"}}
 {{with .Data}}
-<p class="back"><a href="/issues">← Issues</a></p>
+{{template "back" (back "/issues" "Issues")}}
 
 <section class="issue-header">
   <h1>{{template "badge" (levelBadge .Issue.Level)}} {{.Issue.Title}}</h1>

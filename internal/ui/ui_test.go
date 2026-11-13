@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"html"
+	"slices"
 	"strconv"
 	"time"
 
@@ -78,7 +79,14 @@ func openDatabase(t *testing.T) *store.Store {
 
 // startServer builds a server on an existing database, like a restart of the
 // real server with possibly different settings.
-func startServer(t *testing.T, database *store.Store, adminUsername, adminPassword string) *testServer {
+// newTestServerWith is newTestServer with settings changed by configure.
+func newTestServerWith(t *testing.T, configure func(settings *config.Config)) *testServer {
+	t.Helper()
+
+	return startServer(t, openDatabase(t), "admin", password, configure)
+}
+
+func startServer(t *testing.T, database *store.Store, adminUsername, adminPassword string, configure ...func(settings *config.Config)) *testServer {
 	t.Helper()
 
 	logger := slog.New(slog.NewTextHandler(testLog{t}, nil))
@@ -92,6 +100,10 @@ func startServer(t *testing.T, database *store.Store, adminUsername, adminPasswo
 		Notifications: config.Notifications{ChannelTypes: config.AllChannelTypes, SecretKey: secretKey, SMTP: smtp},
 		// Shown on the Projects page; nothing is deleted by the UI.
 		Retention: config.Retention{Events: 30 * 24 * time.Hour, Logs: 24 * time.Hour, MaxDatabaseBytes: 2 << 30, Issues: 365 * 24 * time.Hour},
+	}
+
+	for _, change := range configure {
+		change(settings)
 	}
 
 	box, err := secret.New(secretKey)
@@ -219,11 +231,15 @@ func (server *testServer) sendEnvelope(target string, body []byte) {
 
 var issueLink = regexp.MustCompile(`href="/issues/(\d+)"`)
 
+// issueIDs lists the issues linked from a page, each once and in order (a
+// list row links its issue from the title and from the open button).
 func issueIDs(html string) []string {
 	var ids []string
 
 	for _, match := range issueLink.FindAllStringSubmatch(html, -1) {
-		ids = append(ids, match[1])
+		if !slices.Contains(ids, match[1]) {
+			ids = append(ids, match[1])
+		}
 	}
 
 	return ids

@@ -1,5 +1,9 @@
 {{/* Small pieces shared by pages. */}}
 
+{{/* The link back to the page above (back "/projects" "Projects"); Esc
+     follows it too (app.js, data-back). */}}
+{{define "back"}}<p class="back"><a href="{{.URL}}" data-back title="Back (Esc)">← {{.Label}}</a></p>{{end}}
+
 {{define "time"}}<time datetime="{{isoTime .}}" title="{{fullTime .}}">{{timeAgo .}}</time>{{end}}
 
 {{/* A project or level badge (badgeView): a link when it has a URL, a

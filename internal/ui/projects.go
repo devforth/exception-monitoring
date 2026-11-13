@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -54,9 +55,15 @@ var projectNotices = map[string]string{
 	"deleted": "Project and its data deleted.",
 }
 
-// dsn is the DSN of a project at the address the admin opened the UI with;
-// behind a proxy that is the public address.
+// dsn is the DSN of a project: at PUBLIC_URL when it is set (the address
+// SDKs reach, which may differ from the one the admin opened the UI with),
+// otherwise at the address of this request (https behind a trusted proxy
+// that says so). The scheme stays: SDKs need it to parse the DSN.
 func (handler *Handler) dsn(r *http.Request, project config.Project) string {
+	if public, err := url.Parse(handler.notifications.PublicURL); err == nil && public.Host != "" {
+		return fmt.Sprintf("%s://%s@%s%s/%d", public.Scheme, project.PublicKey, public.Host, strings.TrimRight(public.Path, "/"), project.ID)
+	}
+
 	scheme := "http"
 
 	if handler.isHTTPS(r) {

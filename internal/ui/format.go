@@ -26,6 +26,7 @@ var templateFuncs = template.FuncMap{
 	"parseRequest": parseRequest,
 	"short":        short,
 	"asset":        assetURL,
+	"back":         func(url, label string) map[string]string { return map[string]string{"URL": url, "Label": label} },
 	"projectBadge": projectBadge,
 	"levelBadge":   levelBadge,
 	"statusBadge":  statusBadge,

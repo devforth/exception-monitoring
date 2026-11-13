@@ -1,6 +1,7 @@
 package notify
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -57,4 +58,34 @@ func truncate(text string, limit int) string {
 	}
 
 	return string(runes[:limit-1]) + "…"
+}
+
+// Description is what the delivery log shows of an outbox message.
+type Description struct {
+	Label        string // "New issue", "Regression", "Test message" or "Summary"
+	Project      string
+	ProjectColor string
+	Title        string // the issue; for a summary, how many issues it covers
+	IssueID      int64
+}
+
+// Describe reads an outbox message (kind "notification" or "summary") for
+// display. A payload that does not parse gives what could be read.
+func Describe(kind string, payload []byte) Description {
+	if kind == kindSummary {
+		var summary Summary
+
+		_ = json.Unmarshal(payload, &summary)
+
+		return Description{Label: "Summary", Title: summary.heading()}
+	}
+
+	var notification Notification
+
+	_ = json.Unmarshal(payload, &notification)
+
+	return Description{
+		Label: notification.Kind.label(), Project: notification.Project, ProjectColor: notification.ProjectColor,
+		Title: notification.Title, IssueID: notification.IssueID,
+	}
 }

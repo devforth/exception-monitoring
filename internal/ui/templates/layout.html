@@ -14,22 +14,39 @@
   <script src="{{asset "app.js"}}" defer></script>
 </head>
 <body>
+  <div class="app {{if .SidebarCollapsed}}sidebar-collapsed{{end}}">
   {{if .LoggedIn}}
-  <header class="topbar">
-    <a class="brand" href="/issues">Exception Monitoring</a>
-    <nav>
-      <a href="/issues" {{if eq .Page "issues" "issue"}}class="active"{{end}}>Issues</a>
-      <a href="/logs" {{if eq .Page "logs"}}class="active"{{end}}>Logs</a>
-      <a href="/projects" {{if eq .Page "projects" "project"}}class="active"{{end}}>Projects</a>
-      <a href="/notifications" {{if eq .Page "notifications" "connection"}}class="active"{{end}}>Notifications</a>
+  <aside class="sidebar">
+    <div class="sidebar-head">
+      <a class="brand" href="/issues">Exception Monitoring</a>
+      <button type="button" class="sidebar-toggle" aria-label="Collapse or expand the menu" title="Collapse or expand the menu" aria-expanded="{{if .SidebarCollapsed}}false{{else}}true{{end}}">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+      </button>
+    </div>
+    <nav aria-label="Main">
+      <a href="/issues" title="Issues" {{if eq .Page "issues" "issue"}}class="active" aria-current="page"{{end}}>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 20h20L12 3Z M12 10v4 M12 17h.01"/></svg><span>Issues</span>
+      </a>
+      <a href="/logs" title="Logs" {{if eq .Page "logs"}}class="active" aria-current="page"{{end}}>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16 M4 12h16 M4 18h10"/></svg><span>Logs</span>
+      </a>
+      <a href="/projects" title="Projects" {{if eq .Page "projects" "project"}}class="active" aria-current="page"{{end}}>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg><span>Projects</span>
+      </a>
+      <a href="/notifications" title="Notifications" {{if eq .Page "notifications" "connection"}}class="active" aria-current="page"{{end}}>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4Z M10 21h4"/></svg><span>Notifications</span>
+      </a>
     </nav>
-    <form method="post" action="/logout">
-      <button type="submit" class="link">Log out</button>
+    <form class="logout" method="post" action="/logout">
+      <button type="submit" class="link" title="Log out">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 4h4v16h-4 M10 8l-4 4 4 4 M6 12h10"/></svg><span>Log out</span>
+      </button>
     </form>
-  </header>
+  </aside>
   {{end}}
   <main>
     {{template "content" .}}
   </main>
+  </div>
 </body>
 </html>{{end}}

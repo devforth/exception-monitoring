@@ -4,7 +4,10 @@
 {{with .Data}}
 <div class="page-heading">
   <h1>Notifications</h1>
-  {{if .CanCreate}}<a class="button primary" href="/notifications/new">Add connection</a>{{end}}
+  <div class="actions">
+    <a class="button" href="/notifications/log">Delivery log</a>
+    {{if .CanCreate}}<a class="button primary" href="/notifications/new">Add connection</a>{{end}}
+  </div>
 </div>
 <p class="muted">New issues and regressions are sent to every active connection that has the project and the level selected.</p>
 
@@ -16,7 +19,7 @@
 
 {{if .Rows}}
 <table class="list">
-  <thead><tr><th>Name</th><th>Type</th><th>Destination</th><th>Projects</th><th>Levels</th><th>Status</th><th>Actions</th></tr></thead>
+  <thead><tr><th>Name</th><th>Type</th><th>Destination</th><th>Projects</th><th>Levels</th><th>Delivery</th><th>Status</th><th>Actions</th></tr></thead>
   <tbody>
     {{range .Rows}}
     <tr>
@@ -25,6 +28,15 @@
       <td class="muted">{{.Destination}}</td>
       <td>{{if .AllProjects}}All projects{{else}}{{range .Projects}}{{template "badge" (projectBadge .)}} {{end}}{{end}}</td>
       <td>{{.Levels}}</td>
+      <td class="small">
+        {{$id := .ID}}
+        {{with .Delivery}}
+        {{if .Failing}}<a class="field-error" href="/notifications/log?connection={{$id}}" title="{{.LastError}}">failing: {{short .LastError 60}}</a>
+        {{else if not .LastSentAt.IsZero}}<a class="muted" href="/notifications/log?connection={{$id}}">ok · {{template "time" .LastSentAt}}</a>
+        {{else if .Pending}}<span class="muted">{{.Pending}} queued</span>
+        {{else}}<span class="muted">—</span>{{end}}
+        {{end}}
+      </td>
       <td>
         <form method="post" action="/notifications/{{.ID}}/active">
           <input type="hidden" name="active" value="{{if .Active}}0{{else}}1{{end}}">

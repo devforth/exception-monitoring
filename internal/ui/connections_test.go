@@ -1,6 +1,7 @@
 package ui_test
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -529,5 +530,58 @@ func TestConnectionDefaultNames(t *testing.T) {
 
 	if page := server.page("/notifications/new"); !strings.Contains(page, `placeholder="team"`) || strings.Contains(page, `name="name" value="" maxlength="100" required`) {
 		t.Error("the name must be optional, with a placeholder")
+	}
+}
+
+// The delivery log shows every message with its status and error, and the
+// notifications list flags a connection whose deliveries fail.
+func TestDeliveryLog(t *testing.T) {
+	database := openDatabase(t)
+	server := startServer(t, database, "admin", password)
+	server.login()
+
+	for _, name := range []string{"Broken chat", "Working chat"} {
+		_, webhookURL := newWebhook(t)
+		form := url.Values{"name": {name}, "type": {"slack"}, "webhook_url": {webhookURL}, "all_projects": {"on"}, "level": {"error"}}
+
+		if response := server.post("/notifications", form); response.Code != http.StatusSeeOther {
+			t.Fatalf("create %s: %d", name, response.Code)
+		}
+	}
+
+	ctx := context.Background()
+	now := time.Now()
+	notification := `{"Kind":"new_issue","Project":"backend","Title":"Error: queue is full","IssueID":7}`
+
+	for _, channel := range []string{"1", "2"} {
+		if err := database.EnqueueOutbox(ctx, []string{channel}, "notification", []byte(notification), nil, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := database.MarkOutboxRetry(ctx, 1, "slack: 500 internal_error", now.Add(time.Minute), now); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := database.MarkOutboxSent(ctx, 2, now); err != nil {
+		t.Fatal(err)
+	}
+
+	list := server.page("/notifications")
+
+	if !strings.Contains(list, "failing: slack: 500 internal_error") || !strings.Contains(list, `href="/notifications/log?connection=2">ok`) {
+		t.Fatalf("delivery column:\n%s", list)
+	}
+
+	log := server.page("/notifications/log")
+
+	for _, want := range []string{"Broken chat", "Working chat", `href="/issues/7">Error: queue is full</a>`, "retrying", "slack: 500 internal_error", `delivery-sent`} {
+		if !strings.Contains(log, want) {
+			t.Errorf("delivery log is missing %q", want)
+		}
+	}
+
+	if filtered := server.page("/notifications/log?status=sent&connection=999"); strings.Contains(filtered, "internal_error") || !strings.Contains(filtered, "Working chat") {
+		t.Error("the status filter must apply and an unknown connection must be ignored")
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/devforth/exception-monitoring/internal/config"
 	"github.com/devforth/exception-monitoring/internal/fixtures"
 )
 
@@ -294,5 +295,68 @@ func TestTraceLink(t *testing.T) {
 	if page, position := pages["logged"], strings.Index; position(page, "<h2>Exception</h2>") > position(page, "<h2>Events</h2>") ||
 		position(page, "<h2>Events</h2>") > position(page, "<h2>Logs from the same request</h2>") {
 		t.Error("order: exception, events, logs of the request")
+	}
+}
+
+// The menu is rendered collapsed when the sidebar cookie says so.
+func TestSidebarCollapsed(t *testing.T) {
+	server := newTestServer(t, password)
+	server.login()
+
+	if page := server.page("/issues"); strings.Contains(page, "sidebar-collapsed") {
+		t.Fatal("the menu starts expanded")
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/issues", nil)
+	request.AddCookie(&http.Cookie{Name: "em_sidebar", Value: "collapsed"})
+
+	if page := server.send(request).Body.String(); !strings.Contains(page, `class="app sidebar-collapsed"`) {
+		t.Fatal("the cookie must collapse the menu")
+	}
+}
+
+// Each issue in the list can be opened from its title and from a button.
+func TestIssueOpenButton(t *testing.T) {
+	server := newTestServer(t, password)
+	server.ingestFixtures()
+	server.login()
+
+	list := server.page("/issues")
+	id := issueIDs(list)[0]
+
+	if !strings.Contains(list, `<a class="button" href="/issues/`+id+`" title="Open the issue"`) {
+		t.Fatal("the open button is missing")
+	}
+}
+
+// With PUBLIC_URL set, DSNs use it: SDKs may reach the server at another
+// address than the one the UI was opened with.
+func TestDSNUsesPublicURL(t *testing.T) {
+	server := newTestServerWith(t, func(settings *config.Config) {
+		settings.Notifications.PublicURL = "https://errors.example.com/monitoring"
+	})
+	server.login()
+
+	if page := server.page("/projects"); !strings.Contains(page, "https://"+fixtures.BackendKey+"@errors.example.com/monitoring/1") {
+		t.Fatalf("DSN:\n%s", page)
+	}
+}
+
+// Pages below a list link back to it with the one "back" partial, which
+// app.js follows on Esc (data-back).
+func TestBackLinks(t *testing.T) {
+	server := newTestServer(t, password)
+	server.ingestFixtures()
+	server.login()
+
+	for path, want := range map[string]string{
+		"/issues/" + issueIDs(server.page("/issues"))[0]: `<a href="/issues" data-back`,
+		"/projects/1":        `<a href="/projects" data-back`,
+		"/notifications/new": `<a href="/notifications" data-back`,
+		"/notifications/log": `<a href="/notifications" data-back`,
+	} {
+		if !strings.Contains(server.page(path), want) {
+			t.Errorf("%s: missing %s", path, want)
+		}
 	}
 }

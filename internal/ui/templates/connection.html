@@ -2,7 +2,7 @@
 
 {{define "content"}}
 {{with .Data}}
-<p class="back"><a href="/notifications">← Notifications</a></p>
+{{template "back" (back "/notifications" "Notifications")}}
 <h1>{{if .New}}Add connection{{else}}{{.Name}}{{end}}</h1>
 
 {{with .Notice}}<p class="notice-success" role="status">{{.}}</p>{{end}}

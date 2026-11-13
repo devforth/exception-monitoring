@@ -91,7 +91,7 @@ func New(ctx context.Context, logger *slog.Logger, database *store.Store, settin
 
 // pageNames are the templates in templates/ that are full pages. Each is
 // parsed together with layout.html and partials.html.
-var pageNames = []string{"login", "issues", "issue", "logs", "projects", "project", "notifications", "connection"}
+var pageNames = []string{"login", "issues", "issue", "logs", "projects", "project", "notifications", "connection", "deliveries"}
 
 func parseTemplates() (map[string]*template.Template, error) {
 	pages := map[string]*template.Template{}
@@ -132,6 +132,7 @@ func (handler *Handler) Register(router *http.ServeMux, protect func(http.Handle
 		"POST /projects/{projectID}/delete": handler.requireLogin(sameOrigin(handler.deleteProject)),
 
 		"GET /notifications":                        handler.requireLogin(handler.connectionsPage),
+		"GET /notifications/log":                    handler.requireLogin(handler.deliveriesPage),
 		"GET /notifications/new":                    handler.requireLogin(handler.newConnectionPage),
 		"POST /notifications":                       handler.requireLogin(sameOrigin(handler.createConnection)),
 		"GET /notifications/{connectionID}":         handler.requireLogin(handler.connectionPage),
@@ -234,11 +235,20 @@ type view struct {
 	Data     any
 	// ProjectColors is the URL of the stylesheet with the project colors.
 	ProjectColors string
+	// SidebarCollapsed: the menu shows icons only (the sidebar cookie, set by
+	// app.js), rendered by the server so the page does not jump on load.
+	SidebarCollapsed bool
 }
+
+const sidebarCookie = "em_sidebar"
 
 // render executes a full page (the "layout" template around the page's "content").
 func (handler *Handler) render(w http.ResponseWriter, r *http.Request, status int, page string, data any) {
 	pageView := view{Page: page, LoggedIn: page != "login", Data: data}
+
+	if cookie, err := r.Cookie(sidebarCookie); err == nil {
+		pageView.SidebarCollapsed = cookie.Value == "collapsed"
+	}
 
 	if pageView.LoggedIn {
 		pageView.ProjectColors = "/project-colors.css?v=" + handler.registry.Colors().Version

@@ -274,6 +274,21 @@ document.addEventListener("change", (event) => {
   updatePicker(picker);
 });
 
+// Collapse or expand the menu; the cookie lets the server render the next
+// page the same way, so it does not jump on load.
+document.addEventListener("click", (event) => {
+  const toggle = event.target.closest(".sidebar-toggle");
+
+  if (!toggle) {
+    return;
+  }
+
+  const collapsed = toggle.closest(".app").classList.toggle("sidebar-collapsed");
+
+  toggle.setAttribute("aria-expanded", String(!collapsed));
+  document.cookie = `em_sidebar=${collapsed ? "collapsed" : "expanded"}; path=/; max-age=31536000; SameSite=Lax`;
+});
+
 // Close an open dropdown on a click outside it or on Escape.
 document.addEventListener("click", (event) => {
   document.querySelectorAll(".picker[open]").forEach((picker) => {
@@ -283,12 +298,48 @@ document.addEventListener("click", (event) => {
   });
 });
 
+// Esc closes what is open (a dropdown; dialogs and the date picker close
+// themselves), otherwise it goes back like the page's "← …" link (data-back).
+// Not while typing: there Esc belongs to the field.
+//
+// The page changes on keyup, and keydown cancels the browser's own Esc:
+// Firefox stops loading the page on Esc, which would cancel a navigation
+// started on keydown, so the page would just stay.
+function backLink(event) {
+  const busy = document.querySelector("dialog[open], .flatpickr-calendar.open, .picker[open]");
+  const typing = event.target instanceof Element && event.target.closest("input, textarea, select, [contenteditable]");
+
+  return busy || typing ? null : document.querySelector("a[data-back]");
+}
+
+// The link to follow on the coming keyup, decided on keydown: an Esc that
+// closes a dropdown must not also leave the page once the dropdown is gone.
+let backOnKeyup = null;
+
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") {
-    document.querySelectorAll(".picker[open]").forEach((picker) => {
-      picker.open = false;
-    });
+  if (event.key !== "Escape" || event.defaultPrevented) {
+    return;
   }
+
+  backOnKeyup = backLink(event);
+
+  if (backOnKeyup) {
+    event.preventDefault();
+
+    return;
+  }
+
+  document.querySelectorAll(".picker[open]").forEach((picker) => {
+    picker.open = false;
+  });
+});
+
+document.addEventListener("keyup", (event) => {
+  if (event.key === "Escape" && backOnKeyup) {
+    window.location.href = backOnKeyup.href;
+  }
+
+  backOnKeyup = null;
 });
 
 function enhance() {

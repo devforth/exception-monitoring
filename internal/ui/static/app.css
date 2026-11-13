@@ -66,19 +66,42 @@ h3 { font-size: 14px; margin: 0 0 6px; }
 main { max-width: 1200px; margin: 0 auto; padding: 24px 16px 64px; }
 section { margin-top: 28px; }
 
-.topbar {
+/* The page: a sidebar with the menu on the left, the content beside it. On
+   narrow screens the sidebar becomes a bar at the top (see the media query). */
+.app { display: flex; min-height: 100vh; }
+.app > main { flex: 1; min-width: 0; }
+.sidebar {
+  position: sticky;
+  top: 0;
+  flex-shrink: 0;
   display: flex;
-  align-items: center;
-  gap: 24px;
-  padding: 0 16px;
-  height: 52px;
+  flex-direction: column;
+  gap: 20px;
+  width: 236px;
+  height: 100vh;
+  padding: 18px 12px;
   background: var(--surface);
-  border-bottom: 1px solid var(--border);
+  border-right: 1px solid var(--border);
 }
-.brand { font-weight: 700; color: var(--text); }
-.topbar nav { display: flex; gap: 4px; flex: 1; }
-.topbar nav a { padding: 6px 12px; border-radius: 6px; color: var(--muted); }
-.topbar nav a.active, .topbar nav a:hover { background: var(--bg); color: var(--text); text-decoration: none; }
+.sidebar-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+/* The name may wrap to two lines rather than be cut with a wider font. */
+.brand { min-width: 0; padding: 0 4px 0 10px; font-weight: 700; line-height: 1.25; color: var(--text); overflow-wrap: anywhere; }
+.sidebar-toggle { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 30px; height: 30px; padding: 0; border: none; background: none; color: var(--muted); border-radius: 6px; cursor: pointer; }
+.sidebar-toggle:hover { background: var(--bg); color: var(--text); }
+.sidebar-toggle svg { transition: transform .2s; }
+
+/* Collapsed: icons only; the names are in the tooltips. */
+.sidebar-collapsed .sidebar { width: 62px; padding-left: 8px; padding-right: 8px; }
+.sidebar-collapsed .sidebar .brand, .sidebar-collapsed .sidebar nav a span, .sidebar-collapsed .sidebar .logout span { display: none; }
+.sidebar-collapsed .sidebar-head { justify-content: center; }
+.sidebar-collapsed .sidebar-toggle svg { transform: rotate(180deg); }
+.sidebar-collapsed .sidebar nav a, .sidebar-collapsed .sidebar .logout button { justify-content: center; padding: 8px; }
+.brand:hover { text-decoration: none; }
+.sidebar nav { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+.sidebar nav a, .sidebar .logout button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border-radius: 6px; color: var(--muted); font-size: 14px; text-align: left; }
+.sidebar nav a.active, .sidebar nav a:hover, .sidebar .logout button:hover { background: var(--bg); color: var(--text); text-decoration: none; }
+.sidebar nav a.active { font-weight: 600; }
+.sidebar svg { width: 18px; height: 18px; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 
 button, input, select {
   font: inherit;
@@ -216,6 +239,13 @@ pre.message { background: var(--surface); border: 1px solid var(--border); paddi
 .projects-table .dsn { width: 100%; min-width: 260px; font-size: 12px; }
 .level-choices { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin: 4px 0; }
 .level-choices > .muted { min-width: 130px; }
+/* Read by screen readers, not shown. */
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.actions-column { width: 1%; white-space: nowrap; }
+.delivery { font-size: 12px; font-weight: 600; }
+.delivery-sent { color: #2e7d32; }
+.delivery-pending, .delivery-retrying { color: var(--warning); }
+.delivery-failed { color: var(--error); }
 .color-field input[type="color"] { width: 48px; height: 32px; padding: 2px; }
 .storage meter { width: 100%; max-width: 420px; height: 10px; }
 input.dsn { width: 100%; margin-top: 4px; font-family: ui-monospace, monospace; }
@@ -238,9 +268,17 @@ input.dsn { width: 100%; margin-top: 4px; font-family: ui-monospace, monospace; 
 
 .htmx-request { opacity: .6; transition: opacity .2s; }
 
+@media (max-width: 800px) {
+  .app { flex-direction: column; }
+  .sidebar { position: static; flex-direction: row; align-items: center; gap: 8px; width: auto; height: auto; padding: 8px 12px; border-right: none; border-bottom: 1px solid var(--border); }
+  .sidebar nav { flex-direction: row; overflow-x: auto; }
+  .sidebar nav a span, .sidebar .logout span, .sidebar-toggle { display: none; }
+  .sidebar nav a, .sidebar .logout button { width: auto; }
+}
+
 @media (max-width: 700px) {
-  .topbar { gap: 12px; }
   table.list th:nth-child(n+4), table.list td:nth-child(n+4) { display: none; }
+  table.list th.actions-column, table.list td.actions-column { display: table-cell; }
 }
 
 /* Full-screen log viewer (app.js). */
