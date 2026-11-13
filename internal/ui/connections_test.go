@@ -729,3 +729,55 @@ func TestRetryNow(t *testing.T) {
 		t.Error("nothing waits: no button")
 	}
 }
+
+// A chat is tested from the form before it is saved; a saved connection
+// tests with its stored tokens when the fields are left empty.
+func TestChatTestBeforeSave(t *testing.T) {
+	server := newTestServer(t, password)
+	server.login()
+
+	hook, webhookURL := newWebhook(t)
+
+	response := server.post("/notifications/test-chat", url.Values{"type": {"slack"}, "webhook_url": {webhookURL}, "name": {"Ops"}}, "HX-Request", "true")
+
+	if body := response.Body.String(); response.Code != http.StatusOK || !strings.Contains(body, "Test message sent") || hook.count() != 1 || !strings.Contains(hook.last(), `Test message for \"Ops\"`) {
+		t.Fatalf("test before save: %d %s, %d messages %s", response.Code, body, hook.count(), hook.last())
+	}
+
+	// Nothing was saved by the test.
+	if list := server.page("/notifications"); connectionLink.MatchString(list) {
+		t.Error("a test created a connection")
+	}
+
+	for name, form := range map[string]url.Values{
+		"invalid token":   {"type": {"telegram"}, "bot_token": {"nope"}, "chat_id": {"-100"}},
+		"unreachable":     {"type": {"slack"}, "webhook_url": {"http://127.0.0.1:1/services/x"}},
+		"not a chat type": {"type": {"email"}, "address": {"team@example.com"}},
+	} {
+		body := server.post("/notifications/test-chat", form, "HX-Request", "true").Body.String()
+
+		if strings.Contains(body, "Test message sent") || !strings.Contains(body, "field-error") {
+			t.Errorf("%s: %s", name, body)
+		}
+	}
+
+	// A saved connection: an empty webhook field keeps the stored one.
+	form := url.Values{"name": {"Ops"}, "type": {"slack"}, "webhook_url": {webhookURL}, "all_projects": {"on"}, "level": {"error"}}
+
+	if response := server.post("/notifications", form); response.Code != http.StatusSeeOther {
+		t.Fatalf("save: %d %s", response.Code, response.Body)
+	}
+
+	id := connectionLink.FindStringSubmatch(server.page("/notifications"))[1]
+	page := server.page("/notifications/" + id)
+
+	if !strings.Contains(page, `hx-post="/notifications/`+id+`/test-chat"`) || !strings.Contains(page, `name="webhook_url" autocomplete="off" data-saved`) {
+		t.Fatalf("edit form:\n%s", page)
+	}
+
+	body := server.post("/notifications/"+id+"/test-chat", url.Values{"webhook_url": {""}}, "HX-Request", "true").Body.String()
+
+	if !strings.Contains(body, "Test message sent") || hook.count() != 2 {
+		t.Errorf("saved connection: %s, %d messages", body, hook.count())
+	}
+}

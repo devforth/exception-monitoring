@@ -45,6 +45,12 @@ type Duplicate struct {
 	Name string
 }
 
+// ChatTest is the result of a test message sent from the form.
+type ChatTest struct {
+	Sent    bool
+	Message string
+}
+
 // ConnectionView is what templates/connection.html shows: the form of a new
 // or an existing connection, with errors after a failed save.
 type ConnectionView struct {

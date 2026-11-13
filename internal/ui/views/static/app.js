@@ -266,6 +266,17 @@ document.addEventListener("change", (event) => {
     all.checked = !values.some((input) => input.checked);
   }
 
+  // A chat's test button works once the fields it needs are filled.
+  form.querySelectorAll("button[data-test-needs]").forEach((button) => {
+    const fields = button.closest(".type-fields") || form;
+    const filled = (name) => {
+      const input = fields.querySelector(`[name="${name}"]`);
+      return Boolean(input && (input.value.trim() !== "" || input.dataset.saved !== undefined));
+    };
+
+    button.disabled = !button.dataset.testNeeds.split("|").some((group) => group.split(" ").every(filled));
+  });
+
   updatePicker(picker);
 });
 
@@ -369,7 +380,7 @@ document.addEventListener("change", (event) => {
 });
 
 document.addEventListener("input", (event) => {
-  if (event.target.matches('form.connection-form input[name="address"]')) {
+  if (event.target.matches("form.connection-form input")) {
     updateConnectionForm(event.target.form);
   }
 

@@ -42,6 +42,7 @@ var templateFuncs = template.FuncMap{
 		return map[string]any{"ID": id, "Count": count, "Return": back}
 	},
 	"back":         func(url, label string) map[string]string { return map[string]string{"URL": url, "Label": label} },
+	"chatTest":     func(url, needs string) map[string]string { return map[string]string{"URL": url, "Needs": needs} },
 	"projectBadge": lists.ProjectBadge,
 	"levelBadge":   lists.LevelBadge,
 	"statusBadge":  lists.StatusBadge,

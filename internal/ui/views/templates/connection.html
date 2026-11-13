@@ -3,7 +3,14 @@
 {{define "content"}}
 {{with .Data}}
 {{template "back" (back "/notifications" "Notifications")}}
-<h1>{{if .New}}Add connection{{else}}{{.Name}}{{end}}</h1>
+<div class="page-heading">
+  <h1>{{if .New}}Add connection{{else}}{{.Name}}{{end}}</h1>
+  {{if not .New}}
+  <form method="post" action="/notifications/{{.ID}}/delete">
+    <button type="submit" class="danger" data-confirm="Delete the connection {{.Name}}? Its queued messages are dropped; a confirmed address stays confirmed.">Delete</button>
+  </form>
+  {{end}}
+</div>
 
 {{with .Notice}}<p class="notice-success" role="status">{{.}}</p>{{end}}
 {{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}
@@ -25,6 +32,7 @@
   {{end}}
 
   {{/* app.js shows only the fields of the selected type; without JS all are shown. */}}
+  {{$testURL := "/notifications/test-chat"}}{{if not .New}}{{$testURL = printf "/notifications/%d/test-chat" .ID}}{{end}}
   {{if or .New (eq .Type "email")}}
   <div class="type-fields" data-type="email">
     {{template "email-step" .Email}}
@@ -35,13 +43,14 @@
   {{if or .New (eq .Type "telegram")}}
   <div class="type-fields" data-type="telegram">
     <label>Bot token
-      <input name="bot_token" autocomplete="off" placeholder="{{with .SavedTelegramToken}}saved: {{.}} — leave empty to keep{{else}}123456:ABC-DEF…{{end}}">
+      <input type="password" name="bot_token" autocomplete="off" {{if .SavedTelegramToken}}data-saved{{end}} placeholder="{{with .SavedTelegramToken}}saved: {{.}} — leave empty to keep{{else}}123456:ABC-DEF…{{end}}">
     </label>
     {{with index .Errors "bot_token"}}<p class="field-error">{{.}}</p>{{end}}
     <label>Chat ID
       <input name="chat_id" value="{{.ChatID}}" placeholder="-1001234567890 or @channel">
     </label>
     {{with index .Errors "chat_id"}}<p class="field-error">{{.}}</p>{{end}}
+    {{template "chat-test-button" (chatTest $testURL "bot_token chat_id")}}
     {{if eq .Type "telegram"}}{{with .Duplicate}}{{template "duplicate" .}}{{end}}{{end}}
     <p class="muted small">
       Create a bot with <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer">@BotFather</a> (send <code>/newbot</code>, it replies with the token) and add the bot to the chat.
@@ -55,7 +64,7 @@
   {{if or .New (eq .Type "slack")}}
   <div class="type-fields" data-type="slack">
     <label>Incoming webhook URL
-      <input name="webhook_url" autocomplete="off" placeholder="{{with .SavedWebhook}}saved: {{.}} — leave empty to keep{{else}}https://hooks.slack.com/services/…{{end}}">
+      <input type="password" name="webhook_url" autocomplete="off" {{if .SavedWebhook}}data-saved{{end}} placeholder="{{with .SavedWebhook}}saved: {{.}} — leave empty to keep{{else}}https://hooks.slack.com/services/…{{end}}">
     </label>
     {{with index .Errors "webhook_url"}}<p class="field-error">{{.}}</p>{{end}}
     <p class="muted small">
@@ -64,13 +73,14 @@
       Mattermost and Rocket.Chat webhooks work too.
     </p>
     <label>Bot token <span class="muted small">(optional: the bot posts the messages and puts the prompt for a coding agent in a thread under each error; the webhook is then not needed)</span>
-      <input name="slack_bot_token" autocomplete="off" placeholder="{{with .SavedSlackToken}}saved: {{.}} — leave empty to keep{{else}}xoxb-…{{end}}">
+      <input type="password" name="slack_bot_token" autocomplete="off" {{if .SavedSlackToken}}data-saved{{end}} placeholder="{{with .SavedSlackToken}}saved: {{.}} — leave empty to keep{{else}}xoxb-…{{end}}">
     </label>
     {{with index .Errors "slack_bot_token"}}<p class="field-error">{{.}}</p>{{end}}
     <label>Channel ID
       <input name="slack_channel" value="{{.SlackChannel}}" placeholder="C0123456789">
     </label>
     {{with index .Errors "slack_channel"}}<p class="field-error">{{.}}</p>{{end}}
+    {{template "chat-test-button" (chatTest $testURL "webhook_url|slack_bot_token slack_channel")}}
     {{if eq .Type "slack"}}{{with .Duplicate}}{{template "duplicate" .}}{{end}}{{end}}
     <p class="muted small">
       Bot: <a href="https://api.slack.com/apps" target="_blank" rel="noopener noreferrer">your Slack app</a> → OAuth &amp; Permissions → Bot Token Scopes: <code>chat:write</code> → Install to Workspace → Bot User OAuth Token.
@@ -126,14 +136,12 @@
 {{if not .New}}
 <div class="actions secondary-actions">
   {{if .Waiting}}{{template "retry-now" (retryNow .ID .Waiting "")}}{{end}}
-  {{if .Verified}}
+  {{/* Chats are tested from their fields above, before saving. */}}
+  {{if and .Verified (eq .Type "email")}}
   <form method="post" action="/notifications/{{.ID}}/test">
     <button type="submit">Send test message</button>
   </form>
   {{end}}
-  <form method="post" action="/notifications/{{.ID}}/delete">
-    <button type="submit" class="danger" data-confirm="Delete the connection {{.Name}}? Its queued messages are dropped; a confirmed address stays confirmed.">Delete</button>
-  </form>
 </div>
 {{end}}
 {{end}}
@@ -181,6 +189,18 @@
   {{with .Error}}<p class="field-error" role="alert">{{.}}</p>{{end}}
 </div>
 {{end}}
+
+{{/* Sends a test message with the chat fields as typed (the whole form goes
+     with it). Needs names the fields it requires: groups separated by |,
+     any one group filled enables it (app.js; a saved token counts). */}}
+{{define "chat-test-button"}}
+<div class="chat-test">
+  <button type="button" data-test-needs="{{.Needs}}" hx-post="{{.URL}}" hx-target="next .chat-test-result" hx-swap="innerHTML">Send test message</button>
+  <span class="chat-test-result" aria-live="polite"></span>
+</div>
+{{end}}
+
+{{define "chat-test"}}<span class="{{if .Sent}}notice-success{{else}}field-error{{end}} small" role="status">{{.Message}}</span>{{end}}
 
 {{/* One connection per address or chat: link to the one that has it. */}}
 {{define "duplicate"}}

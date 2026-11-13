@@ -384,3 +384,7 @@ fieldset.connection-rest { border: none; padding: 0; background: none; display: 
 fieldset.connection-rest:disabled > :not(.actions) { opacity: .45; }
 fieldset.connection-rest:disabled button[type="submit"] { opacity: .45; cursor: not-allowed; }
 fieldset.connection-rest > label:not(.option) { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 13px; }
+
+/* A chat's test button under its fields, with the answer beside it. */
+.chat-test { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 8px 0; }
+.chat-test-result:empty { display: none; }

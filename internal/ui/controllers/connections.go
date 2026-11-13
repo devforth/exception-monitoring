@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
+	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/devforth/exception-monitoring/internal/config"
@@ -285,6 +287,56 @@ func (controller *Controllers) TestConnection(w http.ResponseWriter, r *http.Req
 	}
 
 	redirectAfterPost(w, r, fmt.Sprintf("/notifications/%d?notice=test-sent", connection.ID))
+}
+
+// TestChat sends a test message with the chat settings in the form, before
+// they are saved, and answers with the chat-test fragment next to the button.
+// On an existing connection, fields left empty keep the stored tokens.
+func (controller *Controllers) TestChat(w http.ResponseWriter, r *http.Request) {
+	var existing store.Connection
+
+	channelType := r.PostFormValue("type")
+
+	if r.PathValue("connectionID") != "" {
+		connection, ok := controller.loadConnection(w, r)
+
+		if !ok {
+			return
+		}
+
+		existing, channelType = connection, connection.Type
+	}
+
+	result := controller.testChat(r, channelType, existing)
+
+	controller.views.RenderPartial(w, r, "connection", "chat-test", result)
+}
+
+func (controller *Controllers) testChat(r *http.Request, channelType string, existing store.Connection) contracts.ChatTest {
+	if channelType != config.ChannelTelegram && channelType != config.ChannelSlack {
+		return contracts.ChatTest{Message: "Choose Telegram or Slack."}
+	}
+
+	secret := requests.ReadChatSecret(r, controller.factory, channelType, existing.Secret, true)
+
+	if len(secret.Problems) > 0 {
+		problems := slices.Sorted(maps.Values(secret.Problems))
+
+		return contracts.ChatTest{Message: strings.Join(problems, " ")}
+	}
+
+	name := cmp.Or(strings.TrimSpace(r.PostFormValue("name")), existing.Name, "new connection")
+	connection := store.Connection{Type: channelType, Name: name, Secret: secret.Secret, HideIssueLink: r.PostFormValue("include_issue_link") != "on"}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+
+	defer cancel()
+
+	if err := controller.factory.SendTest(ctx, connection, controller.notifications.PublicURL); err != nil {
+		return contracts.ChatTest{Message: "Not delivered: " + err.Error()}
+	}
+
+	return contracts.ChatTest{Sent: true, Message: "Test message sent: check the chat."}
 }
 
 func (controller *Controllers) SetConnectionActive(w http.ResponseWriter, r *http.Request) {
