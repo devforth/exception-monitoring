@@ -38,6 +38,9 @@ var templateFuncs = template.FuncMap{
 	"parseRequest": contracts.ParseRequest,
 	"short":        helpers.Short,
 	"asset":        assetURL,
+	"retryNow": func(id any, count int, back string) map[string]any {
+		return map[string]any{"ID": id, "Count": count, "Return": back}
+	},
 	"back":         func(url, label string) map[string]string { return map[string]string{"URL": url, "Label": label} },
 	"projectBadge": lists.ProjectBadge,
 	"levelBadge":   lists.LevelBadge,

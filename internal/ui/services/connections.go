@@ -83,6 +83,13 @@ func (service *Connections) SetActive(ctx context.Context, connection store.Conn
 	return service.saved(ctx, connection)
 }
 
+// RetryNow sends the waiting messages of a connection again now, without
+// waiting for the next step of the retry schedule: for when the problem was
+// fixed outside this server (a scope added in Slack, the bot invited).
+func (service *Connections) RetryNow(ctx context.Context, id int64) error {
+	return service.store.RetryOutboxNow(ctx, strconv.FormatInt(id, 10), service.now())
+}
+
 // saved stores a changed connection and retries its waiting messages now:
 // a save is usually the fix for why they failed.
 func (service *Connections) saved(ctx context.Context, connection store.Connection) error {

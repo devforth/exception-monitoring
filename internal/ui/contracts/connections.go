@@ -48,7 +48,10 @@ type Duplicate struct {
 // ConnectionView is what templates/connection.html shows: the form of a new
 // or an existing connection, with errors after a failed save.
 type ConnectionView struct {
-	ID           int64
+	ID int64
+	// Waiting is how many messages wait for a retry after a failed attempt
+	// (the "Retry now" button is shown for them).
+	Waiting      int
 	New          bool
 	Name         string
 	Type         string

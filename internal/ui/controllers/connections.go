@@ -27,6 +27,7 @@ var notices = map[string]string{
 	"deleted":     "Connection deleted.",
 	"activated":   "Connection activated.",
 	"deactivated": "Connection deactivated.",
+	"retried":     "The waiting messages are being sent again now.",
 }
 
 func (controller *Controllers) ConnectionsPage(w http.ResponseWriter, r *http.Request) {
@@ -93,6 +94,16 @@ func (controller *Controllers) ConnectionPage(w http.ResponseWriter, r *http.Req
 
 	view := controller.connectionViews.Form(connection)
 	view.Notice = notices[r.URL.Query().Get("notice")]
+
+	health, err := controller.connections.DeliveryHealth(r.Context())
+
+	if err != nil {
+		controller.serverError(w, r, err)
+
+		return
+	}
+
+	view.Waiting = health[strconv.FormatInt(connection.ID, 10)].Retrying
 
 	if connection.Type == config.ChannelEmail {
 		if destination, err := controller.verification.EmailDestination(r.Context(), connection.DestinationID); err == nil {
@@ -223,6 +234,30 @@ func (controller *Controllers) renderConnectionForm(w http.ResponseWriter, r *ht
 	}
 
 	controller.views.Render(w, r, status, "connection", view)
+}
+
+// RetryConnection sends the messages waiting for a retry again now, then
+// goes back to the page the button was on.
+func (controller *Controllers) RetryConnection(w http.ResponseWriter, r *http.Request) {
+	connection, ok := controller.loadConnection(w, r)
+
+	if !ok {
+		return
+	}
+
+	if err := controller.connections.RetryNow(r.Context(), connection.ID); err != nil {
+		controller.serverError(w, r, err)
+
+		return
+	}
+
+	target := requests.SafeNext(r.PostFormValue("return"))
+
+	if r.PostFormValue("return") == "" {
+		target = fmt.Sprintf("/notifications/%d", connection.ID)
+	}
+
+	redirectAfterPost(w, r, target+"?notice=retried")
 }
 
 func (controller *Controllers) TestConnection(w http.ResponseWriter, r *http.Request) {

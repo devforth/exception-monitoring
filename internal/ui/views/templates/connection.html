@@ -125,6 +125,7 @@
 
 {{if not .New}}
 <div class="actions secondary-actions">
+  {{if .Waiting}}{{template "retry-now" (retryNow .ID .Waiting "")}}{{end}}
   {{if .Verified}}
   <form method="post" action="/notifications/{{.ID}}/test">
     <button type="submit">Send test message</button>

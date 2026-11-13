@@ -32,6 +32,7 @@
         {{$id := .ID}}
         {{with .Delivery}}
         {{if .Failing}}<a class="field-error" href="/notifications/log?connection={{$id}}" title="{{.LastError}}">failing: {{short .LastError 60}}</a>
+        {{if .Retrying}}{{template "retry-now" (retryNow $id .Retrying "/notifications")}}{{end}}
         {{else if not .LastSentAt.IsZero}}<a class="muted" href="/notifications/log?connection={{$id}}">ok · {{template "time" .LastSentAt}}</a>
         {{else if .Pending}}<span class="muted">{{.Pending}} queued</span>
         {{else}}<span class="muted">—</span>{{end}}

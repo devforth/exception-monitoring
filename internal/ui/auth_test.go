@@ -158,3 +158,25 @@ func TestLoginReplacesSession(t *testing.T) {
 		t.Fatalf("the previous session still works: %d", response.Code)
 	}
 }
+
+// Every dashboard route asks for a login, pages and actions alike; only the
+// login itself and static files are open.
+func TestDashboardNeedsLogin(t *testing.T) {
+	server := newTestServer(t, password)
+
+	for _, path := range []string{"/", "/issues", "/issues/1", "/logs", "/projects", "/projects/1", "/notifications", "/notifications/log", "/notifications/1", "/project-colors.css"} {
+		if response := server.get(path); response.Code != http.StatusSeeOther || !strings.HasPrefix(response.Header().Get("Location"), "/login") {
+			t.Errorf("GET %s: %d %q", path, response.Code, response.Header().Get("Location"))
+		}
+	}
+
+	for _, path := range []string{"/issues/bulk", "/projects", "/projects/1/delete", "/notifications", "/notifications/1/retry", "/notifications/email/start"} {
+		if response := server.post(path, url.Values{}); response.Code != http.StatusSeeOther || !strings.HasPrefix(response.Header().Get("Location"), "/login") {
+			t.Errorf("POST %s: %d %q", path, response.Code, response.Header().Get("Location"))
+		}
+	}
+
+	if response := server.get("/login"); response.Code != http.StatusOK {
+		t.Errorf("the login page must be open: %d", response.Code)
+	}
+}

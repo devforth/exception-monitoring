@@ -681,3 +681,51 @@ func TestSlackBotConnection(t *testing.T) {
 		t.Errorf("the same bot channel twice: %d", response.Code)
 	}
 }
+
+// "Retry now" sends the messages waiting for a retry at once: for when the
+// cause was fixed outside this server (a scope added in Slack).
+func TestRetryNow(t *testing.T) {
+	database := openDatabase(t)
+	server := startServer(t, database, "admin", password)
+	server.login()
+
+	_, webhookURL := newWebhook(t)
+
+	if response := server.post("/notifications", url.Values{"name": {"Chat"}, "type": {"slack"}, "webhook_url": {webhookURL}, "all_projects": {"on"}, "level": {"error"}}); response.Code != http.StatusSeeOther {
+		t.Fatalf("create: %d", response.Code)
+	}
+
+	ctx := context.Background()
+	now := time.Now()
+
+	if err := database.EnqueueOutbox(ctx, []string{"1"}, "notification", []byte(`{}`), nil, now); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := database.MarkOutboxRetry(ctx, 1, "slack: 200 missing_scope", now.Add(5*time.Minute), now); err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(server.page("/notifications"), "Retry now (1)") || !strings.Contains(server.page("/notifications/1"), "Retry now (1)") {
+		t.Fatal("the button is shown where the failure is")
+	}
+
+	response := server.post("/notifications/1/retry", url.Values{"return": {"/notifications"}})
+
+	if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/notifications?notice=retried" {
+		t.Fatalf("retry: %d %q", response.Code, response.Header().Get("Location"))
+	}
+
+	if due, _ := database.DueOutbox(ctx, "1", time.Now().Add(time.Second), 10); len(due) != 1 {
+		t.Fatal("the waiting message must be due now")
+	}
+
+	// Once sent, nothing waits: no button.
+	if err := database.MarkOutboxSent(ctx, 1, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	if strings.Contains(server.page("/notifications/1"), "Retry now") || strings.Contains(server.page("/notifications"), "Retry now") {
+		t.Error("nothing waits: no button")
+	}
+}

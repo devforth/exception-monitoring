@@ -242,6 +242,8 @@ pre.message { background: var(--surface); border: 1px solid var(--border); paddi
 /* Read by screen readers, not shown. */
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .actions-column { width: 1%; white-space: nowrap; }
+.inline-action { display: inline; }
+.inline-action button { margin-top: 4px; padding: 2px 8px; font-size: 12px; }
 .delivery { font-size: 12px; font-weight: 600; }
 .delivery-sent { color: #2e7d32; }
 .delivery-pending, .delivery-retrying { color: var(--warning); }
