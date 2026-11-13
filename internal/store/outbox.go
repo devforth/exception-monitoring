@@ -109,6 +109,18 @@ func (store *Store) MarkOutboxRetry(ctx context.Context, id int64, lastError str
 	return err
 }
 
+// RetryOutboxNow makes the waiting messages of a channel due now: after its
+// connection is fixed (a token, a scope), they need not wait for the next
+// step of the retry schedule. The channel's worker picks them up on its next
+// poll.
+func (store *Store) RetryOutboxNow(ctx context.Context, channel string, now time.Time) error {
+	_, err := store.DB.ExecContext(ctx,
+		`UPDATE notification_outbox SET next_attempt_at = ? WHERE channel = ? AND status = 'pending' AND next_attempt_at > ?`,
+		formatTime(now), channel, formatTime(now))
+
+	return err
+}
+
 // MarkOutboxFailed gives up on a message after its last attempt.
 func (store *Store) MarkOutboxFailed(ctx context.Context, id int64, lastError string, now time.Time) error {
 	_, err := store.DB.ExecContext(ctx,

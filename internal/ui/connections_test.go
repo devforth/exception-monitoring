@@ -3,6 +3,7 @@ package ui_test
 import (
 	"context"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -583,5 +584,100 @@ func TestDeliveryLog(t *testing.T) {
 
 	if filtered := server.page("/notifications/log?status=sent&connection=999"); strings.Contains(filtered, "internal_error") || !strings.Contains(filtered, "Working chat") {
 		t.Error("the status filter must apply and an unknown connection must be ignored")
+	}
+}
+
+// Issue links are on by default for email and off for chats, which may be
+// public; the box can be set either way for any type.
+func TestIssueLinkDefaults(t *testing.T) {
+	database := openDatabase(t)
+	server := startServer(t, database, "admin", password)
+	server.login()
+
+	// The form opens on email (SMTP is set up): the box is checked.
+	if page := server.page("/notifications/new"); !strings.Contains(page, `name="include_issue_link" checked`) {
+		t.Error("issue links must be on by default for email")
+	}
+
+	_, quiet := newWebhook(t)
+	_, linked := newWebhook(t)
+
+	for _, form := range []url.Values{
+		{"name": {"Public chat"}, "type": {"slack"}, "webhook_url": {quiet}, "all_projects": {"on"}, "level": {"error"}},
+		{"name": {"Team chat"}, "type": {"slack"}, "webhook_url": {linked}, "all_projects": {"on"}, "level": {"error"}, "include_issue_link": {"on"}},
+	} {
+		if response := server.post("/notifications", form); response.Code != http.StatusSeeOther {
+			t.Fatalf("create %s: %d", form.Get("name"), response.Code)
+		}
+	}
+
+	hidden := map[string]bool{}
+	rows, err := database.DB.Query(`SELECT name, hide_issue_link FROM notification_connections`)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			name string
+			hide bool
+		)
+
+		_ = rows.Scan(&name, &hide)
+		hidden[name] = hide
+	}
+
+	if !hidden["Public chat"] || hidden["Team chat"] {
+		t.Fatalf("hide_issue_link: %v", hidden)
+	}
+}
+
+// A Slack connection can use a bot instead of a webhook (the bot also sends
+// the agent prompt); a bot needs both its token and a channel.
+func TestSlackBotConnection(t *testing.T) {
+	database := openDatabase(t)
+	server := startServer(t, database, "admin", password)
+	server.login()
+
+	base := url.Values{"name": {"Bot chat"}, "type": {"slack"}, "all_projects": {"on"}, "level": {"error"}}
+	withoutChannel := maps.Clone(base)
+	withoutChannel.Set("slack_bot_token", "xoxb-1234567890-abcdefghij")
+
+	if response := server.post("/notifications", withoutChannel); response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), "Enter the channel ID") {
+		t.Fatalf("token without a channel: %d", response.Code)
+	}
+
+	bot := maps.Clone(withoutChannel)
+	bot.Set("slack_channel", "C0123456789")
+
+	if response := server.post("/notifications", bot); response.Code != http.StatusSeeOther {
+		t.Fatalf("bot without a webhook: %d\n%s", response.Code, response.Body)
+	}
+
+	list := server.page("/notifications")
+
+	if !strings.Contains(list, "bot in C0123456789, prompt in thread") {
+		t.Fatalf("list:\n%s", list)
+	}
+
+	id := connectionLink.FindStringSubmatch(list)[1]
+
+	// The edit form shows the channel and the token masked; a webhook was
+	// never saved, so its field does not claim one.
+	page := server.page("/notifications/" + id)
+
+	if !strings.Contains(page, `name="slack_channel" value="C0123456789"`) || strings.Contains(page, "abcdefghij") ||
+		!strings.Contains(page, "saved: xoxb-…ghij") || strings.Contains(page, "saved: https://") {
+		t.Errorf("edit form:\n%s", page)
+	}
+
+	// The same channel again is a duplicate.
+	bot.Set("name", "Again")
+
+	if response := server.post("/notifications", bot); response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), "Already added") {
+		t.Errorf("the same bot channel twice: %d", response.Code)
 	}
 }

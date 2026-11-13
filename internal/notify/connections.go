@@ -20,8 +20,24 @@ type TelegramSecret struct {
 	ChatID   string `json:"chat_id"`
 }
 
+// SlackSecret: an incoming webhook, or a bot (Bot User OAuth Token with
+// chat:write, invited to Channel). With a bot, messages are posted by the bot
+// and the agent prompt goes in a thread under each error; a webhook cannot
+// do that, it does not tell which message it posted.
 type SlackSecret struct {
-	WebhookURL string `json:"webhook_url"`
+	WebhookURL string `json:"webhook_url,omitempty"`
+	BotToken   string `json:"bot_token,omitempty"`
+	Channel    string `json:"channel,omitempty"`
+}
+
+// Key is what makes two Slack connections post to the same place: the
+// channel of a bot, else the webhook.
+func (secret SlackSecret) Key() string {
+	if secret.BotToken != "" {
+		return "channel:" + secret.Channel
+	}
+
+	return secret.WebhookURL
 }
 
 // Factory turns stored connections into channels: it holds what they share
@@ -34,6 +50,9 @@ type Factory struct {
 	// TelegramURL replaces the Telegram API (tests point it to a fake
 	// server); empty means https://api.telegram.org.
 	TelegramURL string
+	// SlackURL replaces the Slack Web API the same way; empty means
+	// https://slack.com/api.
+	SlackURL string
 }
 
 // ErrNoSecretKey means a chat connection exists but SECRET_KEY is not set.
@@ -79,15 +98,50 @@ func (factory Factory) TelegramChatTitle(ctx context.Context, tokens TelegramSec
 	return factory.telegram(tokens).ChatTitle(ctx)
 }
 
-// Channel builds the channel that delivers to a connection.
+// Channel builds the channel that delivers to a connection; when the
+// connection hides issue links, its messages carry none.
 func (factory Factory) Channel(connection store.Connection) (Channel, error) {
+	channel, err := factory.channel(connection)
+
+	if err != nil || !connection.HideIssueLink {
+		return channel, err
+	}
+
+	return withoutIssueLinks{channel}, nil
+}
+
+// withoutIssueLinks drops the links to the panel from every message: for
+// chats that people outside the team may read, the panel address stays out.
+type withoutIssueLinks struct {
+	Channel
+}
+
+func (channel withoutIssueLinks) Send(ctx context.Context, notification Notification) error {
+	notification.IssueURL = ""
+
+	return channel.Channel.Send(ctx, notification)
+}
+
+func (channel withoutIssueLinks) SendSummary(ctx context.Context, summary Summary) error {
+	items := slices.Clone(summary.Items)
+
+	for index := range items {
+		items[index].IssueURL = ""
+	}
+
+	summary.Items = items
+
+	return channel.Channel.SendSummary(ctx, summary)
+}
+
+func (factory Factory) channel(connection store.Connection) (Channel, error) {
 	switch connection.Type {
 	case config.ChannelEmail:
 		if !factory.SMTP.Enabled() {
 			return nil, errors.New("SMTP is not configured")
 		}
 
-		return Email{SMTP: factory.SMTP, To: connection.Address, HideIssueLink: connection.HideIssueLink}, nil
+		return Email{SMTP: factory.SMTP, To: connection.Address}, nil
 	case config.ChannelTelegram:
 		var tokens TelegramSecret
 
@@ -103,7 +157,7 @@ func (factory Factory) Channel(connection store.Connection) (Channel, error) {
 			return nil, err
 		}
 
-		return Slack{WebhookURL: tokens.WebhookURL, Client: factory.HTTPClient}, nil
+		return Slack{WebhookURL: tokens.WebhookURL, BotToken: tokens.BotToken, Channel: tokens.Channel, Client: factory.HTTPClient, apiURL: factory.SlackURL}, nil
 	default:
 		return nil, fmt.Errorf("unknown connection type %q", connection.Type)
 	}

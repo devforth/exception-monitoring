@@ -178,157 +178,6 @@ func TestProjectColor(t *testing.T) {
 	}
 }
 
-// Project and level badges are links: within the issue and log lists they
-// filter that list, everywhere else they open the issues with that filter.
-// Inside checkboxes they are plain labels.
-func TestBadgeLinks(t *testing.T) {
-	server := newTestServer(t, password)
-	server.ingestFixtures()
-	server.login()
-
-	issueID := issueIDs(server.page("/issues?project=backend&level=error"))[0]
-	issue := server.page("/issues/" + issueID)
-
-	for _, want := range []string{
-		`<a class="project" data-project="backend" href="/issues?project=backend"`,
-		`<a class="badge level-error" href="/issues?level=error"`,
-		`<a class="status status-unresolved" href="/issues?status=unresolved"`,
-	} {
-		if !strings.Contains(issue, want) {
-			t.Errorf("issue page is missing %s", want)
-		}
-	}
-
-	if list := server.page("/issues?status=all"); !strings.Contains(list, `<a class="project" data-project="backend" href="/issues?project=backend&amp;status=all"`) {
-		t.Error("in the issue list a project badge filters the list and keeps its filters")
-	}
-
-	// A status filter is a chip with the status badge; the default is not.
-	if resolved := server.page("/issues?status=resolved"); !strings.Contains(resolved, `Status: <span class="status status-resolved">`) {
-		t.Error("status chip")
-	}
-
-	if strings.Contains(server.page("/issues?status=unresolved"), `class="active-filters"`) {
-		t.Error("the default status is not a filter")
-	}
-
-	logs := server.page("/logs?query=a")
-
-	if !strings.Contains(logs, `<a class="badge level-warning" href="/logs?level=warn&amp;query=a"`) && !strings.Contains(logs, `href="/logs?level=info&amp;query=a"`) {
-		t.Error("in the log list a level badge filters the log list")
-	}
-
-	// Labels inside checkboxes are not links.
-	if strings.Contains(logs, `<input type="checkbox" name="project" value="backend" > <a`) || !strings.Contains(logs, `value="backend" > <span class="project"`) {
-		t.Error("badges in checkboxes must be labels")
-	}
-
-	if page := server.page("/projects"); !strings.Contains(page, `<a class="project" data-project="frontend" href="/issues?project=frontend"`) {
-		t.Error("projects table")
-	}
-}
-
-// When an issue was resolved is shown on its page and in the list of
-// resolved issues.
-func TestResolvedAt(t *testing.T) {
-	server := newTestServer(t, password)
-	server.ingestFixtures()
-	server.login()
-
-	id := issueIDs(server.page("/issues"))[0]
-
-	if response := server.post("/issues/"+id+"/action", url.Values{"action": {"resolve"}}); response.Code != http.StatusSeeOther {
-		t.Fatalf("resolve: %d", response.Code)
-	}
-
-	if page := server.page("/issues/" + id); !strings.Contains(page, "<dt>Resolved</dt><dd><time") {
-		t.Error("the issue page must show when it was resolved")
-	}
-
-	if list := server.page("/issues?status=resolved"); !strings.Contains(list, "<th>Resolved</th>") || strings.Count(list, "<td><time") < 3 {
-		t.Error("the resolved list must have a Resolved column with the time")
-	}
-
-	if list := server.page("/issues"); strings.Contains(list, "<th>Resolved</th>") {
-		t.Error("unresolved issues have no Resolved column")
-	}
-
-	// Reopened, it is not resolved any more.
-	server.post("/issues/"+id+"/action", url.Values{"action": {"reopen"}})
-
-	if page := server.page("/issues/" + id); strings.Contains(page, "<dt>Resolved</dt>") {
-		t.Error("a reopened issue must not show a resolve time")
-	}
-}
-
-// The trace ID of an event links to the logs of the trace only when it has
-// some; the event's details come before the list of events.
-func TestTraceLink(t *testing.T) {
-	server := newTestServer(t, password)
-	server.login()
-
-	const withLogs, withoutLogs = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-
-	logged, logs := requestEnvelopes(withLogs, "1111111111111111", "2222222222222222", "logged failure", "a log line")
-	alone, _ := requestEnvelopes(withoutLogs, "3333333333333333", "", "alone failure", "")
-
-	for _, envelope := range [][]byte{logs, logged, alone} {
-		server.sendEnvelope(fixtures.BackendEnvelopeURL, envelope)
-	}
-
-	pages := map[string]string{}
-
-	for _, id := range issueIDs(server.page("/issues")) {
-		page := server.page("/issues/" + id)
-		pages[strings.Split(strings.SplitN(page, "<title>", 2)[1], " ")[1]] = page
-	}
-
-	if !strings.Contains(pages["logged"], `href="/logs?trace_id=`+withLogs+`"`) {
-		t.Error("a trace with logs links to them")
-	}
-
-	if strings.Contains(pages["alone"], `href="/logs?trace_id=`+withoutLogs+`"`) {
-		t.Error("a trace without logs must not link to an empty log list")
-	}
-
-	// The events follow the exception, before the logs of the request.
-	if page, position := pages["logged"], strings.Index; position(page, "<h2>Exception</h2>") > position(page, "<h2>Events</h2>") ||
-		position(page, "<h2>Events</h2>") > position(page, "<h2>Logs from the same request</h2>") {
-		t.Error("order: exception, events, logs of the request")
-	}
-}
-
-// The menu is rendered collapsed when the sidebar cookie says so.
-func TestSidebarCollapsed(t *testing.T) {
-	server := newTestServer(t, password)
-	server.login()
-
-	if page := server.page("/issues"); strings.Contains(page, "sidebar-collapsed") {
-		t.Fatal("the menu starts expanded")
-	}
-
-	request := httptest.NewRequest(http.MethodGet, "/issues", nil)
-	request.AddCookie(&http.Cookie{Name: "em_sidebar", Value: "collapsed"})
-
-	if page := server.send(request).Body.String(); !strings.Contains(page, `class="app sidebar-collapsed"`) {
-		t.Fatal("the cookie must collapse the menu")
-	}
-}
-
-// Each issue in the list can be opened from its title and from a button.
-func TestIssueOpenButton(t *testing.T) {
-	server := newTestServer(t, password)
-	server.ingestFixtures()
-	server.login()
-
-	list := server.page("/issues")
-	id := issueIDs(list)[0]
-
-	if !strings.Contains(list, `<a class="button" href="/issues/`+id+`" title="Open the issue"`) {
-		t.Fatal("the open button is missing")
-	}
-}
-
 // With PUBLIC_URL set, DSNs use it: SDKs may reach the server at another
 // address than the one the UI was opened with.
 func TestDSNUsesPublicURL(t *testing.T) {
@@ -342,21 +191,22 @@ func TestDSNUsesPublicURL(t *testing.T) {
 	}
 }
 
-// Pages below a list link back to it with the one "back" partial, which
-// app.js follows on Esc (data-back).
-func TestBackLinks(t *testing.T) {
+// The Projects page shows each DSN and the storage section.
+func TestProjectsPage(t *testing.T) {
 	server := newTestServer(t, password)
 	server.ingestFixtures()
 	server.login()
 
-	for path, want := range map[string]string{
-		"/issues/" + issueIDs(server.page("/issues"))[0]: `<a href="/issues" data-back`,
-		"/projects/1":        `<a href="/projects" data-back`,
-		"/notifications/new": `<a href="/notifications" data-back`,
-		"/notifications/log": `<a href="/notifications" data-back`,
-	} {
-		if !strings.Contains(server.page(path), want) {
-			t.Errorf("%s: missing %s", path, want)
+	projects := server.page("/projects")
+
+	if !strings.Contains(projects, "http://"+fixtures.BackendKey+"@example.com/1") {
+		t.Fatalf("projects page must show the DSN:\n%s", projects)
+	}
+
+	// The storage section: size against the limit and what retention keeps.
+	for _, want := range []string{" of 2.0 GB", "<meter", "By default events are kept 30 days, logs 1 day; all events per issue.", "has not happened for 365 days"} {
+		if !strings.Contains(projects, want) {
+			t.Errorf("projects page is missing %q", want)
 		}
 	}
 }

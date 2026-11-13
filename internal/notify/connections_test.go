@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/devforth/exception-monitoring/internal/config"
 	"github.com/devforth/exception-monitoring/internal/secret"
@@ -128,5 +129,38 @@ func TestTelegramChatTitle(t *testing.T) {
 
 	if _, err := factory.TelegramChatTitle(context.Background(), TelegramSecret{BotToken: "123:SECRET", ChatID: "1"}); err == nil || strings.Contains(err.Error(), "SECRET") {
 		t.Errorf("unknown chat: %v (the token must not appear)", err)
+	}
+}
+
+// A chat connection that hides issue links gets messages and summaries
+// without any link to the panel.
+func TestChatWithoutIssueLinks(t *testing.T) {
+	notification := Notification{Kind: NewIssue, Project: "backend", Title: "Example issue", Level: "error", IssueURL: "https://errors.example.com/issues/5"}
+
+	for _, hidden := range []bool{false, true} {
+		server, _, payload := recordingServer(t, http.StatusOK, nil, "ok")
+		factory := testFactory(t)
+		secret, _ := factory.EncryptSecret(SlackSecret{WebhookURL: server.URL})
+		channel, err := factory.Channel(store.Connection{Type: config.ChannelSlack, Secret: secret, HideIssueLink: hidden})
+
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if err := channel.Send(context.Background(), notification); err != nil {
+			t.Fatal(err)
+		}
+
+		if strings.Contains(string(*payload), notification.IssueURL) == hidden || !strings.Contains(string(*payload), "Example issue") {
+			t.Errorf("hide %v, message: %s", hidden, *payload)
+		}
+
+		if err := channel.SendSummary(context.Background(), Summary{Count: 1, Window: time.Minute, Items: []Notification{notification}}); err != nil {
+			t.Fatal(err)
+		}
+
+		if strings.Contains(string(*payload), notification.IssueURL) == hidden {
+			t.Errorf("hide %v, summary: %s", hidden, *payload)
+		}
 	}
 }

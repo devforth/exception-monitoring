@@ -8,8 +8,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/devforth/exception-monitoring/internal/sentry"
 )
 
 var sample = Notification{
@@ -144,5 +147,99 @@ func TestTelegramErrors(t *testing.T) {
 
 	if err == nil || strings.Contains(err.Error(), "SECRET") {
 		t.Fatalf("error leaks the token or is missing: %v", err)
+	}
+}
+
+// slackAPI is a fake Slack Web API that keeps every chat.postMessage call.
+type slackAPI struct {
+	mutex sync.Mutex
+	calls []slackCall
+}
+
+type slackCall struct {
+	Authorization string
+	Channel       string `json:"channel"`
+	Text          string `json:"text"`
+	Thread        string `json:"thread_ts"`
+}
+
+func newSlackAPI(t *testing.T, answer string) (*slackAPI, string) {
+	t.Helper()
+
+	api := &slackAPI{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var call slackCall
+
+		_ = json.NewDecoder(r.Body).Decode(&call)
+		call.Authorization = r.Header.Get("Authorization")
+
+		api.mutex.Lock()
+		api.calls = append(api.calls, call)
+		api.mutex.Unlock()
+
+		_, _ = io.WriteString(w, answer)
+	}))
+	t.Cleanup(server.Close)
+
+	return api, server.URL
+}
+
+// With a bot the message stays short and the agent prompt goes in a thread
+// under it.
+func TestSlackBotPromptInThread(t *testing.T) {
+	api, url := newSlackAPI(t, `{"ok":true,"ts":"1700000000.000100"}`)
+	slack := Slack{BotToken: "xoxb-test-token", Channel: "C0123456789", apiURL: url}
+	notification := sample
+	notification.Event = &sentry.Event{Exception: sentry.ExceptionList{{Type: "TypeError", Value: "Cannot read properties of undefined"}}}
+
+	if err := slack.Send(context.Background(), notification); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(api.calls) != 2 {
+		t.Fatalf("%d calls, want the message and the prompt", len(api.calls))
+	}
+
+	message, prompt := api.calls[0], api.calls[1]
+
+	if message.Authorization != "Bearer xoxb-test-token" || message.Channel != "C0123456789" || message.Thread != "" || strings.Contains(message.Text, "```") {
+		t.Errorf("message: %+v", message)
+	}
+
+	if prompt.Thread != "1700000000.000100" || !strings.Contains(prompt.Text, "```") || !strings.Contains(prompt.Text, "Do not change any code") {
+		t.Errorf("prompt: %+v", prompt)
+	}
+
+	// A test message (no event) has no prompt; a summary is one message.
+	api.calls = nil
+	_ = slack.Send(context.Background(), sample)
+	_ = slack.SendSummary(context.Background(), Summary{Count: 2, Window: time.Minute, Items: []Notification{sample}})
+
+	if len(api.calls) != 2 || api.calls[0].Thread != "" || api.calls[1].Thread != "" {
+		t.Errorf("without an event: %+v", api.calls)
+	}
+}
+
+// Slack answers 200 with ok:false: the error says why, and no thread follows.
+func TestSlackBotError(t *testing.T) {
+	api, url := newSlackAPI(t, `{"ok":false,"error":"not_in_channel"}`)
+	slack := Slack{BotToken: "xoxb-test-token", Channel: "C0123456789", apiURL: url}
+	notification := sample
+	notification.Event = &sentry.Event{}
+
+	err := slack.Send(context.Background(), notification)
+
+	if err == nil || !strings.Contains(err.Error(), "not_in_channel") || strings.Contains(err.Error(), "xoxb") || len(api.calls) != 1 {
+		t.Fatalf("err %v, %d calls", err, len(api.calls))
+	}
+}
+
+// Setup errors say what to fix.
+func TestSlackBotErrorHints(t *testing.T) {
+	_, url := newSlackAPI(t, `{"ok":false,"error":"missing_scope","needed":"chat:write"}`)
+	slack := Slack{BotToken: "xoxb-test-token", Channel: "C0123456789", apiURL: url}
+
+	if err := slack.Send(context.Background(), sample); err == nil || !strings.Contains(err.Error(), "lacks the chat:write scope") || !strings.Contains(err.Error(), "Reinstall to Workspace") {
+		t.Fatalf("err %v", err)
 	}
 }

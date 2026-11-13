@@ -1,0 +1,173 @@
+package services
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"slices"
+	"time"
+
+	"github.com/devforth/exception-monitoring/internal/agentprompt"
+	"github.com/devforth/exception-monitoring/internal/sentry"
+	"github.com/devforth/exception-monitoring/internal/store"
+)
+
+// Issues: the issue list and pages, the actions on issues and the logs
+// shown with an event.
+type Issues struct {
+	store *store.Store
+}
+
+func NewIssues(database *store.Store) *Issues {
+	return &Issues{store: database}
+}
+
+// Count counts the issues that match filter (its Limit and Offset are ignored).
+func (issues *Issues) Count(ctx context.Context, filter store.IssueFilter) (int, error) {
+	return issues.store.CountIssues(ctx, filter)
+}
+
+// List returns one page of the issues that match filter.
+func (issues *Issues) List(ctx context.Context, filter store.IssueFilter) ([]store.Issue, error) {
+	return issues.store.ListIssues(ctx, filter)
+}
+
+// Get reads an issue; store.ErrNotFound when it does not exist.
+func (issues *Issues) Get(ctx context.Context, issueID int64) (store.Issue, error) {
+	return issues.store.GetIssue(ctx, issueID)
+}
+
+// recentEventsShown is how many events of an issue its page lists.
+const recentEventsShown = 20
+
+// RecentEvents lists the newest events of an issue for its page.
+func (issues *Issues) RecentEvents(ctx context.Context, issueID int64) ([]store.EventSummary, error) {
+	return issues.store.ListEvents(ctx, store.EventFilter{IssueID: issueID, Limit: recentEventsShown})
+}
+
+// SelectedEvent is the event the issue page shows: eventID (from ?event=, in
+// UUID or hex form) when given, otherwise the latest one. An event of another
+// issue is store.ErrNotFound, as a missing one: the page then shows no event
+// rather than another issue's.
+func (issues *Issues) SelectedEvent(ctx context.Context, issue store.Issue, eventID string) (store.Event, error) {
+	if eventID == "" {
+		return issues.store.LatestEvent(ctx, issue.ID)
+	}
+
+	event, err := issues.store.GetEvent(ctx, issue.ProjectID, sentry.NormalizeEventID(eventID))
+
+	if err == nil && event.IssueID != issue.ID {
+		return store.Event{}, store.ErrNotFound
+	}
+
+	return event, err
+}
+
+// Issue actions are shared by the issue page (one issue) and the issues list
+// (the selected issues): both post an "action" and end up in ApplyAction.
+
+// issueActions maps an action to the status it sets; delete sets none.
+var issueActions = map[string]string{
+	"resolve": store.StatusResolved,
+	"ignore":  store.StatusIgnored,
+	"reopen":  store.StatusUnresolved,
+	"delete":  "",
+}
+
+var ErrUnknownAction = errors.New("unknown action")
+
+// ApplyAction runs action on each issue. An issue that no longer exists
+// (deleted from another tab) is skipped, the others are still processed.
+func (issues *Issues) ApplyAction(ctx context.Context, action string, issueIDs []int64) error {
+	status, ok := issueActions[action]
+
+	if !ok {
+		return ErrUnknownAction
+	}
+
+	for _, issueID := range issueIDs {
+		var err error
+
+		if action == "delete" {
+			err = issues.store.DeleteIssue(ctx, issueID)
+		} else {
+			err = issues.store.SetIssueStatus(ctx, issueID, status)
+		}
+
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return fmt.Errorf("%s issue %d: %w", action, issueID, err)
+		}
+	}
+
+	return nil
+}
+
+// TraceLogs counts the logs of the event's trace: its trace ID links to
+// them only when there are some.
+func (issues *Issues) TraceLogs(ctx context.Context, event store.Event) (int, error) {
+	if event.TraceID == "" {
+		return 0, nil
+	}
+
+	return issues.store.CountLogs(ctx, store.LogFilter{TraceID: event.TraceID})
+}
+
+// relatedLogsWindow bounds the fallback by time: logs of the same trace this
+// close to the error. A browser trace lasts as long as the tab is open.
+const relatedLogsWindow = time.Minute
+
+// RelatedLogs returns the logs written around an event, oldest first, and
+// whether they are exactly the logs of its request.
+//
+// A log written during the request carries the span of the route handler (the
+// event's span) or of the HTTP request (the event's parent span). Without span
+// matches (SDKs that send no spans), it falls back to logs of the same trace
+// within relatedLogsWindow of the error.
+func (issues *Issues) RelatedLogs(ctx context.Context, event store.Event) (logs []store.LogRecord, fromRequest bool, err error) {
+	if event.TraceID == "" {
+		return nil, false, nil
+	}
+
+	var spans []string
+
+	for _, span := range []string{event.SpanID, event.ParentSpanID} {
+		if span != "" {
+			spans = append(spans, span)
+		}
+	}
+
+	if len(spans) > 0 {
+		logs, err = issues.store.ListLogs(ctx, store.LogFilter{TraceID: event.TraceID, SpanIDs: spans, Limit: 100})
+		fromRequest = len(logs) > 0
+	}
+
+	if err == nil && len(logs) == 0 {
+		logs, err = issues.store.ListLogs(ctx, store.LogFilter{
+			TraceID: event.TraceID,
+			Since:   event.Timestamp.Add(-relatedLogsWindow),
+			Until:   event.Timestamp.Add(relatedLogsWindow),
+			Limit:   100,
+		})
+	}
+
+	// Oldest first: read what happened in order.
+	slices.Reverse(logs)
+
+	return logs, fromRequest, err
+}
+
+// AgentPrompt is the text of the "Prompt" button: what a coding agent needs
+// to fix the error, without what identifies servers or people.
+func AgentPrompt(project string, issue store.Issue, event *sentry.Event, relatedLogs []store.LogRecord, fromRequest bool) string {
+	logs := make([]agentprompt.Log, 0, len(relatedLogs))
+
+	for _, record := range relatedLogs {
+		logs = append(logs, agentprompt.Log{Time: record.Timestamp, Level: record.Level, Body: record.Body})
+	}
+
+	return agentprompt.Build(agentprompt.Input{
+		Project: project, Title: issue.Title, Level: issue.Level, Culprit: issue.Culprit, Event: event,
+		Issue: &agentprompt.Issue{Status: issue.Status, Events: issue.EventCount, FirstSeen: issue.FirstSeen, LastSeen: issue.LastSeen},
+		Logs:  logs, LogsFromRequest: fromRequest,
+	})
+}

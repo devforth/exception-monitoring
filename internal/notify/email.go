@@ -45,9 +45,8 @@ func projectColor(color string) string {
 // SMTP server. Port 465 uses implicit TLS; other ports upgrade with STARTTLS
 // when the server offers it.
 type Email struct {
-	SMTP          config.SMTP
-	To            string // the address of the connection
-	HideIssueLink bool
+	SMTP config.SMTP
+	To   string // the address of the connection
 }
 
 func (email Email) Name() string { return "email" }
@@ -103,10 +102,6 @@ func (emailView) InAppFrames(stacktrace *sentry.Stacktrace) []sentry.Frame {
 }
 
 func (email Email) Send(ctx context.Context, notification Notification) error {
-	if email.HideIssueLink {
-		notification.IssueURL = ""
-	}
-
 	view := emailView{Kind: notification.Kind.label(), Notification: notification, Event: notification.Event}
 
 	for _, item := range []fact{
@@ -155,16 +150,6 @@ func (email Email) Send(ctx context.Context, notification Notification) error {
 }
 
 func (email Email) SendSummary(ctx context.Context, summary Summary) error {
-	if email.HideIssueLink {
-		items := append([]Notification(nil), summary.Items...)
-
-		for index := range items {
-			items[index].IssueURL = ""
-		}
-
-		summary.Items = items
-	}
-
 	view := emailView{Heading: summary.heading(), Summary: summary, Note: summary.note()}
 
 	var text strings.Builder

@@ -37,7 +37,7 @@ type Connection struct {
 	ProjectIDs    []int // used when AllProjects is false
 	Levels        []string
 	Active        bool
-	HideIssueLink bool // omit panel links from email notifications
+	HideIssueLink bool // messages carry no link to the panel (default for chats, which may be public)
 	CreatedAt     time.Time
 
 	Type     string

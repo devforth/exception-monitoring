@@ -1,0 +1,187 @@
+{{define "title"}}{{if .Data.New}}Add connection{{else}}{{.Data.Name}}{{end}} · Notifications{{end}}
+
+{{define "content"}}
+{{with .Data}}
+{{template "back" (back "/notifications" "Notifications")}}
+<h1>{{if .New}}Add connection{{else}}{{.Name}}{{end}}</h1>
+
+{{with .Notice}}<p class="notice-success" role="status">{{.}}</p>{{end}}
+{{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}
+
+<form class="connection-form" data-type="{{.Type}}" method="post" action="{{if .New}}/notifications{{else}}/notifications/{{.ID}}{{end}}">
+  {{if .New}}
+  <fieldset>
+    <legend>Type</legend>
+    {{range .Types}}
+    <label class="option {{if not .Available}}disabled{{end}}">
+      <input type="radio" name="type" value="{{.Value}}" {{if .Selected}}checked{{end}} {{if not .Available}}disabled{{end}} required>
+      {{.Label}}{{if not .Available}} <span class="muted small">({{.Reason}})</span>{{end}}
+    </label>
+    {{end}}
+  </fieldset>
+  {{with index .Errors "type"}}<p class="field-error">{{.}}</p>{{end}}
+  {{else}}
+  <p class="muted">Type: <b>{{.TypeLabel}}</b></p>
+  {{end}}
+
+  {{/* app.js shows only the fields of the selected type; without JS all are shown. */}}
+  {{if or .New (eq .Type "email")}}
+  <div class="type-fields" data-type="email">
+    {{template "email-step" .Email}}
+    {{with index .Errors "address"}}<p class="field-error">{{.}}</p>{{end}}
+  </div>
+  {{end}}
+
+  {{if or .New (eq .Type "telegram")}}
+  <div class="type-fields" data-type="telegram">
+    <label>Bot token
+      <input name="bot_token" autocomplete="off" placeholder="{{with .SavedTelegramToken}}saved: {{.}} — leave empty to keep{{else}}123456:ABC-DEF…{{end}}">
+    </label>
+    {{with index .Errors "bot_token"}}<p class="field-error">{{.}}</p>{{end}}
+    <label>Chat ID
+      <input name="chat_id" value="{{.ChatID}}" placeholder="-1001234567890 or @channel">
+    </label>
+    {{with index .Errors "chat_id"}}<p class="field-error">{{.}}</p>{{end}}
+    {{if eq .Type "telegram"}}{{with .Duplicate}}{{template "duplicate" .}}{{end}}{{end}}
+    <p class="muted small">
+      Create a bot with <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer">@BotFather</a> (send <code>/newbot</code>, it replies with the token) and add the bot to the chat.
+      The chat ID is in the answer of <code>https://api.telegram.org/bot&lt;token&gt;/getUpdates</code> after a message in the chat.
+      <a href="https://core.telegram.org/bots/tutorial#obtain-your-bot-token" target="_blank" rel="noopener noreferrer">Telegram's guide</a>.
+      Tokens are stored encrypted.
+    </p>
+  </div>
+  {{end}}
+
+  {{if or .New (eq .Type "slack")}}
+  <div class="type-fields" data-type="slack">
+    <label>Incoming webhook URL
+      <input name="webhook_url" autocomplete="off" placeholder="{{with .SavedWebhook}}saved: {{.}} — leave empty to keep{{else}}https://hooks.slack.com/services/…{{end}}">
+    </label>
+    {{with index .Errors "webhook_url"}}<p class="field-error">{{.}}</p>{{end}}
+    <p class="muted small">
+      <a href="https://api.slack.com/apps?new_app=1" target="_blank" rel="noopener noreferrer">Create a Slack app</a>, turn on Incoming Webhooks and add one for the channel.
+      <a href="https://api.slack.com/messaging/webhooks" target="_blank" rel="noopener noreferrer">Slack's guide</a>.
+      Mattermost and Rocket.Chat webhooks work too.
+    </p>
+    <label>Bot token <span class="muted small">(optional: the bot posts the messages and puts the prompt for a coding agent in a thread under each error; the webhook is then not needed)</span>
+      <input name="slack_bot_token" autocomplete="off" placeholder="{{with .SavedSlackToken}}saved: {{.}} — leave empty to keep{{else}}xoxb-…{{end}}">
+    </label>
+    {{with index .Errors "slack_bot_token"}}<p class="field-error">{{.}}</p>{{end}}
+    <label>Channel ID
+      <input name="slack_channel" value="{{.SlackChannel}}" placeholder="C0123456789">
+    </label>
+    {{with index .Errors "slack_channel"}}<p class="field-error">{{.}}</p>{{end}}
+    {{if eq .Type "slack"}}{{with .Duplicate}}{{template "duplicate" .}}{{end}}{{end}}
+    <p class="muted small">
+      Bot: <a href="https://api.slack.com/apps" target="_blank" rel="noopener noreferrer">your Slack app</a> → OAuth &amp; Permissions → Bot Token Scopes: <code>chat:write</code> → Install to Workspace → Bot User OAuth Token.
+      Invite the bot to the channel (<code>/invite @app</code>); the channel ID is at the bottom of the channel details.
+      Tokens and webhooks are stored encrypted.
+    </p>
+  </div>
+  {{end}}
+
+  {{/* Locked until the email address is confirmed (app.js unlocks it when the step reports it). */}}
+  <fieldset class="connection-rest" {{if .RestLocked}}disabled{{end}}>
+    <label>Name
+      <input name="name" value="{{.Name}}" maxlength="100" placeholder="{{.NamePlaceholder}}"
+             data-placeholder-telegram="the name of the chat, from Telegram" data-placeholder-slack="Slack">
+    </label>
+    <p class="muted small">Optional: left empty, it is filled in when saved.</p>
+    {{with index .Errors "name"}}<p class="field-error">{{.}}</p>{{end}}
+
+    <fieldset>
+      <legend>Projects</legend>
+      <label class="option"><input type="checkbox" name="all_projects" class="all-projects" {{if .AllProjects}}checked{{end}}> All projects, including ones added later</label>
+      <div class="project-choices">
+        {{range .Projects}}<label class="option"><input type="checkbox" name="project" value="{{.Value}}" {{if .Checked}}checked{{end}}> {{.Label}}</label>{{end}}
+      </div>
+    </fieldset>
+    {{with index .Errors "projects"}}<p class="field-error">{{.}}</p>{{end}}
+
+    <fieldset>
+      <legend>Levels</legend>
+      {{range .Levels}}<label class="option"><input type="checkbox" name="level" value="{{.Value}}" {{if .Checked}}checked{{end}}> {{template "badge" (label "level" .Label)}}</label>{{end}}
+    </fieldset>
+    {{with index .Errors "levels"}}<p class="field-error">{{.}}</p>{{end}}
+
+    <div class="actions connection-options">
+    <label class="option">
+      <input type="checkbox" name="active" {{if .Active}}checked{{end}}>
+      Active: send notifications
+    </label>
+    <label class="option issue-link-option" title="A chat may be read by people outside the team: links to the panel are off there by default.">
+      <input type="checkbox" name="include_issue_link" {{if not .HideIssueLink}}checked{{end}}>
+      Include Open issue link
+    </label>
+    </div>
+    {{with index .Errors "active"}}<p class="field-error">{{.}}</p>{{end}}
+
+    <div class="actions">
+      <button type="submit" class="primary">{{if .New}}Add{{else}}Save{{end}}</button>
+      <a class="button" href="/notifications">Cancel</a>
+    </div>
+  </fieldset>
+</form>
+
+{{if not .New}}
+<div class="actions secondary-actions">
+  {{if .Verified}}
+  <form method="post" action="/notifications/{{.ID}}/test">
+    <button type="submit">Send test message</button>
+  </form>
+  {{end}}
+  <form method="post" action="/notifications/{{.ID}}/delete">
+    <button type="submit" class="danger" data-confirm="Delete the connection {{.Name}}? Its queued messages are dropped; a confirmed address stays confirmed.">Delete</button>
+  </form>
+</div>
+{{end}}
+{{end}}
+{{end}}
+
+{{/* The email step of a new connection, swapped in place by htmx. The buttons
+     are inside the main form, so htmx sends its fields; the handlers read only
+     what they need. data-verified tells app.js to unlock the rest. */}}
+{{define "email-step"}}
+<div class="email-step" {{if eq .State "verified"}}data-verified{{end}}>
+  {{if eq .State "input"}}
+  <label>Email address
+    <span class="inline-form">
+      <input type="email" name="address" value="{{.Address}}" placeholder="team@example.com" autocomplete="email">
+      <button type="button" class="primary" hx-post="/notifications/email/start" hx-target="closest .email-step" hx-swap="outerHTML">Verify</button>
+    </span>
+  </label>
+  <p class="muted small">We send a confirmation code to this address. Addresses confirmed before need no new code.</p>
+  {{else}}
+  {{if .Fixed}}<input type="hidden" name="address_fixed" value="1">{{end}}
+  <input type="hidden" name="destination_id" value="{{.DestinationID}}">
+  <input type="hidden" name="address" value="{{.Address}}">
+  <p class="email-confirmed">{{.Address}}
+    {{if eq .State "verified"}}<span class="confirmed">✓ confirmed{{if not .VerifiedAt.IsZero}} {{template "time" .VerifiedAt}}{{end}}</span>{{end}}
+  </p>
+  {{if eq .State "unconfirmed"}}
+  <p class="muted small">This address is not confirmed yet: notifications start after you enter the code we mail to it.</p>
+  <span class="step-actions">
+    <button type="button" class="primary" hx-post="/notifications/email/resend" hx-target="closest .email-step" hx-swap="outerHTML">Send a code</button>
+  </span>
+  {{end}}
+  {{if eq .State "code"}}
+  <span class="inline-form">
+    <input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123456" aria-label="Confirmation code">
+    <button type="button" class="primary" hx-post="/notifications/email/confirm" hx-target="closest .email-step" hx-swap="outerHTML">Confirm</button>
+  </span>
+  {{end}}
+  <span class="step-actions">
+    {{if eq .State "code"}}<button type="button" class="link" hx-post="/notifications/email/resend" hx-target="closest .email-step" hx-swap="outerHTML">Send the code again</button>{{end}}
+    {{if not .Fixed}}<button type="button" class="link" hx-post="/notifications/email/change" hx-target="closest .email-step" hx-swap="outerHTML">Change email</button>{{end}}
+  </span>
+  {{end}}
+  {{with .Duplicate}}{{template "duplicate" .}}{{end}}
+  {{with .Notice}}<p class="notice-success small" role="status">{{.}}</p>{{end}}
+  {{with .Error}}<p class="field-error" role="alert">{{.}}</p>{{end}}
+</div>
+{{end}}
+
+{{/* One connection per address or chat: link to the one that has it. */}}
+{{define "duplicate"}}
+<p class="field-error" role="alert">Already added as <a href="/notifications/{{.ID}}">{{.Name}}</a>: edit that connection instead.</p>
+{{end}}

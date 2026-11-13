@@ -1,18 +1,22 @@
 package ui
 
-import "time"
+import (
+	"time"
+
+	"github.com/devforth/exception-monitoring/internal/ui/services"
+)
 
 // Compiled only into tests: the external ui_test package uses it to keep the
 // slow credentials key derivation out of every test server start.
 func init() {
-	credentialsIterations = 1_000
+	services.CredentialsIterations = 1_000
 }
 
 // SetResendCooldown changes the minimum time between two verification codes
 // to one address and returns a function that restores it.
 func SetResendCooldown(cooldown time.Duration) (restore func()) {
-	previous := resendCooldown
-	resendCooldown = cooldown
+	previous := services.ResendCooldown
+	services.ResendCooldown = cooldown
 
-	return func() { resendCooldown = previous }
+	return func() { services.ResendCooldown = previous }
 }
