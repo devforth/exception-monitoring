@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/devforth/exception-monitoring/internal/agentprompt"
+	"github.com/devforth/exception-monitoring/internal/config"
 )
 
 // Shared wording of the short formats (Slack, Telegram). Email has its own
@@ -31,6 +34,27 @@ func (notification Notification) details() string {
 	}
 
 	return strings.Join(parts, " · ")
+}
+
+// mcpReference is a short, copyable request an agent can use without the
+// attached prompt (see agentprompt.MCPReference); none for a test message.
+// It works even when the panel's links are hidden.
+func mcpReference(appName string, notification Notification) string {
+	if notification.IssueID <= 0 || notification.Kind == Test {
+		return ""
+	}
+
+	return agentprompt.MCPReference(appNameOr(appName), notification.IssueID)
+}
+
+// appNameOr is APP_NAME as channels got it, or the default for channels
+// built without it.
+func appNameOr(appName string) string {
+	if appName == "" {
+		return config.DefaultAppName
+	}
+
+	return appName
 }
 
 func (summary Summary) heading() string {

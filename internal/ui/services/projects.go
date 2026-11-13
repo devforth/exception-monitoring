@@ -6,8 +6,9 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
-	"strings"
+	"strconv"
 
+	"github.com/devforth/exception-monitoring/internal/access"
 	"github.com/devforth/exception-monitoring/internal/config"
 	"github.com/devforth/exception-monitoring/internal/projects"
 	"github.com/devforth/exception-monitoring/internal/store"
@@ -61,22 +62,23 @@ func (service *Projects) Name(projectID int) string {
 	return fmt.Sprintf("project %d", projectID)
 }
 
-// DSN is the DSN of a project: at PUBLIC_URL when it is set (the address
-// SDKs reach, which may differ from the one the admin opened the UI with),
-// otherwise at the address of this request (https behind a trusted proxy
-// that says so). The scheme stays: SDKs need it to parse the DSN.
+// DSN is the DSN of a project, at the server's address (see address). The
+// scheme stays: SDKs need it to parse the DSN.
 func (service *Projects) DSN(r *http.Request, project config.Project) string {
-	if public, err := url.Parse(service.publicURL); err == nil && public.Host != "" {
-		return fmt.Sprintf("%s://%s@%s%s/%d", public.Scheme, project.PublicKey, public.Host, strings.TrimRight(public.Path, "/"), project.ID)
-	}
+	base := service.address(r)
+	base.User = url.User(project.PublicKey)
 
-	scheme := "http"
+	return base.JoinPath(strconv.Itoa(project.ID)).String()
+}
 
-	if IsHTTPS(r, service.trustedProxies) {
-		scheme = "https"
-	}
+// URL is the address of path on this server, such as the MCP endpoint.
+func (service *Projects) URL(r *http.Request, path string) string {
+	return service.address(r).JoinPath(path).String()
+}
 
-	return fmt.Sprintf("%s://%s@%s/%d", scheme, project.PublicKey, r.Host, project.ID)
+// address is where clients reach the server (see access.PublicURL).
+func (service *Projects) address(r *http.Request) *url.URL {
+	return access.PublicURL(r, service.publicURL, service.trustedProxies)
 }
 
 // Color is the color a project shows: its own, or the palette color

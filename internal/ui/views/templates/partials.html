@@ -1,5 +1,14 @@
 {{/* Small pieces shared by pages. */}}
 
+{{/* "copy-button": copies Text, or the text of the element with id Target
+     (a textarea's value or an element's text); app.js shows Copied in the
+     toast of the layout. Without a Label it is an icon. Built by copyButton
+     (target) or copyText (text). */}}
+{{define "copy-button"}}<button type="button" class="copy-button" {{with .Text}}data-copy-text="{{.}}"{{else}}data-copy="{{.Target}}"{{end}} data-copied="{{.Copied}}" title="{{.Title}}" aria-label="{{.Title}}">
+  <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg>
+  {{with .Label}}<span>{{.}}</span>{{end}}
+</button>{{end}}
+
 {{/* The link back to the page above (back "/projects" "Projects"); Esc
      follows it too (app.js, data-back). */}}
 {{define "back"}}<p class="back"><a href="{{.URL}}" data-back title="Back (Esc)">← {{.Label}}</a></p>{{end}}

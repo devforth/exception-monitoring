@@ -19,7 +19,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/devforth/exception-monitoring/internal/agentprompt"
 	"github.com/devforth/exception-monitoring/internal/config"
 	"github.com/devforth/exception-monitoring/internal/sentry"
 )
@@ -45,8 +44,9 @@ func projectColor(color string) string {
 // SMTP server. Port 465 uses implicit TLS; other ports upgrade with STARTTLS
 // when the server offers it.
 type Email struct {
-	SMTP config.SMTP
-	To   string // the address of the connection
+	SMTP    config.SMTP
+	To      string // the address of the connection
+	AppName string // APP_NAME: subjects and the footer say where mail comes from
 }
 
 func (email Email) Name() string { return "email" }
@@ -74,11 +74,17 @@ type emailView struct {
 	Note         string
 	// PromptFile is the name of the attached agent prompt, empty without one.
 	PromptFile string
+	AppName    string // set by send
 
 	// Verification email.
 	ConnectionName string
 	Code           string
 	ValidFor       string
+}
+
+// Reference is the MCP request of an issue in the message (empty for a test).
+func (view emailView) Reference(notification Notification) string {
+	return mcpReference(view.AppName, notification)
 }
 
 // InAppFrames returns the frames to show for an exception: the newest
@@ -137,10 +143,7 @@ func (email Email) Send(ctx context.Context, notification Notification) error {
 	// The prompt for a coding agent goes as a file: mail clients run no
 	// script, so it cannot be copied with a button as on the issue page, and
 	// in the body it would bury the error.
-	prompt := agentprompt.Build(agentprompt.Input{
-		Project: notification.Project, Title: notification.Title, Level: notification.Level, Culprit: notification.Culprit,
-		Kind: notification.Kind.label(), Event: notification.Event,
-	})
+	prompt := agentPrompt(notification)
 
 	subject := fmt.Sprintf("[%s] %s: %s", notification.Project, notification.Kind.label(), truncate(notification.Title, 150))
 	view.PromptFile = promptFileName(notification)
@@ -158,11 +161,15 @@ func (email Email) SendSummary(ctx context.Context, summary Summary) error {
 
 	for _, item := range summary.Items {
 		fmt.Fprintf(&text, "- [%s] %s %s\n", item.Project, item.Title, item.IssueURL)
+
+		if reference := mcpReference(email.AppName, item); reference != "" {
+			fmt.Fprintf(&text, "  %s\n", reference)
+		}
 	}
 
 	text.WriteString("\n" + summary.note() + "\n")
 
-	return email.send(ctx, "[Exception Monitoring] "+summary.heading(), text.String(), "summary", view)
+	return email.send(ctx, "["+appNameOr(email.AppName)+"] "+summary.heading(), text.String(), "summary", view)
 }
 
 // plainText is the text/plain part for clients that do not show HTML.
@@ -173,6 +180,10 @@ func (email Email) plainText(notification Notification) string {
 
 	if details := notification.details(); details != "" {
 		text.WriteString(details + "\n")
+	}
+
+	if reference := mcpReference(email.AppName, notification); reference != "" {
+		text.WriteString("\n" + reference + "\n")
 	}
 
 	if notification.IssueURL != "" {
@@ -198,40 +209,6 @@ func (email Email) plainText(notification Notification) string {
 	return text.String()
 }
 
-// promptFileName names the attached prompt after the issue, such as
-// "backend-error-6.md", so prompts saved from several emails do not
-// overwrite each other.
-func promptFileName(notification Notification) string {
-	level := notification.Level
-
-	if level == "" {
-		level = "error"
-	}
-
-	return fmt.Sprintf("%s-%s-%d.md", fileNamePart(notification.Project), fileNamePart(level), notification.IssueID)
-}
-
-// fileNamePart keeps letters, digits and dashes, lowercase: project names
-// come from config and may hold anything.
-func fileNamePart(text string) string {
-	var part strings.Builder
-
-	for _, char := range strings.ToLower(text) {
-		switch {
-		case char >= 'a' && char <= 'z', char >= '0' && char <= '9', char == '-':
-			part.WriteRune(char)
-		case part.Len() > 0 && !strings.HasSuffix(part.String(), "-"):
-			part.WriteRune('-')
-		}
-	}
-
-	if name := strings.Trim(part.String(), "-"); name != "" {
-		return name
-	}
-
-	return "project"
-}
-
 // attachment is a file attached to an email.
 type attachment struct {
 	Name        string
@@ -241,6 +218,8 @@ type attachment struct {
 
 func (email Email) send(ctx context.Context, subject, text, templateName string, view emailView, attachments ...attachment) error {
 	var htmlBody bytes.Buffer
+
+	view.AppName = appNameOr(email.AppName)
 
 	if err := emailTemplates.ExecuteTemplate(&htmlBody, templateName, view); err != nil {
 		return fmt.Errorf("email template: %w", err)
@@ -261,8 +240,8 @@ func (email Email) send(ctx context.Context, subject, text, templateName string,
 func (email Email) SendVerificationCode(ctx context.Context, connectionName, code string, validFor time.Duration) error {
 	subject := "Confirm notifications to this address: " + code
 	text := fmt.Sprintf("Your confirmation code for the notification connection %q is:\n\n    %s\n\n"+
-		"Enter it in Exception Monitoring within %s. If you did not add this address, ignore this email.\n",
-		connectionName, code, validFor.Round(time.Minute))
+		"Enter it in %s within %s. If you did not add this address, ignore this email.\n",
+		connectionName, code, appNameOr(email.AppName), validFor.Round(time.Minute))
 
 	view := emailView{ConnectionName: connectionName, Code: code, ValidFor: validFor.Round(time.Minute).String()}
 

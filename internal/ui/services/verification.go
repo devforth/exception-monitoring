@@ -96,7 +96,7 @@ func (verification *Verification) SendCode(ctx context.Context, destination stor
 
 	defer cancel()
 
-	email := notify.Email{SMTP: verification.factory.SMTP, To: destination.Address}
+	email := verification.factory.Email(destination.Address)
 
 	if err := email.SendVerificationCode(sendCtx, destination.Address, code, verificationCodeLifetime); err != nil {
 		verification.logger.Error("send verification code", "destination_id", destination.ID, "err", err)

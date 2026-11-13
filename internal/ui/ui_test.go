@@ -19,7 +19,9 @@ import (
 	"github.com/devforth/exception-monitoring/internal/config"
 	"github.com/devforth/exception-monitoring/internal/fixtures"
 	"github.com/devforth/exception-monitoring/internal/ingest"
+	"github.com/devforth/exception-monitoring/internal/mcp"
 	"github.com/devforth/exception-monitoring/internal/notify"
+	"github.com/devforth/exception-monitoring/internal/oauth"
 	"github.com/devforth/exception-monitoring/internal/projects"
 	"github.com/devforth/exception-monitoring/internal/secret"
 	"github.com/devforth/exception-monitoring/internal/server"
@@ -127,7 +129,10 @@ func startServer(t *testing.T, database *store.Store, adminUsername, adminPasswo
 	}))
 	t.Cleanup(telegram.Close)
 
-	webUI, err := ui.New(context.Background(), logger, database, settings, registry, notify.Factory{SMTP: smtp, Box: box, TelegramURL: telegram.URL})
+	authorization := &oauth.Server{
+		Store: database, PublicURL: settings.Notifications.PublicURL, TrustedProxies: settings.TrustedProxies, ResourcePath: mcp.Path,
+	}
+	webUI, err := ui.New(context.Background(), logger, database, settings, registry, notify.Factory{SMTP: smtp, Box: box, TelegramURL: telegram.URL}, authorization)
 
 	if err != nil {
 		t.Fatal(err)
@@ -138,6 +143,7 @@ func startServer(t *testing.T, database *store.Store, adminUsername, adminPasswo
 		Database: database,
 		Ingest:   ingest.New(logger, settings, registry, ingest.StoreSink{Store: database, Logger: logger}),
 		UI:       webUI,
+		MCP:      mcp.New(logger, database, registry, authorization, config.DefaultAppName, "test"),
 	}).Handler()
 
 	return &testServer{t: t, handler: handler, mails: mails}

@@ -121,8 +121,8 @@ func TestRedact(t *testing.T) {
 	}
 
 	for input, want := range testCases {
-		if got := redact(input); got != want {
-			t.Errorf("redact(%q) = %q, want %q", input, got, want)
+		if got := Redact(input); got != want {
+			t.Errorf("Redact(%q) = %q, want %q", input, got, want)
 		}
 	}
 }

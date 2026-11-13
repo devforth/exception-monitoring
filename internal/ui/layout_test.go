@@ -1,8 +1,10 @@
 package ui_test
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"regexp"
 	"strings"
 	"testing"
@@ -104,5 +106,45 @@ func TestBackLinks(t *testing.T) {
 		if !strings.Contains(server.page(path), want) {
 			t.Errorf("%s: missing %s", path, want)
 		}
+	}
+}
+
+// The menu has two groups, MCP last in the settings; Issues shows how many
+// are unresolved.
+func TestMenuGroupsAndCounter(t *testing.T) {
+	server := newTestServer(t, password)
+	server.login()
+
+	if page := server.page("/projects"); strings.Contains(page, `class="nav-count"`) {
+		t.Error("a counter with no issues")
+	}
+
+	server.ingestFixtures()
+
+	page := server.page("/projects")
+	ids := issueIDs(server.page("/issues"))
+	counter := fmt.Sprintf(`<b class="nav-count" aria-label="%d unresolved">%d</b>`, len(ids), len(ids))
+
+	if !strings.Contains(page, counter) {
+		t.Fatalf("missing %s", counter)
+	}
+
+	order := []string{`>Monitoring<`, `href="/issues"`, `href="/logs"`, `>Settings<`, `href="/projects"`, `href="/notifications"`, `href="/agents"`, `</nav>`}
+	position := 0
+
+	for _, item := range order {
+		next := strings.Index(page[position:], item)
+
+		if next < 0 {
+			t.Fatalf("menu order: %s missing after position %d", item, position)
+		}
+
+		position += next
+	}
+
+	server.post("/issues/"+ids[0]+"/action", url.Values{"action": {"resolve"}})
+
+	if page := server.page("/logs"); !strings.Contains(page, fmt.Sprintf(`aria-label="%d unresolved"`, len(ids)-1)) {
+		t.Error("the counter does not follow a resolved issue")
 	}
 }

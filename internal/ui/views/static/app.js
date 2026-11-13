@@ -2,13 +2,28 @@
 
 let copyToastTimeout;
 
+// Copy buttons (the "copy-button" partial): copy the text of their target.
 document.addEventListener("click", async (event) => {
-  const button = event.target.closest("button[data-copy-prompt]");
+  const button = event.target.closest("button[data-copy], button[data-copy-text]");
   if (!button) return;
 
-  const source = document.getElementById(button.dataset.copyPrompt);
-  const status = document.getElementById("agent-copy-status");
+  // The text is on the button (data-copy-text), or in the element it names:
+  // a textarea's value or an element's text.
+  let source = button.dataset.copy ? document.getElementById(button.dataset.copy) : null;
+  const status = document.getElementById("copy-status");
+
+  if (button.dataset.copyText !== undefined && !source) {
+    source = document.createElement("textarea");
+    source.value = button.dataset.copyText;
+    source.hidden = true;
+    source.dataset.temporary = "true";
+    button.after(source);
+  }
   if (!source) return;
+
+  const isField = source instanceof HTMLTextAreaElement || source instanceof HTMLInputElement;
+  const text = isField ? source.value : source.textContent;
+  const done = button.dataset.copied || "Copied to clipboard.";
 
   clearTimeout(copyToastTimeout);
   if (status) status.textContent = "";
@@ -16,29 +31,64 @@ document.addEventListener("click", async (event) => {
   button.disabled = true;
   try {
     if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
-    await navigator.clipboard.writeText(source.value);
+    await navigator.clipboard.writeText(text);
     button.title = "Copied!";
-    if (status) status.textContent = "Agent prompt copied to clipboard.";
+    if (status) status.textContent = done;
   } catch {
+    if (source instanceof HTMLInputElement && ["password", "hidden"].includes(source.type)) {
+      // Password fields cannot be copied with execCommand in some browsers.
+      // Keep the fallback off screen and remove it before returning focus.
+      const previousFocus = document.activeElement;
+      const fallback = document.createElement("textarea");
+      fallback.value = text;
+      fallback.readOnly = true;
+      fallback.className = "secret-copy-fallback";
+      fallback.setAttribute("aria-hidden", "true");
+      fallback.tabIndex = -1;
+      document.body.append(fallback);
+      let copied = false;
+      try {
+        fallback.focus({ preventScroll: true });
+        fallback.select();
+        copied = document.execCommand("copy");
+      } catch {
+        // Leave the token masked even when clipboard access is unavailable.
+      } finally {
+        fallback.remove();
+        previousFocus?.focus({ preventScroll: true });
+      }
+      if (status) status.textContent = copied ? done : "Could not copy. Allow clipboard access and try again.";
+      if (copied) button.title = "Copied!";
+      return;
+    }
     // HTTP and browsers without clipboard permission can still copy a selection.
-    source.hidden = false;
-    source.classList.add("agent-prompt-fallback");
-    source.readOnly = true;
-    source.focus();
-    source.select();
+    const wasHidden = source.hidden;
+    if (isField) {
+      source.hidden = false;
+      source.classList.add("agent-prompt-fallback");
+      source.readOnly = true;
+      source.focus();
+      source.select();
+    } else {
+      const range = document.createRange();
+      range.selectNodeContents(source);
+      window.getSelection().removeAllRanges();
+      window.getSelection().addRange(range);
+    }
     let copied = false;
     try {
       copied = document.execCommand("copy");
     } catch {
       // Keep the selected text available for manual copying.
     }
-    source.hidden = copied;
-    if (status) status.textContent = copied ? "Agent prompt copied to clipboard." : "Copy the selected prompt with Ctrl+C or ⌘C.";
+    if (isField) source.hidden = copied && wasHidden;
+    if (status) status.textContent = copied ? done : "Copy the selected text with Ctrl+C or ⌘C.";
     if (copied) button.title = "Copied!";
   } finally {
     button.disabled = false;
     setTimeout(() => { button.title = label; }, 2000);
     copyToastTimeout = setTimeout(() => { if (status) status.textContent = ""; }, 5000);
+    if (source.dataset.temporary && source.hidden) source.remove();
   }
 });
 
@@ -216,6 +266,17 @@ function updateConnectionForm(form) {
     name.placeholder = type === "email" ? local || "team" : name.dataset[`placeholder${type[0].toUpperCase()}${type.slice(1)}`] || "";
   }
 
+  // A chat's test button works once the fields it needs are filled.
+  form.querySelectorAll("button[data-test-needs]").forEach((button) => {
+    const fields = button.closest(".type-fields") || form;
+    const filled = (name) => {
+      const input = fields.querySelector(`[name="${name}"]`);
+      return Boolean(input && (input.value.trim() !== "" || input.dataset.saved !== undefined));
+    };
+
+    button.disabled = !button.dataset.testNeeds.split("|").some((group) => group.split(" ").every(filled));
+  });
+
   // An email connection is filled in only after its address is confirmed.
   const rest = form.querySelector(".connection-rest");
 
@@ -265,17 +326,6 @@ document.addEventListener("change", (event) => {
   } else if (all) {
     all.checked = !values.some((input) => input.checked);
   }
-
-  // A chat's test button works once the fields it needs are filled.
-  form.querySelectorAll("button[data-test-needs]").forEach((button) => {
-    const fields = button.closest(".type-fields") || form;
-    const filled = (name) => {
-      const input = fields.querySelector(`[name="${name}"]`);
-      return Boolean(input && (input.value.trim() !== "" || input.dataset.saved !== undefined));
-    };
-
-    button.disabled = !button.dataset.testNeeds.split("|").some((group) => group.split(" ").every(filled));
-  });
 
   updatePicker(picker);
 });
@@ -454,3 +504,54 @@ document.addEventListener("click", (event) => {
 document.addEventListener("DOMContentLoaded", enhance);
 // After an outerHTML swap the event points at the removed element, so rescan the page.
 document.addEventListener("htmx:afterSettle", enhance);
+
+// Client tabs keep connected apps in view. Links also work without JavaScript.
+function selectMCPClient(tab, focus = false) {
+  const settings = tab.closest(".mcp-settings");
+  const client = tab.dataset.mcpTab;
+
+  settings.querySelectorAll("[data-mcp-tab]").forEach((item) => {
+    const selected = item === tab;
+    item.setAttribute("aria-selected", String(selected));
+    item.tabIndex = selected ? 0 : -1;
+    document.getElementById(item.getAttribute("aria-controls")).hidden = !selected;
+  });
+  settings.querySelectorAll("[data-mcp-client]").forEach((input) => { input.value = client; });
+  history.replaceState(null, "", tab.href);
+
+  if (focus) tab.focus();
+}
+
+document.addEventListener("click", (event) => {
+  const tab = event.target.closest("[data-mcp-tab]");
+
+  if (!tab || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button !== 0) return;
+
+  event.preventDefault();
+  selectMCPClient(tab);
+});
+
+document.addEventListener("keydown", (event) => {
+  const tab = event.target.closest("[data-mcp-tab]");
+
+  if (!tab || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+
+  const tabs = Array.from(tab.closest('[role="tablist"]').querySelectorAll("[data-mcp-tab]"));
+  let index = tabs.indexOf(tab);
+
+  if (event.key === "Home") index = 0;
+  else if (event.key === "End") index = tabs.length - 1;
+  else index = (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+
+  event.preventDefault();
+  selectMCPClient(tabs[index], true);
+});
+
+// Token generation returns just the settings card; keep its selected URL in sync.
+document.addEventListener("htmx:afterSwap", (event) => {
+  if (event.detail.target.id !== "mcp-settings") return;
+
+  const tab = document.querySelector('[data-mcp-tab][aria-selected="true"]');
+
+  if (tab) history.replaceState(null, "", tab.href);
+});

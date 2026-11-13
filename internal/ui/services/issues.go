@@ -27,6 +27,12 @@ func (issues *Issues) Count(ctx context.Context, filter store.IssueFilter) (int,
 	return issues.store.CountIssues(ctx, filter)
 }
 
+// Unresolved counts the unresolved issues of every project: the counter
+// next to Issues in the menu.
+func (issues *Issues) Unresolved(ctx context.Context) (int, error) {
+	return issues.store.CountIssues(ctx, store.IssueFilter{Status: store.StatusUnresolved})
+}
+
 // List returns one page of the issues that match filter.
 func (issues *Issues) List(ctx context.Context, filter store.IssueFilter) ([]store.Issue, error) {
 	return issues.store.ListIssues(ctx, filter)
@@ -123,7 +129,15 @@ const relatedLogsWindow = time.Minute
 // event's span) or of the HTTP request (the event's parent span). Without span
 // matches (SDKs that send no spans), it falls back to logs of the same trace
 // within relatedLogsWindow of the error.
-func (issues *Issues) RelatedLogs(ctx context.Context, event store.Event) (logs []store.LogRecord, fromRequest bool, err error) {
+func (issues *Issues) RelatedLogs(ctx context.Context, event store.Event) ([]store.LogRecord, bool, error) {
+	return issues.RelatedLogsLimit(ctx, event, 100)
+}
+
+// RelatedLogsLimit bounds diagnostic context at the database query, so MCP
+// can start with a smaller sample than the interactive UI.
+func (issues *Issues) RelatedLogsLimit(ctx context.Context, event store.Event, limit int) (logs []store.LogRecord, fromRequest bool, err error) {
+	limit = min(max(limit, 1), 100)
+
 	if event.TraceID == "" {
 		return nil, false, nil
 	}
@@ -137,7 +151,7 @@ func (issues *Issues) RelatedLogs(ctx context.Context, event store.Event) (logs 
 	}
 
 	if len(spans) > 0 {
-		logs, err = issues.store.ListLogs(ctx, store.LogFilter{TraceID: event.TraceID, SpanIDs: spans, Limit: 100})
+		logs, err = issues.store.ListLogs(ctx, store.LogFilter{TraceID: event.TraceID, SpanIDs: spans, Limit: limit})
 		fromRequest = len(logs) > 0
 	}
 
@@ -146,7 +160,7 @@ func (issues *Issues) RelatedLogs(ctx context.Context, event store.Event) (logs 
 			TraceID: event.TraceID,
 			Since:   event.Timestamp.Add(-relatedLogsWindow),
 			Until:   event.Timestamp.Add(relatedLogsWindow),
-			Limit:   100,
+			Limit:   limit,
 		})
 	}
 
@@ -157,17 +171,23 @@ func (issues *Issues) RelatedLogs(ctx context.Context, event store.Event) (logs 
 }
 
 // AgentPrompt is the text of the "Prompt" button: what a coding agent needs
-// to fix the error, without what identifies servers or people.
+// to explain the error, without what identifies servers or people.
 func AgentPrompt(project string, issue store.Issue, event *sentry.Event, relatedLogs []store.LogRecord, fromRequest bool) string {
+	return agentprompt.Build(AgentInput(project, issue, event, relatedLogs, fromRequest))
+}
+
+// AgentInput is what an agent may learn about an issue: the prompt and the
+// MCP server describe the same allowlisted fields.
+func AgentInput(project string, issue store.Issue, event *sentry.Event, relatedLogs []store.LogRecord, fromRequest bool) agentprompt.Input {
 	logs := make([]agentprompt.Log, 0, len(relatedLogs))
 
 	for _, record := range relatedLogs {
 		logs = append(logs, agentprompt.Log{Time: record.Timestamp, Level: record.Level, Body: record.Body})
 	}
 
-	return agentprompt.Build(agentprompt.Input{
+	return agentprompt.Input{
 		Project: project, Title: issue.Title, Level: issue.Level, Culprit: issue.Culprit, Event: event,
 		Issue: &agentprompt.Issue{Status: issue.Status, Events: issue.EventCount, FirstSeen: issue.FirstSeen, LastSeen: issue.LastSeen},
 		Logs:  logs, LogsFromRequest: fromRequest,
-	})
+	}
 }

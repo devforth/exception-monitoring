@@ -172,30 +172,9 @@ func (store *Store) SaveEvent(ctx context.Context, event NewEvent) (SaveResult, 
 
 // SetIssueStatus changes an issue's status (resolve, ignore, reopen).
 func (store *Store) SetIssueStatus(ctx context.Context, issueID int64, status string) error {
-	switch status {
-	case StatusUnresolved, StatusResolved, StatusIgnored:
-	default:
-		return fmt.Errorf("invalid status %q", status)
-	}
+	_, err := store.SetIssuesStatus(ctx, []int64{issueID}, status)
 
-	var resolvedAt any
-
-	if status == StatusResolved {
-		resolvedAt = formatTime(time.Now())
-	}
-
-	update, err := store.DB.ExecContext(ctx,
-		`UPDATE issues SET status = ?, resolved_at = ? WHERE id = ?`, status, resolvedAt, issueID)
-
-	if err != nil {
-		return err
-	}
-
-	if count, err := update.RowsAffected(); err == nil && count == 0 {
-		return ErrNotFound
-	}
-
-	return nil
+	return err
 }
 
 // NewLog is a log record ready to store.

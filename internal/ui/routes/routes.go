@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/devforth/exception-monitoring/internal/oauth"
 	"github.com/devforth/exception-monitoring/internal/ui/controllers"
 	"github.com/devforth/exception-monitoring/internal/ui/middleware"
 	"github.com/devforth/exception-monitoring/internal/ui/services"
@@ -35,6 +36,12 @@ func Register(router *http.ServeMux, protect func(http.Handler) http.Handler, co
 		"GET /projects/{projectID}":         controller.ProjectPage,
 		"POST /projects/{projectID}":        controller.UpdateProject,
 		"POST /projects/{projectID}/delete": controller.DeleteProject,
+
+		"GET /agents":                       controller.AgentsPage,
+		"POST /agents/token":                controller.NewAgentToken,
+		"POST /agents/{grantID}/disconnect": controller.DisconnectAgent,
+		"GET " + oauth.AuthorizePath:        controller.AuthorizePage,
+		"POST " + oauth.AuthorizePath:       controller.Authorize,
 
 		"GET /notifications":                           controller.ConnectionsPage,
 		"GET /notifications/log":                       controller.DeliveriesPage,

@@ -20,6 +20,7 @@ import (
 
 	"github.com/devforth/exception-monitoring/internal/config"
 	"github.com/devforth/exception-monitoring/internal/notify"
+	"github.com/devforth/exception-monitoring/internal/oauth"
 	"github.com/devforth/exception-monitoring/internal/projects"
 	"github.com/devforth/exception-monitoring/internal/store"
 	"github.com/devforth/exception-monitoring/internal/ui/controllers"
@@ -33,8 +34,10 @@ type Handler struct {
 	auth        *services.Auth
 }
 
-func New(ctx context.Context, logger *slog.Logger, database *store.Store, settings *config.Config, registry *projects.Registry, factory notify.Factory) (*Handler, error) {
-	renderer, err := views.New(logger, registry)
+func New(ctx context.Context, logger *slog.Logger, database *store.Store, settings *config.Config, registry *projects.Registry, factory notify.Factory,
+	authorization *oauth.Server,
+) (*Handler, error) {
+	renderer, err := views.New(logger, registry, services.NewIssues(database), settings.AppName)
 
 	if err != nil {
 		return nil, err
@@ -56,7 +59,7 @@ func New(ctx context.Context, logger *slog.Logger, database *store.Store, settin
 
 	return &Handler{
 		controllers: controllers.New(controllers.Dependencies{
-			Logger: logger, Store: database, Registry: registry, Settings: settings, Factory: factory, Views: renderer, Auth: auth,
+			Logger: logger, Store: database, Registry: registry, Settings: settings, Factory: factory, Views: renderer, Auth: auth, OAuth: authorization,
 		}),
 		auth: auth,
 	}, nil

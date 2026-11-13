@@ -204,7 +204,7 @@ func (store *Store) ListIssues(ctx context.Context, filter IssueFilter) ([]Issue
 		order = issueSorts["last_seen"]
 	}
 
-	query := `SELECT id, project_id, title, culprit, level, status, event_count, first_seen, last_seen, resolved_at FROM issues` + where
+	query := `SELECT ` + issueFields + ` FROM issues` + where
 
 	query += " ORDER BY " + order + " LIMIT ? OFFSET ?"
 
@@ -235,7 +235,7 @@ func (store *Store) ListIssues(ctx context.Context, filter IssueFilter) ([]Issue
 
 func (store *Store) GetIssue(ctx context.Context, issueID int64) (Issue, error) {
 	row := store.DB.QueryRowContext(ctx,
-		`SELECT id, project_id, title, culprit, level, status, event_count, first_seen, last_seen, resolved_at FROM issues WHERE id = ?`, issueID)
+		`SELECT `+issueFields+` FROM issues WHERE id = ?`, issueID)
 	issue, err := scanIssue(row)
 
 	if errors.Is(err, sql.ErrNoRows) {

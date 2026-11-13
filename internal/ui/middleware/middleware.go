@@ -77,11 +77,20 @@ func StaticCache(next http.Handler) http.Handler {
 // hold error data and must not stay in any cache (StaticCache overrides this
 // for static files); the same URL serves a full page or an htmx fragment, so
 // caches must tell them apart (Vary).
+// ContentSecurityPolicy is the policy of every page. formTargets are other
+// origins a form of the page may send the browser to (the OAuth consent
+// page returns to the agent): browsers apply form-action to redirects too.
+func ContentSecurityPolicy(formTargets ...string) string {
+	formAction := strings.TrimSpace("'self' " + strings.Join(formTargets, " "))
+
+	return "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-ancestors 'none'; form-action " +
+		formAction + "; base-uri 'none'"
+}
+
 func SecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		header := w.Header()
-		header.Set("Content-Security-Policy",
-			"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-ancestors 'none'; form-action 'self'; base-uri 'none'")
+		header.Set("Content-Security-Policy", ContentSecurityPolicy())
 		header.Set("X-Content-Type-Options", "nosniff")
 		header.Set("Referrer-Policy", "same-origin")
 		header.Set("X-Frame-Options", "DENY")

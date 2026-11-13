@@ -252,6 +252,49 @@ ALTER TABLE projects ADD COLUMN log_levels TEXT;
 -- The log list is newest first (by id) for the chosen projects.
 CREATE INDEX logs_by_project_id ON logs (project_id, id);
 `},
+	{15, `
+-- Coding agents connected to the MCP server. OAuth clients register
+-- themselves (RFC 7591); a code lives a few minutes until the agent trades
+-- it for tokens. A grant is one connected agent, or the personal token
+-- (kind 'token', at most one). Only SHA-256 hashes of codes and tokens are kept.
+CREATE TABLE oauth_clients (
+	client_id     TEXT PRIMARY KEY,
+	name          TEXT NOT NULL,
+	redirect_uris TEXT NOT NULL,
+	created_at    TEXT NOT NULL
+);
+CREATE TABLE oauth_codes (
+	code_hash      TEXT PRIMARY KEY,
+	client_id      TEXT NOT NULL,
+	redirect_uri   TEXT NOT NULL,
+	code_challenge TEXT NOT NULL,
+	expires_at     TEXT NOT NULL
+);
+CREATE TABLE agent_grants (
+	id                 INTEGER PRIMARY KEY,
+	kind               TEXT NOT NULL,
+	client_id          TEXT NOT NULL DEFAULT '',
+	name               TEXT NOT NULL,
+	access_hash        TEXT NOT NULL UNIQUE,
+	access_expires_at  TEXT,
+	refresh_hash       TEXT UNIQUE,
+	refresh_expires_at TEXT,
+	created_at         TEXT NOT NULL,
+	last_used_at       TEXT
+);
+`},
+	{16, `
+-- Retain spent refresh-token hashes to detect replay and revoke the grant.
+CREATE TABLE oauth_spent_refresh_tokens (
+	refresh_hash TEXT PRIMARY KEY,
+	grant_id INTEGER NOT NULL REFERENCES agent_grants(id) ON DELETE CASCADE,
+	expires_at TEXT NOT NULL
+);
+CREATE INDEX oauth_spent_refresh_expiry ON oauth_spent_refresh_tokens(expires_at);
+CREATE INDEX oauth_spent_refresh_grant ON oauth_spent_refresh_tokens(grant_id);
+CREATE INDEX oauth_codes_client ON oauth_codes(client_id);
+CREATE INDEX agent_grants_client ON agent_grants(client_id);
+`},
 }
 
 func migrate(ctx context.Context, db *sql.DB, migrationList []migration) error {

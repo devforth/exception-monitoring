@@ -22,6 +22,7 @@ It collects exceptions and logs from your backend and frontend apps. Repeated er
 - A web UI for browsing issues and logs, with restricted access.
 - Multiple projects per instance.
 - Data retention limits.
+- An MCP server with OAuth sign-in and revocable tokens, so coding agents can read errors and logs and help explain them.
 
 ## License
 

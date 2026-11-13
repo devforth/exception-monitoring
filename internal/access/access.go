@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"strings"
 
 	"github.com/devforth/exception-monitoring/internal/httpjson"
@@ -67,6 +68,33 @@ func remoteAddr(r *http.Request) netip.Addr {
 // reverse proxy, so its X-Forwarded-* headers can be believed.
 func FromTrustedProxy(r *http.Request, trustedProxies []netip.Prefix) bool {
 	return contains(trustedProxies, remoteAddr(r))
+}
+
+// IsHTTPS reports whether the client talks to us over HTTPS, directly or
+// through a trusted proxy that says so.
+func IsHTTPS(r *http.Request, trustedProxies []netip.Prefix) bool {
+	if r.TLS != nil {
+		return true
+	}
+
+	return FromTrustedProxy(r, trustedProxies) && strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+}
+
+// PublicURL is where clients reach this server: publicURL (PUBLIC_URL) when
+// set, since SDKs and agents may use another address than the admin's
+// browser, otherwise the address of this request.
+func PublicURL(r *http.Request, publicURL string, trustedProxies []netip.Prefix) *url.URL {
+	if public, err := url.Parse(publicURL); err == nil && public.Host != "" {
+		return &url.URL{Scheme: public.Scheme, Host: public.Host, Path: strings.TrimRight(public.Path, "/")}
+	}
+
+	scheme := "http"
+
+	if IsHTTPS(r, trustedProxies) {
+		scheme = "https"
+	}
+
+	return &url.URL{Scheme: scheme, Host: r.Host}
 }
 
 func contains(networks []netip.Prefix, address netip.Addr) bool {

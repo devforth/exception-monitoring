@@ -43,8 +43,10 @@ func (secret SlackSecret) Key() string {
 // Factory turns stored connections into channels: it holds what they share
 // (the SMTP server, the encryption key).
 type Factory struct {
-	SMTP config.SMTP
-	Box  *secret.Box // nil without SECRET_KEY: chat connections cannot be used
+	// AppName (APP_NAME) is how messages name this server.
+	AppName string
+	SMTP    config.SMTP
+	Box     *secret.Box // nil without SECRET_KEY: chat connections cannot be used
 	// HTTPClient is used by chat channels; nil means http.DefaultClient.
 	HTTPClient *http.Client
 	// TelegramURL replaces the Telegram API (tests point it to a fake
@@ -89,7 +91,7 @@ func (factory Factory) DecryptSecret(encrypted string, target any) error {
 }
 
 func (factory Factory) telegram(tokens TelegramSecret) Telegram {
-	return Telegram{BotToken: tokens.BotToken, ChatID: tokens.ChatID, Client: factory.HTTPClient, apiURL: factory.TelegramURL}
+	return Telegram{BotToken: tokens.BotToken, ChatID: tokens.ChatID, AppName: factory.AppName, Client: factory.HTTPClient, apiURL: factory.TelegramURL}
 }
 
 // TelegramChatTitle asks Telegram for the name of the chat of these tokens,
@@ -141,7 +143,7 @@ func (factory Factory) channel(connection store.Connection) (Channel, error) {
 			return nil, errors.New("SMTP is not configured")
 		}
 
-		return Email{SMTP: factory.SMTP, To: connection.Address}, nil
+		return factory.Email(connection.Address), nil
 	case config.ChannelTelegram:
 		var tokens TelegramSecret
 
@@ -157,10 +159,18 @@ func (factory Factory) channel(connection store.Connection) (Channel, error) {
 			return nil, err
 		}
 
-		return Slack{WebhookURL: tokens.WebhookURL, BotToken: tokens.BotToken, Channel: tokens.Channel, Client: factory.HTTPClient, apiURL: factory.SlackURL}, nil
+		return Slack{
+			WebhookURL: tokens.WebhookURL, BotToken: tokens.BotToken, Channel: tokens.Channel, AppName: factory.AppName,
+			Client: factory.HTTPClient, apiURL: factory.SlackURL,
+		}, nil
 	default:
 		return nil, fmt.Errorf("unknown connection type %q", connection.Type)
 	}
+}
+
+// Email is the email channel to address (also for confirmation codes).
+func (factory Factory) Email(address string) Email {
+	return Email{SMTP: factory.SMTP, To: address, AppName: factory.AppName}
 }
 
 // SendTest sends a test message right away, for the "Send test" button.

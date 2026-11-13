@@ -30,6 +30,9 @@ type Options struct {
 	Ingest http.Handler
 	// API adds the admin REST API routes, wrapped with the given protection.
 	API Routes
+	// MCP adds the endpoint for coding agents with its OAuth endpoints; it
+	// checks its own tokens, the server adds the IP allowlist.
+	MCP Routes
 	// UI adds the web interface; it handles its own login, the server adds the IP allowlist.
 	UI             Routes
 	APIToken       string
@@ -55,6 +58,10 @@ func (server *Server) Handler() http.Handler {
 
 	if server.API != nil {
 		server.API.Register(router, server.protectAPI)
+	}
+
+	if server.MCP != nil {
+		server.MCP.Register(router, server.protectUI)
 	}
 
 	if server.UI != nil {

@@ -100,6 +100,8 @@ func (projects Projects) Find(idOrName string) (Project, bool) {
 }
 
 type Config struct {
+	// AppName (APP_NAME) names this server in the UI, emails and to agents.
+	AppName  string
 	Port     int
 	DataDir  string
 	LogLevel slog.Level
@@ -165,6 +167,12 @@ func loadFrom(getenv func(string) string) (*Config, error) {
 		AllowedOrigins:     []string{DefaultAllowedOrigins},
 		RateLimitPerMinute: DefaultRateLimitPerMinute,
 		AdminUsername:      DefaultAdminUsername,
+	}
+
+	var err error
+
+	if config.AppName, err = parseAppName(getenv("APP_NAME")); err != nil {
+		return nil, err
 	}
 
 	if value := getenv("PORT"); value != "" {

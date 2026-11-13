@@ -11,6 +11,7 @@ import (
 
 	"github.com/devforth/exception-monitoring/internal/config"
 	"github.com/devforth/exception-monitoring/internal/notify"
+	"github.com/devforth/exception-monitoring/internal/oauth"
 	"github.com/devforth/exception-monitoring/internal/projects"
 	"github.com/devforth/exception-monitoring/internal/store"
 	"github.com/devforth/exception-monitoring/internal/ui/presenters"
@@ -35,6 +36,10 @@ type Controllers struct {
 	deliveries    *services.Deliveries
 	verification  *services.Verification
 	logs          *services.Logs
+	agents        *services.Agents
+	// For the MCP page: whether ALLOWED_IPS limits access.
+	ipsRestricted bool
+	appName       string // APP_NAME
 
 	connectionViews presenters.Connections
 	projectViews    presenters.Projects
@@ -49,6 +54,7 @@ type Dependencies struct {
 	Factory  notify.Factory
 	Views    *views.Renderer
 	Auth     *services.Auth
+	OAuth    *oauth.Server // the MCP server's sign-in, shared with it
 }
 
 func New(dependencies Dependencies) *Controllers {
@@ -70,6 +76,9 @@ func New(dependencies Dependencies) *Controllers {
 		deliveries:    services.NewDeliveries(dependencies.Store),
 		verification:  services.NewVerification(dependencies.Logger, dependencies.Store, dependencies.Factory),
 		logs:          services.NewLogs(dependencies.Store),
+		agents:        services.NewAgents(dependencies.OAuth),
+		ipsRestricted: len(settings.AllowedIPs) > 0,
+		appName:       settings.AppName,
 		connectionViews: presenters.Connections{
 			Factory: dependencies.Factory, Notifications: settings.Notifications,
 			Projects: dependencies.Registry, ProjectName: projectService.Name,

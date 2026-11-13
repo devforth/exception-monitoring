@@ -10,6 +10,7 @@ package services
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/pbkdf2"
 	"crypto/rand"
 	"crypto/sha256"
@@ -19,7 +20,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/netip"
-	"strings"
 	"sync"
 	"time"
 
@@ -138,15 +138,9 @@ func (limiter *loginLimiter) reset(address netip.Addr) {
 	delete(limiter.failures, address)
 }
 
-// IsHTTPS reports whether the browser talks to us over HTTPS, directly or
-// through a trusted reverse proxy that terminates TLS.
+// IsHTTPS reports whether the browser talks to us over HTTPS.
 func IsHTTPS(r *http.Request, trustedProxies []netip.Prefix) bool {
-	if r.TLS != nil {
-		return true
-	}
-
-	return access.FromTrustedProxy(r, trustedProxies) &&
-		strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+	return access.IsHTTPS(r, trustedProxies)
 }
 
 // Auth is the admin login: credentials, sessions and the limit on failed logins.
@@ -280,4 +274,26 @@ func (auth *Auth) LoggedIn(r *http.Request) bool {
 	}
 
 	return valid
+}
+
+// FormToken binds an authorization form to this admin session and request.
+// The session cookie is random and HttpOnly, so another site cannot forge it.
+func (auth *Auth) FormToken(r *http.Request, value string) string {
+	cookie, err := r.Cookie(sessionCookie)
+
+	if err != nil || cookie.Value == "" {
+		return ""
+	}
+
+	mac := hmac.New(sha256.New, []byte(cookie.Value))
+	_, _ = mac.Write([]byte(value))
+
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// ValidFormToken checks a session-bound token without exposing its value.
+func (auth *Auth) ValidFormToken(r *http.Request, action, token string) bool {
+	expected := auth.FormToken(r, action)
+
+	return token != "" && expected != "" && subtle.ConstantTimeCompare([]byte(token), []byte(expected)) == 1
 }

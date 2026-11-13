@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"html"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -70,6 +71,7 @@ func TestSlack(t *testing.T) {
 		"*New issue* in `backend` · error",
 		"<https://errors.example.com/issues/42|TypeError: Cannot read properties of undefined (reading 'id') &lt;script&gt;>",
 		"GET /api/orders · production",
+		`Exception Monitoring MCP: get_issue {"issue_id":42}`,
 	} {
 		if !strings.Contains(message.Text, want) {
 			t.Errorf("missing %q in:\n%s", want, message.Text)
@@ -82,7 +84,7 @@ func TestSlack(t *testing.T) {
 
 	_ = json.Unmarshal(*payload, &message)
 
-	if !strings.Contains(message.Text, "12 more issues in the last 1m0s") || !strings.Contains(message.Text, "…and 11 more") {
+	if !strings.Contains(message.Text, "12 more issues in the last 1m0s") || !strings.Contains(message.Text, "…and 11 more") || !strings.Contains(message.Text, `get_issue {"issue_id":42}`) {
 		t.Errorf("summary:\n%s", message.Text)
 	}
 }
@@ -103,7 +105,7 @@ func TestTelegram(t *testing.T) {
 	server, request, payload := recordingServer(t, http.StatusOK, nil, `{"ok":true}`)
 	telegram := Telegram{BotToken: "123:SECRET", ChatID: "-100500", apiURL: server.URL}
 
-	if err := telegram.Send(context.Background(), Notification{Kind: Regression, Project: "frontend", Title: "a < b", Level: "fatal"}); err != nil {
+	if err := telegram.Send(context.Background(), Notification{Kind: Regression, IssueID: 42, Project: "frontend", Title: "a < b", Level: "fatal"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -123,8 +125,98 @@ func TestTelegram(t *testing.T) {
 
 	// No PUBLIC_URL: no link. HTML is escaped because parse_mode is HTML.
 	if message.ChatID != "-100500" || message.ParseMode != "HTML" ||
-		!strings.Contains(message.Text, "<b>Regression</b> in <code>frontend</code> · fatal") || !strings.Contains(message.Text, "<b>a &lt; b</b>") {
+		!strings.Contains(message.Text, "<b>Regression</b> in <code>frontend</code> · fatal") || !strings.Contains(message.Text, "<b>a &lt; b</b>") ||
+		!strings.Contains(html.UnescapeString(message.Text), `Exception Monitoring MCP: get_issue {"issue_id":42}`) {
 		t.Fatalf("message: %+v", message)
+	}
+}
+
+// An error is one message: the agent prompt as a file, the alert as its caption.
+func TestTelegramPromptFile(t *testing.T) {
+	type call struct {
+		method, chatID, caption, parseMode, fileName, file string
+	}
+
+	var (
+		calls    []call
+		failFile bool
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+
+		if method == "sendMessage" {
+			var message struct {
+				Text string `json:"text"`
+			}
+
+			_ = json.NewDecoder(r.Body).Decode(&message)
+			calls = append(calls, call{method: method, caption: message.Text})
+			_, _ = io.WriteString(w, `{"ok":true}`)
+
+			return
+		}
+
+		recorded := call{method: method, chatID: r.FormValue("chat_id"), caption: r.FormValue("caption"), parseMode: r.FormValue("parse_mode")}
+
+		if file, header, err := r.FormFile("document"); err == nil {
+			data, _ := io.ReadAll(file)
+			recorded.fileName, recorded.file = header.Filename, string(data)
+		}
+
+		calls = append(calls, recorded)
+
+		if failFile {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = io.WriteString(w, `{"ok":false,"description":"Bad Request: file is too big"}`)
+
+			return
+		}
+
+		_, _ = io.WriteString(w, `{"ok":true}`)
+	}))
+	t.Cleanup(server.Close)
+
+	telegram := Telegram{BotToken: "123:SECRET", ChatID: "-100500", apiURL: server.URL}
+	notification := sample
+	notification.Culprit = strings.Repeat("x", 2000)
+	notification.Event = &sentry.Event{Exception: sentry.ExceptionList{{Type: "TypeError", Value: "Cannot read properties of undefined"}}}
+
+	if err := telegram.Send(context.Background(), notification); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(calls) != 1 {
+		t.Fatalf("calls: %+v, want one message with the file", calls)
+	}
+
+	document := calls[0]
+
+	if document.method != "sendDocument" || document.chatID != "-100500" || document.fileName != "backend-error-42.md" || document.parseMode != "HTML" ||
+		!strings.Contains(document.caption, "<b>New issue</b> in <code>backend</code>") ||
+		!strings.Contains(html.UnescapeString(document.caption), `Exception Monitoring MCP: get_issue {"issue_id":42}`) || strings.Contains(document.caption, promptCaption) ||
+		!strings.Contains(document.file, "Do not change any code") || !strings.Contains(document.file, "Cannot read properties of undefined") {
+		t.Errorf("document: %+v", document)
+	}
+
+	if length := len([]rune(document.caption)); length > 1024 {
+		t.Errorf("caption has %d characters, Telegram takes 1024", length)
+	}
+
+	// A refused file does not lose the alert: it goes as a plain message.
+	calls, failFile = nil, true
+
+	if err := telegram.Send(context.Background(), notification); err != nil || len(calls) != 2 || calls[1].method != "sendMessage" || !strings.Contains(html.UnescapeString(calls[1].caption), `get_issue {"issue_id":42}`) {
+		t.Errorf("refused file: %v, %+v", err, calls)
+	}
+
+	// A test message (no event) and a summary are plain messages.
+	calls = nil
+	_ = telegram.Send(context.Background(), sample)
+	_ = telegram.SendSummary(context.Background(), Summary{Count: 2, Window: time.Minute, Items: []Notification{sample}})
+
+	if len(calls) != 2 || calls[0].method != "sendMessage" || calls[1].method != "sendMessage" || !strings.Contains(html.UnescapeString(calls[1].caption), `get_issue {"issue_id":42}`) {
+		t.Errorf("without an event: %+v", calls)
 	}
 }
 

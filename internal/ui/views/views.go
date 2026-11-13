@@ -5,6 +5,7 @@ package views
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
@@ -12,9 +13,12 @@ import (
 	"html/template"
 	"io/fs"
 	"log/slog"
+	"maps"
 	"net/http"
 	"time"
 
+	"github.com/devforth/exception-monitoring/internal/agentprompt"
+	"github.com/devforth/exception-monitoring/internal/config"
 	"github.com/devforth/exception-monitoring/internal/projects"
 	"github.com/devforth/exception-monitoring/internal/ui/contracts"
 	"github.com/devforth/exception-monitoring/internal/ui/helpers"
@@ -41,8 +45,14 @@ var templateFuncs = template.FuncMap{
 	"retryNow": func(id any, count int, back string) map[string]any {
 		return map[string]any{"ID": id, "Count": count, "Return": back}
 	},
-	"back":         func(url, label string) map[string]string { return map[string]string{"URL": url, "Label": label} },
-	"chatTest":     func(url, needs string) map[string]string { return map[string]string{"URL": url, "Needs": needs} },
+	"back":     func(url, label string) map[string]string { return map[string]string{"URL": url, "Label": label} },
+	"chatTest": func(url, needs string) map[string]string { return map[string]string{"URL": url, "Needs": needs} },
+	"copyButton": func(target, label, title, copied string) map[string]string {
+		return map[string]string{"Target": target, "Label": label, "Title": title, "Copied": copied}
+	},
+	"copyText": func(text, label, title, copied string) map[string]string {
+		return map[string]string{"Text": text, "Label": label, "Title": title, "Copied": copied}
+	},
 	"projectBadge": lists.ProjectBadge,
 	"levelBadge":   lists.LevelBadge,
 	"statusBadge":  lists.StatusBadge,
@@ -52,13 +62,19 @@ var templateFuncs = template.FuncMap{
 
 // pageNames are the templates in templates/ that are full pages. Each is
 // parsed together with layout.html and partials.html.
-var pageNames = []string{"login", "issues", "issue", "logs", "projects", "project", "notifications", "connection", "deliveries"}
+var pageNames = []string{"login", "issues", "issue", "logs", "projects", "project", "notifications", "connection", "deliveries", "agents", "authorize"}
 
-func parseTemplates() (map[string]*template.Template, error) {
+// parseTemplates parses every page with the shared functions and those that
+// depend on the settings: appName (APP_NAME) and mcpReference (the MCP request
+// of an issue, as notifications carry it).
+func parseTemplates(appName string) (map[string]*template.Template, error) {
 	pages := map[string]*template.Template{}
+	funcs := maps.Clone(templateFuncs)
+	funcs["appName"] = func() string { return appName }
+	funcs["mcpReference"] = func(issueID int64) string { return agentprompt.MCPReference(appName, issueID) }
 
 	for _, name := range pageNames {
-		page, err := template.New(name).Funcs(templateFuncs).ParseFS(templateFiles,
+		page, err := template.New(name).Funcs(funcs).ParseFS(templateFiles,
 			"templates/layout.html", "templates/partials.html", "templates/"+name+".html")
 
 		if err != nil {
@@ -112,6 +128,8 @@ type view struct {
 	// SidebarCollapsed: the menu shows icons only (the sidebar cookie, set by
 	// app.js), rendered by the server so the page does not jump on load.
 	SidebarCollapsed bool
+	// UnresolvedIssues is the counter next to Issues in the menu.
+	UnresolvedIssues int
 }
 
 const sidebarCookie = "em_sidebar"
@@ -123,21 +141,31 @@ type ProjectColors interface {
 	Colors() projects.Stylesheet
 }
 
+// IssueCounter counts the unresolved issues for the menu (services.Issues does).
+type IssueCounter interface {
+	Unresolved(ctx context.Context) (int, error)
+}
+
 // Renderer executes the parsed templates.
 type Renderer struct {
 	logger *slog.Logger
 	colors ProjectColors
+	issues IssueCounter
 	pages  map[string]*template.Template
 }
 
-func New(logger *slog.Logger, colors ProjectColors) (*Renderer, error) {
-	pages, err := parseTemplates()
+func New(logger *slog.Logger, colors ProjectColors, issues IssueCounter, appName string) (*Renderer, error) {
+	if appName == "" {
+		appName = config.DefaultAppName
+	}
+
+	pages, err := parseTemplates(appName)
 
 	if err != nil {
 		return nil, err
 	}
 
-	return &Renderer{logger: logger, colors: colors, pages: pages}, nil
+	return &Renderer{logger: logger, colors: colors, issues: issues, pages: pages}, nil
 }
 
 // Render executes a full page (the "layout" template around the page's "content").
@@ -150,6 +178,15 @@ func (renderer *Renderer) Render(w http.ResponseWriter, r *http.Request, status 
 
 	if pageView.LoggedIn {
 		pageView.ProjectColors = "/project-colors.css?v=" + renderer.colors.Colors().Version
+
+		// The counter is a hint: a failed count leaves it out, not the page.
+		count, err := renderer.issues.Unresolved(r.Context())
+
+		if err != nil {
+			renderer.logger.Warn("count unresolved issues", "err", err)
+		}
+
+		pageView.UnresolvedIssues = count
 	}
 
 	renderer.execute(w, r, status, page, "layout", pageView)

@@ -9,6 +9,7 @@
   <p class="muted">{{.Issue.Culprit}}</p>
 
   <dl class="facts">
+    <div><dt>ID</dt><dd>{{.Issue.ID}}</dd></div>
     <div><dt>Project</dt><dd>{{template "badge" (projectBadge .Issue.ProjectName)}}</dd></div>
     <div><dt>Status</dt><dd>{{template "badge" (statusBadge .Issue.Status)}}</dd></div>
     <div><dt>Events</dt><dd>{{.Issue.EventCount}}</dd></div>
@@ -20,13 +21,10 @@
   {{$issue := .Issue}}
   <form class="actions" method="post" action="/issues/{{$issue.ID}}/action" hx-post="/issues/{{$issue.ID}}/action">
     {{template "issue-action-buttons" $issue.Status}}
-    <button type="button" data-copy-prompt="agent-fix-prompt" class="copy-prompt" title="Copy prompt for a coding agent" aria-label="Copy prompt for a coding agent">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg>
-      <span>Prompt</span>
-    </button>
+    {{template "copy-button" (copyButton "agent-fix-prompt" "Prompt" "Copy prompt for a coding agent" "Agent prompt copied to clipboard.")}}
+    {{template "copy-button" (copyText (mcpReference .Issue.ID) "MCP" "Copy the MCP request for a coding agent" "MCP request copied to clipboard.")}}
   </form>
   <textarea id="agent-fix-prompt" hidden>{{.AgentPrompt}}</textarea>
-  <span class="copy-toast" id="agent-copy-status" role="status" aria-live="polite"></span>
 </section>
 
 {{with .Parsed}}

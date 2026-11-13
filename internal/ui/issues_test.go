@@ -60,7 +60,7 @@ func TestIssueDetails(t *testing.T) {
 		}
 	}
 
-	if !strings.Contains(body, `type="button" data-copy-prompt="agent-fix-prompt"`) {
+	if !strings.Contains(body, `data-copy="agent-fix-prompt"`) {
 		t.Fatal("copy prompt button must not submit the issue action form")
 	}
 

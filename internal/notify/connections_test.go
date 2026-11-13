@@ -135,7 +135,7 @@ func TestTelegramChatTitle(t *testing.T) {
 // A chat connection that hides issue links gets messages and summaries
 // without any link to the panel.
 func TestChatWithoutIssueLinks(t *testing.T) {
-	notification := Notification{Kind: NewIssue, Project: "backend", Title: "Example issue", Level: "error", IssueURL: "https://errors.example.com/issues/5"}
+	notification := Notification{Kind: NewIssue, IssueID: 5, Project: "backend", Title: "Example issue", Level: "error", IssueURL: "https://errors.example.com/issues/5"}
 
 	for _, hidden := range []bool{false, true} {
 		server, _, payload := recordingServer(t, http.StatusOK, nil, "ok")
@@ -151,7 +151,7 @@ func TestChatWithoutIssueLinks(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if strings.Contains(string(*payload), notification.IssueURL) == hidden || !strings.Contains(string(*payload), "Example issue") {
+		if strings.Contains(string(*payload), notification.IssueURL) == hidden || !strings.Contains(string(*payload), "Example issue") || !strings.Contains(string(*payload), "get_issue") {
 			t.Errorf("hide %v, message: %s", hidden, *payload)
 		}
 
@@ -159,7 +159,7 @@ func TestChatWithoutIssueLinks(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if strings.Contains(string(*payload), notification.IssueURL) == hidden {
+		if strings.Contains(string(*payload), notification.IssueURL) == hidden || !strings.Contains(string(*payload), "get_issue") {
 			t.Errorf("hide %v, summary: %s", hidden, *payload)
 		}
 	}

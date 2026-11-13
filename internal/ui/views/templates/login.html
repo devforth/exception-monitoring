@@ -3,7 +3,7 @@
 {{define "content"}}
 {{with .Data}}
 <form class="login" method="post" action="/login">
-  <h1>Exception Monitoring</h1>
+  <h1>{{appName}}</h1>
 
   {{if .Disabled}}
   <p class="notice">The web UI is disabled. Set <code>ADMIN_PASSWORD</code> to enable it.</p>

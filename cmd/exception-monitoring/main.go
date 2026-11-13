@@ -17,7 +17,9 @@ import (
 	"github.com/devforth/exception-monitoring/internal/api"
 	"github.com/devforth/exception-monitoring/internal/config"
 	"github.com/devforth/exception-monitoring/internal/ingest"
+	"github.com/devforth/exception-monitoring/internal/mcp"
 	"github.com/devforth/exception-monitoring/internal/notify"
+	"github.com/devforth/exception-monitoring/internal/oauth"
 	"github.com/devforth/exception-monitoring/internal/projects"
 	"github.com/devforth/exception-monitoring/internal/retention"
 	"github.com/devforth/exception-monitoring/internal/secret"
@@ -80,7 +82,7 @@ func run() error {
 		logger.Warn("ALLOWED_IPS is not set, the API and UI are reachable from any address")
 	}
 
-	factory, err := notificationFactory(logger, settings.Notifications)
+	factory, err := notificationFactory(logger, settings.AppName, settings.Notifications)
 
 	if err != nil {
 		return err
@@ -94,7 +96,13 @@ func run() error {
 		return err
 	}
 
-	webUI, err := ui.New(ctx, logger, database, settings, registry, factory)
+	// Agents sign in to the MCP server with OAuth; the UI holds the consent
+	// page and the list of connected agents.
+	authorization := &oauth.Server{
+		Name: settings.AppName, Store: database, PublicURL: settings.Notifications.PublicURL, TrustedProxies: settings.TrustedProxies, ResourcePath: mcp.Path,
+	}
+
+	webUI, err := ui.New(ctx, logger, database, settings, registry, factory, authorization)
 
 	if err != nil {
 		return err
@@ -159,6 +167,7 @@ func run() error {
 			Database:       database,
 			Ingest:         ingest.New(logger, settings, registry, sink),
 			API:            api.New(logger, database, registry),
+			MCP:            mcp.New(logger, database, registry, authorization, settings.AppName, version),
 			UI:             webUI,
 			APIToken:       settings.APIToken,
 			AllowedIPs:     settings.AllowedIPs,
@@ -210,8 +219,8 @@ func logRetention(logger *slog.Logger, settings config.Retention) {
 
 // notificationFactory builds channels for the connections set up in the UI.
 // It logs which connection types can be created with the current settings.
-func notificationFactory(logger *slog.Logger, settings config.Notifications) (notify.Factory, error) {
-	factory := notify.Factory{SMTP: settings.SMTP}
+func notificationFactory(logger *slog.Logger, appName string, settings config.Notifications) (notify.Factory, error) {
+	factory := notify.Factory{AppName: appName, SMTP: settings.SMTP}
 
 	if settings.SecretKey != "" {
 		box, err := secret.New(settings.SecretKey)

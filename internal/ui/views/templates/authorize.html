@@ -1,0 +1,23 @@
+{{define "title"}}Connect a coding agent{{end}}
+{{define "content"}}
+{{with .Data}}
+<section class="card">
+  <h1>Connect a coding agent</h1>
+  {{if .Error}}
+  <p class="error" role="alert">{{.Error}}</p>
+  {{else}}
+  <p><strong>{{.ClientName}}</strong> is asking to access {{appName}}.</p>
+  <p>This agent will be able to list projects and issues, read error details and logs, and change issue statuses.</p>
+  <p class="muted">Only allow an agent you started connecting. You will return to <code>{{.RedirectURI}}</code>.</p>
+  <form method="post" action="/oauth/authorize">
+    {{range $name, $values := .Params}}{{range $values}}
+    <input type="hidden" name="{{$name}}" value="{{.}}">
+    {{end}}{{end}}
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <button type="submit" name="decision" value="allow">Allow</button>
+    <button type="submit" name="decision" value="deny" class="secondary">Deny</button>
+  </form>
+  {{end}}
+</section>
+{{end}}
+{{end}}

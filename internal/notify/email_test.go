@@ -2,6 +2,7 @@ package notify
 
 import (
 	"context"
+	stdhtml "html"
 	"net"
 	"strconv"
 	"strings"
@@ -69,6 +70,12 @@ func TestEmail(t *testing.T) {
 
 	subject, text, html := fixtures.ParseEmail(t, session.Data)
 
+	for _, body := range []string{text, stdhtml.UnescapeString(html)} {
+		if !strings.Contains(body, `Exception Monitoring MCP: get_issue {"issue_id":5}`) {
+			t.Error("missing copyable MCP reference in email body")
+		}
+	}
+
 	if subject != "[backend] New issue: Error: Failed to load orders" {
 		t.Errorf("subject = %q", subject)
 	}
@@ -106,13 +113,19 @@ func TestEmail(t *testing.T) {
 func TestEmailSummary(t *testing.T) {
 	settings, sessions := fixtures.FakeSMTP(t)
 
-	summary := Summary{Count: 3, Window: time.Minute, Items: []Notification{{Project: "backend", Title: "Error: <b>boom</b>"}}}
+	summary := Summary{Count: 3, Window: time.Minute, Items: []Notification{{Project: "backend", IssueID: 42, Title: "Error: <b>boom</b>"}}}
 
 	if err := (Email{SMTP: settings, To: "ops@example.com"}).SendSummary(context.Background(), summary); err != nil {
 		t.Fatal(err)
 	}
 
-	subject, _, html := fixtures.ParseEmail(t, (<-sessions).Data)
+	subject, text, html := fixtures.ParseEmail(t, (<-sessions).Data)
+
+	for _, body := range []string{text, stdhtml.UnescapeString(html)} {
+		if !strings.Contains(body, `Exception Monitoring MCP: get_issue {"issue_id":42}`) {
+			t.Error("missing MCP reference in summary")
+		}
+	}
 
 	if subject != "[Exception Monitoring] 3 more issues in the last 1m0s" || strings.Contains(html, "<b>boom</b>") {
 		t.Fatalf("subject %q; HTML must escape titles:\n%s", subject, html)

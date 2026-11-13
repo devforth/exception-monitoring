@@ -10,8 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/devforth/exception-monitoring/internal/agentprompt"
 )
 
 // Slack posts to an incoming webhook
@@ -23,6 +21,7 @@ type Slack struct {
 	WebhookURL string
 	BotToken   string
 	Channel    string
+	AppName    string // APP_NAME, in the MCP request of an issue
 	Client     *http.Client
 	// apiURL is replaced in tests with a fake server.
 	apiURL string
@@ -49,6 +48,10 @@ func (slack Slack) Send(ctx context.Context, notification Notification) error {
 		lines = append(lines, slackEscape(details))
 	}
 
+	if reference := mcpReference(slack.AppName, notification); reference != "" {
+		lines = append(lines, "`"+reference+"`")
+	}
+
 	if slack.BotToken == "" {
 		return slack.post(ctx, strings.Join(lines, "\n"))
 	}
@@ -68,13 +71,10 @@ func (slack Slack) Send(ctx context.Context, notification Notification) error {
 
 // slackPrompt is the agent prompt as a code block for the thread.
 func slackPrompt(notification Notification) string {
-	prompt := agentprompt.Build(agentprompt.Input{
-		Project: notification.Project, Title: notification.Title, Level: notification.Level, Culprit: notification.Culprit,
-		Kind: notification.Kind.label(), Event: notification.Event,
-	})
+	prompt := agentPrompt(notification)
 	// A code block ends at the next three backticks: keep them out of it.
 	prompt = strings.ReplaceAll(prompt, "```", "ʼʼʼ")
-	header := "Prompt for a coding agent: it reproduces and explains the error without changing code.\n"
+	header := promptCaption + "\n"
 
 	return header + "```" + truncate(slackEscape(prompt), maxSlackText-len(header)-6) + "```"
 }
@@ -84,6 +84,10 @@ func (slack Slack) SendSummary(ctx context.Context, summary Summary) error {
 
 	for _, item := range summary.Items {
 		lines = append(lines, fmt.Sprintf("• `%s` %s", slackEscape(item.Project), slackLink(item.IssueURL, truncate(item.Title, 150))))
+
+		if reference := mcpReference(slack.AppName, item); reference != "" {
+			lines = append(lines, "  `"+reference+"`")
+		}
 	}
 
 	lines = append(lines, "_"+summary.note()+"_")
