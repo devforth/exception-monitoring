@@ -10,9 +10,8 @@ import (
 
 	"github.com/devforth/exception-monitoring/internal/notify"
 	"github.com/devforth/exception-monitoring/internal/platform/config"
+	"github.com/devforth/exception-monitoring/internal/platform/text"
 	"github.com/devforth/exception-monitoring/internal/storage/store"
-	"github.com/devforth/exception-monitoring/internal/ui/contracts"
-	"github.com/devforth/exception-monitoring/internal/ui/helpers"
 )
 
 // Connections: the notification connections, what tells them apart and
@@ -134,7 +133,7 @@ func (service *Connections) Delete(ctx context.Context, id int64) error {
 func (service *Connections) DefaultName(ctx context.Context, connection store.Connection, secret string) string {
 	switch connection.Type {
 	case config.ChannelEmail:
-		return helpers.TruncateRunes(helpers.EmailLocalPart(connection.Address), contracts.MaxConnectionName)
+		return text.TruncateRunes(text.EmailLocalPart(connection.Address), config.MaxConnectionName)
 	case config.ChannelTelegram:
 		var tokens notify.TelegramSecret
 
@@ -154,7 +153,7 @@ func (service *Connections) DefaultName(ctx context.Context, connection store.Co
 			return "Telegram " + tokens.ChatID
 		}
 
-		return helpers.TruncateRunes(strings.TrimSpace(title), contracts.MaxConnectionName)
+		return text.TruncateRunes(strings.TrimSpace(title), config.MaxConnectionName)
 	default:
 		return "Slack"
 	}
@@ -186,7 +185,7 @@ func (service *Connections) destinationKey(connection store.Connection) string {
 
 // FindDuplicate returns the connection other than exceptID that already
 // sends to key (see destinationKey), or nil.
-func (service *Connections) FindDuplicate(ctx context.Context, channelType, key string, exceptID int64) (*contracts.Duplicate, error) {
+func (service *Connections) FindDuplicate(ctx context.Context, channelType, key string, exceptID int64) (*Duplicate, error) {
 	if key == "" {
 		return nil, nil
 	}
@@ -199,7 +198,7 @@ func (service *Connections) FindDuplicate(ctx context.Context, channelType, key 
 
 	for _, connection := range connections {
 		if connection.ID != exceptID && connection.Type == channelType && service.destinationKey(connection) == key {
-			return &contracts.Duplicate{ID: connection.ID, Name: connection.Name}, nil
+			return &Duplicate{ID: connection.ID, Name: connection.Name}, nil
 		}
 	}
 

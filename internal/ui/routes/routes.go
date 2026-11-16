@@ -9,12 +9,12 @@ import (
 	"github.com/devforth/exception-monitoring/internal/api/oauth"
 	"github.com/devforth/exception-monitoring/internal/ui/controllers"
 	"github.com/devforth/exception-monitoring/internal/ui/middleware"
-	"github.com/devforth/exception-monitoring/internal/ui/services"
+	"github.com/devforth/exception-monitoring/internal/ui/session"
 	"github.com/devforth/exception-monitoring/internal/ui/views"
 )
 
 // Register adds the UI routes. protect is the IP allowlist.
-func Register(router *http.ServeMux, protect func(http.Handler) http.Handler, controller *controllers.Controllers, auth *services.Auth) {
+func Register(router *http.ServeMux, protect func(http.Handler) http.Handler, controller *controllers.Controllers, auth *session.Auth) {
 	// Open to anyone who passes the IP allowlist: the login itself.
 	public := group{
 		"GET /login":   controller.LoginPage,

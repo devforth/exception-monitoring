@@ -23,11 +23,11 @@ import (
 	"github.com/devforth/exception-monitoring/internal/platform/logging"
 	"github.com/devforth/exception-monitoring/internal/platform/secret"
 	"github.com/devforth/exception-monitoring/internal/server"
+	"github.com/devforth/exception-monitoring/internal/services"
 	"github.com/devforth/exception-monitoring/internal/storage/projects"
 	"github.com/devforth/exception-monitoring/internal/storage/retention"
 	"github.com/devforth/exception-monitoring/internal/storage/store"
 	"github.com/devforth/exception-monitoring/internal/ui"
-	"github.com/devforth/exception-monitoring/internal/ui/services"
 )
 
 // version is set at build time: -ldflags "-X main.version=..."

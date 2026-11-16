@@ -11,8 +11,8 @@ import (
 	"github.com/devforth/exception-monitoring/internal/api/agentprompt"
 	"github.com/devforth/exception-monitoring/internal/ingest/sentry"
 	"github.com/devforth/exception-monitoring/internal/platform/config"
+	"github.com/devforth/exception-monitoring/internal/services"
 	"github.com/devforth/exception-monitoring/internal/storage/store"
-	"github.com/devforth/exception-monitoring/internal/ui/services"
 )
 
 type listIssuesInput struct {

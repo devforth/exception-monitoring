@@ -1,6 +1,10 @@
 package lists
 
-import "slices"
+import (
+	"slices"
+
+	"github.com/devforth/exception-monitoring/internal/platform/config"
+)
 
 // Option is a checkbox of a multi-select: a project or a level.
 type Option struct {
@@ -46,7 +50,7 @@ func NewPicker(param, kind, all, label string, names, chosen []string) Picker {
 // LevelOptions lists the known levels highest first, chosen when recorded
 // (nil records every level).
 func LevelOptions(known, recorded []string) []Option {
-	levels := HighestFirst(known)
+	levels := config.HighestFirst(known)
 
 	if recorded == nil {
 		return Options(levels, levels)

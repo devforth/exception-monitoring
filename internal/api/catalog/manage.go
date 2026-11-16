@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/devforth/exception-monitoring/internal/platform/config"
+	"github.com/devforth/exception-monitoring/internal/services"
 	"github.com/devforth/exception-monitoring/internal/storage/projects"
 	"github.com/devforth/exception-monitoring/internal/storage/store"
-	"github.com/devforth/exception-monitoring/internal/ui/contracts"
 )
 
 // The endpoints that manage the server, as the UI pages do: they act as a
@@ -374,7 +374,7 @@ type passwordOutput struct {
 const temporaryPasswordNote = "Shown only this once. Give it to the user privately; they choose their own password at the first login. Do not store it."
 
 func (handler *handlers) createUser(ctx context.Context, call Call, input createUserInput) (passwordOutput, error) {
-	id, password, problems, err := handler.services.Users.Create(ctx, call.Viewer, contracts.UserInput{Username: input.Username, Name: input.Name, Role: input.Role})
+	id, password, problems, err := handler.services.Users.Create(ctx, call.Viewer, services.UserInput{Username: input.Username, Name: input.Name, Role: input.Role})
 
 	if err != nil {
 		return passwordOutput{}, err
@@ -410,7 +410,7 @@ func (handler *handlers) updateUser(ctx context.Context, call Call, input update
 		return userOutput{}, err
 	}
 
-	change := contracts.UserInput{Username: user.Username, Name: user.Name, Role: user.Role}
+	change := services.UserInput{Username: user.Username, Name: user.Name, Role: user.Role}
 
 	if input.Name != nil {
 		change.Name = *input.Name

@@ -1,15 +1,10 @@
-// Package services is the logic behind the UI pages that is not HTTP, and
-// the only way the pages reach the database: users, their sessions and the
-// login limit, issues, their events and actions, logs, project DSNs, colors and
-// storage, notification connections (duplicates, default names, saving),
-// the delivery log and email verification codes. Controllers call it; it
-// returns data or the view types of contracts and never writes a response
-// body (only the session cookie). A change of several steps is one method,
-// so a controller cannot do half of it.
-package services
+// Package session is the login of the web UI: sessions and their cookies,
+// the limit on failed logins (per address and per username), changing your
+// own password and the form tokens of pages. It is the UI's own part; the
+// rules about users and their passwords are in package services.
+package session
 
 import (
-	"cmp"
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
@@ -27,6 +22,7 @@ import (
 
 	"github.com/devforth/exception-monitoring/internal/platform/config"
 	"github.com/devforth/exception-monitoring/internal/server/access"
+	"github.com/devforth/exception-monitoring/internal/services"
 	"github.com/devforth/exception-monitoring/internal/storage/store"
 )
 
@@ -138,6 +134,7 @@ func IsHTTPS(r *http.Request, trustedProxies []netip.Prefix) bool {
 type Auth struct {
 	logger         *slog.Logger
 	store          *store.Store
+	users          *services.Users // checks passwords
 	trustedProxies []netip.Prefix
 	sessionLife    time.Duration // SESSION_LIFETIME
 	// Failed logins are limited per client address and per username, so
@@ -151,7 +148,7 @@ type Auth struct {
 }
 
 func NewAuth(logger *slog.Logger, database *store.Store, settings *config.Config) *Auth {
-	return &Auth{logger: logger, store: database, trustedProxies: settings.TrustedProxies, sessionLife: settings.SessionLifetime, byAddress: newLoginLimiter(), byUsername: newLoginLimiter(), now: time.Now}
+	return &Auth{logger: logger, store: database, users: services.NewUsers(logger, database), trustedProxies: settings.TrustedProxies, sessionLife: settings.SessionLifetime, byAddress: newLoginLimiter(), byUsername: newLoginLimiter(), now: time.Now}
 }
 
 // Disabled: there is no superadmin yet (ADMIN_PASSWORD was never set), so
@@ -193,15 +190,13 @@ func (auth *Auth) Login(w http.ResponseWriter, r *http.Request, username, passwo
 		return LoginBlocked, nil
 	}
 
-	user, hash, err := auth.store.FindLogin(r.Context(), strings.TrimSpace(username))
+	user, ok, err := auth.users.Authenticate(r.Context(), username, password)
 
-	if err != nil && !errors.Is(err, store.ErrNotFound) {
+	if err != nil {
 		return LoginWrongCredentials, err
 	}
 
-	// An unknown username is checked against a dummy hash, so the response
-	// time does not tell which usernames exist.
-	if !checkPassword(cmp.Or(hash, dummyPasswordHash()), password) || user.ID == 0 {
+	if !ok {
 		auth.failed(client, username, now)
 
 		return LoginWrongCredentials, nil
@@ -241,35 +236,21 @@ func (auth *Auth) failed(client netip.Addr, username string, now time.Time) {
 // session must not become a way to guess the password). The viewer's other
 // sessions end; their agents stay connected, since it is the owner who
 // changes it.
-func (auth *Auth) ChangePassword(r *http.Request, viewer store.User, current, password, confirm string) (Problems, error) {
+func (auth *Auth) ChangePassword(r *http.Request, viewer store.User, current, password, confirm string) (services.Problems, error) {
 	client := access.ClientIP(r, auth.trustedProxies)
 	now := auth.now()
 
 	if auth.blocked(client, viewer.Username, now) {
-		return Problems{"current_password": TooManyAttempts}, nil
+		return services.Problems{"current_password": TooManyAttempts}, nil
 	}
 
-	hash, err := auth.store.UserPassword(r.Context(), viewer.ID)
+	problems, wrongCurrent, err := auth.users.ChangeOwnPassword(r.Context(), viewer, current, password, confirm, SessionHash(r))
 
-	if err != nil {
-		return nil, err
-	}
-
-	problems := Problems{}
-
-	if !checkPassword(hash, current) {
+	if wrongCurrent {
 		auth.failed(client, viewer.Username, now)
-
-		problems["current_password"] = "The current password is wrong."
 	}
 
-	checkNewPassword(problems, current, password, confirm)
-
-	if len(problems) > 0 {
-		return problems, nil
-	}
-
-	return nil, setPassword(r.Context(), auth.store, viewer.ID, password, store.PasswordChange{KeepSession: SessionHash(r)})
+	return problems, err
 }
 
 // startSession creates a new session and sets its cookie. A session cookie

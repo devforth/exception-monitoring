@@ -5,12 +5,12 @@ import (
 	"net/http"
 
 	"github.com/devforth/exception-monitoring/internal/ingest/sentry"
+	"github.com/devforth/exception-monitoring/internal/services"
 	"github.com/devforth/exception-monitoring/internal/storage/store"
 	"github.com/devforth/exception-monitoring/internal/ui/contracts"
 	"github.com/devforth/exception-monitoring/internal/ui/lists"
 	"github.com/devforth/exception-monitoring/internal/ui/presenters"
 	"github.com/devforth/exception-monitoring/internal/ui/requests"
-	"github.com/devforth/exception-monitoring/internal/ui/services"
 )
 
 // IssuesPage lists issues. htmx requests (filters, page links) get only the

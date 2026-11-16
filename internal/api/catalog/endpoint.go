@@ -31,8 +31,8 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 
 	"github.com/devforth/exception-monitoring/internal/api/agentprompt"
+	"github.com/devforth/exception-monitoring/internal/services"
 	"github.com/devforth/exception-monitoring/internal/storage/store"
-	"github.com/devforth/exception-monitoring/internal/ui/services"
 )
 
 // Endpoint is one request of the catalog.

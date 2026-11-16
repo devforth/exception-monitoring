@@ -3,7 +3,7 @@ package tests
 import (
 	"time"
 
-	"github.com/devforth/exception-monitoring/internal/ui/services"
+	"github.com/devforth/exception-monitoring/internal/services"
 )
 
 // The slow password key derivation would take seconds per test server under

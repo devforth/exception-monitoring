@@ -4,8 +4,8 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/devforth/exception-monitoring/internal/services"
 	"github.com/devforth/exception-monitoring/internal/storage/store"
-	"github.com/devforth/exception-monitoring/internal/ui/contracts"
 )
 
 type viewerKey struct{}
@@ -25,6 +25,6 @@ func Viewer(r *http.Request) store.User {
 }
 
 // ReadUser reads the user form.
-func ReadUser(r *http.Request) contracts.UserInput {
-	return contracts.UserInput{Username: r.PostFormValue("username"), Name: r.PostFormValue("name"), Role: r.PostFormValue("role")}
+func ReadUser(r *http.Request) services.UserInput {
+	return services.UserInput{Username: r.PostFormValue("username"), Name: r.PostFormValue("name"), Role: r.PostFormValue("role")}
 }

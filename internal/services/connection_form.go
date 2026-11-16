@@ -15,7 +15,6 @@ import (
 	"github.com/devforth/exception-monitoring/internal/notify"
 	"github.com/devforth/exception-monitoring/internal/platform/config"
 	"github.com/devforth/exception-monitoring/internal/storage/store"
-	"github.com/devforth/exception-monitoring/internal/ui/contracts"
 )
 
 // The connection form: the UI posts it, and agents send the same fields as
@@ -28,7 +27,7 @@ import (
 type SavedConnection struct {
 	Connection store.Connection
 	Problems   map[string]string
-	Duplicate  *contracts.Duplicate
+	Duplicate  *Duplicate
 }
 
 // Save applies the form to connection and stores it: a new one when its ID
@@ -112,9 +111,9 @@ func (service *Connections) Save(ctx context.Context, form url.Values, connectio
 // TestChat sends a test message with the chat settings of the form before
 // they are saved. existing is the stored connection, if any: its empty
 // fields keep the stored tokens.
-func (service *Connections) TestChat(ctx context.Context, form url.Values, channelType string, existing store.Connection) contracts.ChatTest {
+func (service *Connections) TestChat(ctx context.Context, form url.Values, channelType string, existing store.Connection) ChatTest {
 	if channelType != config.ChannelTelegram && channelType != config.ChannelSlack {
-		return contracts.ChatTest{Message: "Choose Telegram or Slack."}
+		return ChatTest{Message: "Choose Telegram or Slack."}
 	}
 
 	secret := readChatSecret(form, service.factory, channelType, existing.Secret, true)
@@ -122,17 +121,17 @@ func (service *Connections) TestChat(ctx context.Context, form url.Values, chann
 	if len(secret.Problems) > 0 {
 		problems := slices.Sorted(maps.Values(secret.Problems))
 
-		return contracts.ChatTest{Message: strings.Join(problems, " ")}
+		return ChatTest{Message: strings.Join(problems, " ")}
 	}
 
 	name := cmp.Or(strings.TrimSpace(form.Get("name")), existing.Name, "new connection")
 	connection := store.Connection{Type: channelType, Name: name, Secret: secret.Secret, HideIssueLink: form.Get("include_issue_link") != "on"}
 
 	if err := service.sendTest(ctx, connection); err != nil {
-		return contracts.ChatTest{Message: "Not delivered: " + err.Error()}
+		return ChatTest{Message: "Not delivered: " + err.Error()}
 	}
 
-	return contracts.ChatTest{Sent: true, Message: "Test message sent: check the chat."}
+	return ChatTest{Sent: true, Message: "Test message sent: check the chat."}
 }
 
 // SendTest sends a test message to a saved connection. An unconfirmed
@@ -168,8 +167,8 @@ func readConnectionForm(form url.Values, connection *store.Connection, projectLi
 	// An empty name is filled in on save (see services.Connections.DefaultName).
 	connection.Name = strings.TrimSpace(form.Get("name"))
 
-	if len([]rune(connection.Name)) > contracts.MaxConnectionName {
-		problems["name"] = fmt.Sprintf("Enter a name of up to %d characters, or leave it empty.", contracts.MaxConnectionName)
+	if len([]rune(connection.Name)) > config.MaxConnectionName {
+		problems["name"] = fmt.Sprintf("Enter a name of up to %d characters, or leave it empty.", config.MaxConnectionName)
 	}
 
 	connection.AllProjects = form.Get("all_projects") == "on"

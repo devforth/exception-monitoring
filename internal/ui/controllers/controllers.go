@@ -14,11 +14,12 @@ import (
 	"github.com/devforth/exception-monitoring/internal/api/oauth"
 	"github.com/devforth/exception-monitoring/internal/notify"
 	"github.com/devforth/exception-monitoring/internal/platform/config"
+	"github.com/devforth/exception-monitoring/internal/services"
 	"github.com/devforth/exception-monitoring/internal/storage/projects"
 	"github.com/devforth/exception-monitoring/internal/storage/store"
 	"github.com/devforth/exception-monitoring/internal/ui/presenters"
 	"github.com/devforth/exception-monitoring/internal/ui/requests"
-	"github.com/devforth/exception-monitoring/internal/ui/services"
+	"github.com/devforth/exception-monitoring/internal/ui/session"
 	"github.com/devforth/exception-monitoring/internal/ui/views"
 )
 
@@ -31,7 +32,7 @@ type Controllers struct {
 	recording     config.Recording
 	factory       notify.Factory
 	views         *views.Renderer
-	auth          *services.Auth
+	auth          *session.Auth
 	issues        *services.Issues
 	projects      *services.Projects
 	connections   *services.Connections
@@ -56,7 +57,7 @@ type Dependencies struct {
 	Settings *config.Config
 	Factory  notify.Factory
 	Views    *views.Renderer
-	Auth     *services.Auth
+	Auth     *session.Auth
 	OAuth    *oauth.Server // the MCP server's sign-in, shared with it
 }
 

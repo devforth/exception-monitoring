@@ -7,6 +7,7 @@ import (
 
 	"github.com/devforth/exception-monitoring/internal/notify"
 	"github.com/devforth/exception-monitoring/internal/platform/config"
+	"github.com/devforth/exception-monitoring/internal/services"
 	"github.com/devforth/exception-monitoring/internal/storage/store"
 	"github.com/devforth/exception-monitoring/internal/ui/contracts"
 	"github.com/devforth/exception-monitoring/internal/ui/helpers"
@@ -113,7 +114,7 @@ func (presenter Connections) Form(connection store.Connection) contracts.Connect
 		TypeLabel: channelLabels[connection.Type], AllProjects: connection.AllProjects,
 		HideIssueLink: connection.HideIssueLink,
 		Active:        connection.Active, Verified: connection.Verified, Errors: map[string]string{},
-		Email: contracts.EmailStep{State: "input", Address: connection.Address, DestinationID: connection.DestinationID},
+		Email: services.EmailStep{State: "input", Address: connection.Address, DestinationID: connection.DestinationID},
 	}
 
 	if connection.Type == config.ChannelEmail && !view.New {
@@ -167,7 +168,7 @@ func (presenter Connections) Form(connection store.Connection) contracts.Connect
 // are the field errors, failure an error that is not about one field,
 // existing the connection that already sends there and typedAddress the
 // address field as posted.
-func (presenter Connections) FormAgain(connection store.Connection, problems map[string]string, failure string, existing *contracts.Duplicate, typedAddress string) contracts.ConnectionView {
+func (presenter Connections) FormAgain(connection store.Connection, problems map[string]string, failure string, existing *services.Duplicate, typedAddress string) contracts.ConnectionView {
 	view := presenter.Form(connection)
 	view.Error = failure
 	view.Duplicate = existing
@@ -186,7 +187,7 @@ func (presenter Connections) FormAgain(connection store.Connection, problems map
 
 		// The address is taken: back to the address field, with a link.
 		if existing != nil {
-			view.Email = contracts.EmailStep{State: "input", Address: connection.Address, Duplicate: existing}
+			view.Email = services.EmailStep{State: "input", Address: connection.Address, Duplicate: existing}
 			view.Duplicate = nil
 		}
 	}

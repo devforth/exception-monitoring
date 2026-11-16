@@ -2,8 +2,8 @@ package catalog
 
 import (
 	"github.com/devforth/exception-monitoring/internal/platform/config"
+	"github.com/devforth/exception-monitoring/internal/services"
 	"github.com/devforth/exception-monitoring/internal/storage/store"
-	"github.com/devforth/exception-monitoring/internal/ui/services"
 )
 
 // handlers holds what the handlers read; one per server.

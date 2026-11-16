@@ -1,11 +1,10 @@
 package contracts
 
 import (
-	"time"
-
 	"github.com/devforth/exception-monitoring/internal/platform/config"
+	"github.com/devforth/exception-monitoring/internal/platform/text"
+	"github.com/devforth/exception-monitoring/internal/services"
 	"github.com/devforth/exception-monitoring/internal/storage/store"
-	"github.com/devforth/exception-monitoring/internal/ui/helpers"
 )
 
 type TypeChoice struct {
@@ -19,35 +18,6 @@ type Choice struct {
 	Checked bool
 }
 
-// EmailStep is the address part of the form, swapped by htmx as it moves on:
-// State "input" (enter an address), "unconfirmed" (an existing connection
-// whose address is not confirmed yet: send a code), "code" (enter the mailed
-// code) or "verified" (confirmed: the rest of the form opens). Fixed is set
-// for an existing connection, whose address cannot change.
-type EmailStep struct {
-	State         string
-	Address       string
-	DestinationID int64
-	VerifiedAt    time.Time
-	Fixed         bool
-	Duplicate     *Duplicate // the connection that already uses the address
-	Error         string
-	Notice        string
-}
-
-// Duplicate names the connection that already sends to an address or chat,
-// so the error can link to it.
-type Duplicate struct {
-	ID   int64
-	Name string
-}
-
-// ChatTest is the result of a test message sent from the form.
-type ChatTest struct {
-	Sent    bool
-	Message string
-}
-
 // ConnectionView is what templates/notifications/connection.html shows: the form of a new
 // or an existing connection, with errors after a failed save.
 type ConnectionView struct {
@@ -59,7 +29,7 @@ type ConnectionView struct {
 	Name         string
 	Type         string
 	TypeLabel    string
-	Email        EmailStep
+	Email        services.EmailStep
 	ChatID       string // shown; the bot token never is
 	SlackChannel string // the channel of a Slack bot
 	// The stored secrets, masked (helpers.MaskSecret) so the form can say
@@ -76,8 +46,8 @@ type ConnectionView struct {
 	Projects           []Choice
 	Levels             []Choice
 	Errors             map[string]string
-	Duplicate          *Duplicate // a chat already used by another connection
-	Error              string     // a failure that is not about one field (sending, saving)
+	Duplicate          *services.Duplicate // a chat already used by another connection
+	Error              string              // a failure that is not about one field (sending, saving)
 	Notice             string
 }
 
@@ -91,7 +61,7 @@ func (view ConnectionView) NamePlaceholder() string {
 		return "Slack"
 	}
 
-	if local := helpers.EmailLocalPart(view.Email.Address); local != "" {
+	if local := text.EmailLocalPart(view.Email.Address); local != "" {
 		return local
 	}
 

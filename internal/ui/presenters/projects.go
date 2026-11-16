@@ -25,7 +25,7 @@ func (presenter Projects) Info(project config.Project, dsn string, unresolvedIss
 	return contracts.ProjectInfo{
 		ID: project.ID, Name: project.Name, DSN: dsn, UnresolvedIssues: unresolvedIssues,
 		FromEnv: presenter.FromEnv(project.ID), Retention: helpers.RetentionDifferences(presenter.Retention, project.Retention),
-		EventLevels: lists.InLevelOrder(presenter.Recording.EventLevelsFor(project.EventLevels), config.Levels),
+		EventLevels: config.InLevelOrder(presenter.Recording.EventLevelsFor(project.EventLevels), config.Levels),
 		LogLevels:   presenter.Recording.LogLevelsFor(project.LogLevels),
 	}
 }

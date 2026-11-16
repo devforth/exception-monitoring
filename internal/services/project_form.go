@@ -9,7 +9,6 @@ import (
 
 	"github.com/devforth/exception-monitoring/internal/platform/config"
 	"github.com/devforth/exception-monitoring/internal/storage/store"
-	"github.com/devforth/exception-monitoring/internal/ui/lists"
 )
 
 // The project form: the UI posts it, and agents send the same fields as a
@@ -107,13 +106,13 @@ func readProjectForm(form url.Values, project *store.Project, nameEditable bool,
 // chosenLevels keeps the known levels of the form; nil when they are the
 // defaults (nil defaults: every level).
 func chosenLevels(values, known, defaults []string) *[]string {
-	levels := lists.InLevelOrder(values, known)
+	levels := config.InLevelOrder(values, known)
 
 	if defaults == nil {
 		defaults = known
 	}
 
-	if slices.Equal(levels, lists.InLevelOrder(defaults, known)) {
+	if slices.Equal(levels, config.InLevelOrder(defaults, known)) {
 		return nil
 	}
 

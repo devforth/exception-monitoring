@@ -1,3 +1,10 @@
+// Package services holds the rules of the application and is the only way
+// the UI pages and the agents' tools (package catalog) reach the database:
+// issues, their events and actions, logs, projects, notification connections
+// (duplicates, default names, saving), the delivery log, email verification,
+// users and their passwords, and connected agents. It knows nothing about
+// pages: it returns data and the results in results.go, and a change of
+// several steps is one method, so a caller cannot do half of it.
 package services
 
 import (

@@ -21,18 +21,19 @@ import (
 	"github.com/devforth/exception-monitoring/internal/api/oauth"
 	"github.com/devforth/exception-monitoring/internal/notify"
 	"github.com/devforth/exception-monitoring/internal/platform/config"
+	"github.com/devforth/exception-monitoring/internal/services"
 	"github.com/devforth/exception-monitoring/internal/storage/projects"
 	"github.com/devforth/exception-monitoring/internal/storage/store"
 	"github.com/devforth/exception-monitoring/internal/ui/controllers"
 	"github.com/devforth/exception-monitoring/internal/ui/requests"
 	"github.com/devforth/exception-monitoring/internal/ui/routes"
-	"github.com/devforth/exception-monitoring/internal/ui/services"
+	"github.com/devforth/exception-monitoring/internal/ui/session"
 	"github.com/devforth/exception-monitoring/internal/ui/views"
 )
 
 type Handler struct {
 	controllers *controllers.Controllers
-	auth        *services.Auth
+	auth        *session.Auth
 }
 
 func New(ctx context.Context, logger *slog.Logger, database *store.Store, settings *config.Config, registry *projects.Registry, factory notify.Factory,
@@ -50,7 +51,7 @@ func New(ctx context.Context, logger *slog.Logger, database *store.Store, settin
 		return nil, err
 	}
 
-	auth := services.NewAuth(logger, database, settings)
+	auth := session.NewAuth(logger, database, settings)
 
 	return &Handler{
 		controllers: controllers.New(controllers.Dependencies{

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/devforth/exception-monitoring/internal/services"
 	"github.com/devforth/exception-monitoring/internal/ui/requests"
-	"github.com/devforth/exception-monitoring/internal/ui/services"
 )
 
 // Issue actions are shared by the issue page (one issue) and the issues list

@@ -1,6 +1,6 @@
 // Package middleware wraps UI handlers: login required, same-origin POSTs
 // (CSRF), security headers and caching of static files. The session and
-// login logic they rely on lives in services.Auth.
+// login logic they rely on lives in session.Auth.
 package middleware
 
 import (
@@ -9,14 +9,14 @@ import (
 	"strings"
 
 	"github.com/devforth/exception-monitoring/internal/ui/requests"
-	"github.com/devforth/exception-monitoring/internal/ui/services"
+	"github.com/devforth/exception-monitoring/internal/ui/session"
 )
 
 // RequireLogin sends anonymous visitors to the login page; the user goes
 // with the request (WithSession). For htmx requests a redirect would be
 // swapped into the page, so HX-Redirect asks htmx to do a full navigation
 // instead.
-func RequireLogin(auth *services.Auth) func(next http.HandlerFunc) http.HandlerFunc {
+func RequireLogin(auth *session.Auth) func(next http.HandlerFunc) http.HandlerFunc {
 	withSession := WithSession(auth)
 
 	return func(next http.HandlerFunc) http.HandlerFunc {
@@ -69,7 +69,7 @@ func RequireAdmin(notFound http.HandlerFunc) func(next http.HandlerFunc) http.Ha
 // WithSession passes the user of a valid session with the request
 // (requests.Viewer), if any, without requiring one (the 404 page shows the
 // menu to logged-in users).
-func WithSession(auth *services.Auth) func(next http.HandlerFunc) http.HandlerFunc {
+func WithSession(auth *session.Auth) func(next http.HandlerFunc) http.HandlerFunc {
 	return func(next http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			if user, ok := auth.SessionUser(r); ok {

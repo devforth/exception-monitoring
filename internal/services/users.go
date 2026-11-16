@@ -13,7 +13,6 @@ import (
 
 	"github.com/devforth/exception-monitoring/internal/platform/config"
 	"github.com/devforth/exception-monitoring/internal/storage/store"
-	"github.com/devforth/exception-monitoring/internal/ui/contracts"
 )
 
 // ErrForbidden: the viewer's role does not allow the change.
@@ -85,7 +84,7 @@ func (users *Users) Get(ctx context.Context, id int64) (store.User, error) {
 }
 
 // Create adds a user with a temporary password, returned to be shown once.
-func (users *Users) Create(ctx context.Context, viewer store.User, input contracts.UserInput) (int64, string, Problems, error) {
+func (users *Users) Create(ctx context.Context, viewer store.User, input UserInput) (int64, string, Problems, error) {
 	if !viewer.CanAdminister() {
 		return 0, "", nil, ErrForbidden
 	}
@@ -122,7 +121,7 @@ func (users *Users) Create(ctx context.Context, viewer store.User, input contrac
 }
 
 // Update changes a user's name and role.
-func (users *Users) Update(ctx context.Context, viewer store.User, id int64, input contracts.UserInput) (Problems, error) {
+func (users *Users) Update(ctx context.Context, viewer store.User, id int64, input UserInput) (Problems, error) {
 	target, err := users.manageable(ctx, viewer, id)
 
 	if err != nil {
@@ -199,11 +198,57 @@ func (users *Users) manageable(ctx context.Context, viewer store.User, id int64)
 	return target, err
 }
 
+// Authenticate checks a login: the user with username and password, ok
+// false when either is wrong. An unknown username is checked against a dummy
+// hash, so the response time does not tell which usernames exist.
+func (users *Users) Authenticate(ctx context.Context, username, password string) (store.User, bool, error) {
+	user, hash, err := users.store.FindLogin(ctx, strings.TrimSpace(username))
+
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return store.User{}, false, err
+	}
+
+	if !checkPassword(cmp.Or(hash, dummyPasswordHash()), password) || user.ID == 0 {
+		return store.User{}, false, nil
+	}
+
+	return user, true, nil
+}
+
+// ChangeOwnPassword replaces the viewer's own password after checking the
+// current one; wrongCurrent tells the caller to count a failed attempt. The
+// viewer's other sessions end (keepSession is the hash of the one that
+// stays); their agents stay connected, since it is the owner who changes it.
+func (users *Users) ChangeOwnPassword(ctx context.Context, viewer store.User, current, password, confirm, keepSession string) (problems Problems, wrongCurrent bool, err error) {
+	hash, err := users.store.UserPassword(ctx, viewer.ID)
+
+	if err != nil {
+		return nil, false, err
+	}
+
+	problems = Problems{}
+
+	if !checkPassword(hash, current) {
+		wrongCurrent = true
+		problems["current_password"] = "The current password is wrong."
+	}
+
+	checkNewPassword(problems, current, password, confirm)
+
+	if len(problems) > 0 {
+		return problems, wrongCurrent, nil
+	}
+
+	return nil, false, setPassword(ctx, users.store, viewer.ID, password, store.PasswordChange{KeepSession: keepSession})
+}
+
 // nameOr is the display name as saved: the username when none is given.
 func nameOr(name, username string) string {
 	return cmp.Or(strings.TrimSpace(name), username)
 }
 
+// setPassword stores a new password hash with what the change ends. It
+// checks no role: callers are the methods of Users, which do.
 func setPassword(ctx context.Context, database *store.Store, id int64, password string, change store.PasswordChange) error {
 	hash, err := HashPassword(password)
 
@@ -216,7 +261,7 @@ func setPassword(ctx context.Context, database *store.Store, id int64, password 
 	return database.SetPassword(ctx, id, change)
 }
 
-func checkUserInput(viewer store.User, input contracts.UserInput) Problems {
+func checkUserInput(viewer store.User, input UserInput) Problems {
 	problems := Problems{}
 	checkName(problems, input.Name)
 

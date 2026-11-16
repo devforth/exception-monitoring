@@ -9,8 +9,8 @@ import (
 
 	"github.com/devforth/exception-monitoring/internal/notify"
 	"github.com/devforth/exception-monitoring/internal/platform/config"
+	"github.com/devforth/exception-monitoring/internal/services"
 	"github.com/devforth/exception-monitoring/internal/storage/store"
-	"github.com/devforth/exception-monitoring/internal/ui/contracts"
 )
 
 // Notification connections, as on the Notifications page. Stored tokens are
@@ -147,7 +147,7 @@ type emailStepOutput struct {
 }
 
 // emailStep tells the agent what the UI's email step shows.
-func emailStep(step contracts.EmailStep) (emailStepOutput, error) {
+func emailStep(step services.EmailStep) (emailStepOutput, error) {
 	output := emailStepOutput{Email: step.Address, Confirmed: step.State == "verified"}
 
 	switch {

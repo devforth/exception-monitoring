@@ -3,9 +3,9 @@ package controllers
 import (
 	"net/http"
 
+	"github.com/devforth/exception-monitoring/internal/services"
 	"github.com/devforth/exception-monitoring/internal/ui/contracts"
 	"github.com/devforth/exception-monitoring/internal/ui/requests"
-	"github.com/devforth/exception-monitoring/internal/ui/services"
 )
 
 // The account page: every user changes their own name and password here,

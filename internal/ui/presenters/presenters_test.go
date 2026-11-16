@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/devforth/exception-monitoring/internal/platform/config"
+	"github.com/devforth/exception-monitoring/internal/services"
 	"github.com/devforth/exception-monitoring/internal/storage/store"
-	"github.com/devforth/exception-monitoring/internal/ui/contracts"
 	"github.com/devforth/exception-monitoring/internal/ui/lists"
 )
 
@@ -72,7 +72,7 @@ func TestEmailStepState(t *testing.T) {
 		t.Errorf("form again = %+v, want the confirmed step and the errors", confirmed.Email)
 	}
 
-	existing := &contracts.Duplicate{ID: 9, Name: "dev"}
+	existing := &services.Duplicate{ID: 9, Name: "dev"}
 	taken := presenter.FormAgain(store.Connection{Type: config.ChannelEmail, Address: "dev@example.com", DestinationID: 4}, nil, "", existing, "dev@example.com")
 
 	if taken.Email.State != "input" || taken.Email.Duplicate != existing || taken.Duplicate != nil {

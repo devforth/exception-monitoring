@@ -93,22 +93,6 @@ func HandledLabel(mechanism *sentry.Mechanism) string {
 	return "unhandled"
 }
 
-func TruncateRunes(text string, limit int) string {
-	if runes := []rune(text); len(runes) > limit {
-		return string(runes[:limit])
-	}
-
-	return text
-}
-
-// EmailLocalPart is the part of an address before "@": the default name of
-// an email connection.
-func EmailLocalPart(address string) string {
-	local, _, _ := strings.Cut(address, "@")
-
-	return local
-}
-
 // MaskSecret shows enough of a stored secret to recognize it, not to use
 // it: the start up to the last "/" or ":" of its first part (the webhook
 // host and path, the bot id) and the last 4 characters. Empty stays empty.

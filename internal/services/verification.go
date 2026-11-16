@@ -16,7 +16,6 @@ import (
 	"github.com/devforth/exception-monitoring/internal/notify"
 	"github.com/devforth/exception-monitoring/internal/platform/config"
 	"github.com/devforth/exception-monitoring/internal/storage/store"
-	"github.com/devforth/exception-monitoring/internal/ui/contracts"
 )
 
 // An email address is confirmed before the rest of the connection form can
@@ -48,11 +47,11 @@ func NewVerification(logger *slog.Logger, database *store.Store, factory notify.
 // StartEmail takes an entered address: one already connected is refused
 // (Duplicate), a confirmed one is accepted at once, otherwise a code is
 // mailed. An error is a failure of the database.
-func (verification *Verification) StartEmail(ctx context.Context, entered string) (contracts.EmailStep, error) {
+func (verification *Verification) StartEmail(ctx context.Context, entered string) (EmailStep, error) {
 	parsed, err := mail.ParseAddress(strings.TrimSpace(entered))
 
 	if err != nil {
-		return contracts.EmailStep{State: "input", Address: entered, Error: "Enter a valid email address."}, nil
+		return EmailStep{State: "input", Address: entered, Error: "Enter a valid email address."}, nil
 	}
 
 	address := strings.ToLower(parsed.Address)
@@ -61,17 +60,17 @@ func (verification *Verification) StartEmail(ctx context.Context, entered string
 	existing, err := verification.connections.FindDuplicate(ctx, config.ChannelEmail, address, 0)
 
 	if err != nil || existing != nil {
-		return contracts.EmailStep{State: "input", Address: address, Duplicate: existing}, err
+		return EmailStep{State: "input", Address: address, Duplicate: existing}, err
 	}
 
 	destination, err := verification.DestinationFor(ctx, address)
 
 	if err != nil {
-		return contracts.EmailStep{}, err
+		return EmailStep{}, err
 	}
 
 	if destination.Verified {
-		return contracts.EmailStep{State: "verified", Address: address, DestinationID: destination.ID, VerifiedAt: destination.VerifiedAt,
+		return EmailStep{State: "verified", Address: address, DestinationID: destination.ID, VerifiedAt: destination.VerifiedAt,
 			Notice: "Confirmed earlier: no code needed."}, nil
 	}
 
@@ -91,10 +90,10 @@ func (verification *Verification) FindDestination(ctx context.Context, address s
 }
 
 // againStep asks for the address again: the destination id is unknown.
-var againStep = contracts.EmailStep{State: "input", Error: "Enter the email address again."}
+var againStep = EmailStep{State: "input", Error: "Enter the email address again."}
 
 // ResendCode mails a new code to the address of destination id.
-func (verification *Verification) ResendCode(ctx context.Context, id int64) (contracts.EmailStep, error) {
+func (verification *Verification) ResendCode(ctx context.Context, id int64) (EmailStep, error) {
 	destination, err := verification.EmailDestination(ctx, id)
 
 	if err != nil {
@@ -102,14 +101,14 @@ func (verification *Verification) ResendCode(ctx context.Context, id int64) (con
 	}
 
 	if destination.Verified {
-		return contracts.EmailStep{State: "verified", Address: destination.Address, DestinationID: destination.ID, VerifiedAt: destination.VerifiedAt}, nil
+		return EmailStep{State: "verified", Address: destination.Address, DestinationID: destination.ID, VerifiedAt: destination.VerifiedAt}, nil
 	}
 
 	return verification.SendCode(ctx, destination)
 }
 
 // ConfirmCode checks a code entered for the address of destination id.
-func (verification *Verification) ConfirmCode(ctx context.Context, id int64, code string) (contracts.EmailStep, error) {
+func (verification *Verification) ConfirmCode(ctx context.Context, id int64, code string) (EmailStep, error) {
 	destination, err := verification.EmailDestination(ctx, id)
 
 	if err != nil {
@@ -158,8 +157,8 @@ func emailDestination(ctx context.Context, database *store.Store, id int64) (sto
 
 // SendCode mails a new code unless one was sent within ResendCooldown, and
 // returns the step to show. An error is a failure of the database.
-func (verification *Verification) SendCode(ctx context.Context, destination store.Destination) (contracts.EmailStep, error) {
-	step := contracts.EmailStep{State: "code", Address: destination.Address, DestinationID: destination.ID}
+func (verification *Verification) SendCode(ctx context.Context, destination store.Destination) (EmailStep, error) {
+	step := EmailStep{State: "code", Address: destination.Address, DestinationID: destination.ID}
 
 	if wait := destination.VerifySentAt.Add(ResendCooldown).Sub(verification.now()); wait > 0 {
 		step.Notice = fmt.Sprintf("A code was sent less than %s ago; check the inbox or send again in %ds.", ResendCooldown, int(wait.Seconds())+1)
@@ -186,7 +185,7 @@ func (verification *Verification) SendCode(ctx context.Context, destination stor
 		step.Error = "The email could not be sent: " + err.Error()
 	} else {
 		step.Notice = fmt.Sprintf("We sent a %d-digit code to %s. It is valid for %s.",
-			contracts.VerificationCodeDigits, destination.Address, config.HumanDuration(verificationCodeLifetime))
+			config.VerificationCodeDigits, destination.Address, config.HumanDuration(verificationCodeLifetime))
 	}
 
 	return step, nil
@@ -194,8 +193,8 @@ func (verification *Verification) SendCode(ctx context.Context, destination stor
 
 // Confirm checks a typed code and returns the step to show. An error is a
 // failure of the database.
-func (verification *Verification) Confirm(ctx context.Context, destination store.Destination, code string) (contracts.EmailStep, error) {
-	step := contracts.EmailStep{State: "code", Address: destination.Address, DestinationID: destination.ID}
+func (verification *Verification) Confirm(ctx context.Context, destination store.Destination, code string) (EmailStep, error) {
+	step := EmailStep{State: "code", Address: destination.Address, DestinationID: destination.ID}
 
 	result, err := verification.store.CheckVerificationCode(ctx, destination.ID, codeHash(destination.ID, code), verification.now())
 
@@ -226,8 +225,8 @@ func codeHash(destinationID int64, code string) string {
 }
 
 func newVerificationCode() string {
-	limit := new(big.Int).Exp(big.NewInt(10), big.NewInt(contracts.VerificationCodeDigits), nil)
+	limit := new(big.Int).Exp(big.NewInt(10), big.NewInt(config.VerificationCodeDigits), nil)
 	number, _ := rand.Int(rand.Reader, limit)
 
-	return fmt.Sprintf("%0*d", contracts.VerificationCodeDigits, number.Int64())
+	return fmt.Sprintf("%0*d", config.VerificationCodeDigits, number.Int64())
 }

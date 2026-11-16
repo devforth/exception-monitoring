@@ -16,6 +16,25 @@ type Recording struct {
 // LogLevels are the log levels of the Sentry logs protocol, lowest first.
 var LogLevels = []string{"trace", "debug", "info", "warn", "error", "fatal"}
 
+// HighestFirst lists levels for display: Levels and LogLevels keep them
+// lowest first.
+func HighestFirst(levels []string) []string {
+	reversed := slices.Clone(levels)
+	slices.Reverse(reversed)
+
+	return reversed
+}
+
+// InLevelOrder orders levels highest first, as the known list does; nil
+// (every level) stays nil.
+func InLevelOrder(levels, known []string) []string {
+	if levels == nil {
+		return nil
+	}
+
+	return slices.DeleteFunc(HighestFirst(known), func(level string) bool { return !slices.Contains(levels, level) })
+}
+
 // DefaultRecordEventLevels: errors only by default; messages and warnings
 // are recorded when a project asks for them.
 var DefaultRecordEventLevels = []string{"error", "fatal"}

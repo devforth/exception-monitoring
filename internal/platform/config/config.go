@@ -186,6 +186,10 @@ const (
 	// UsernamePattern is also the pattern attribute of the form, hence the
 	// escaped '-'; Go's regexp accepts it too.
 	UsernamePattern = `[A-Za-z0-9._@\-]+`
+	// MaxConnectionName is the longest name of a notification connection;
+	// VerificationCodeDigits the length of an email confirmation code.
+	MaxConnectionName      = 100
+	VerificationCodeDigits = 6
 	// MaxProjectName is the longest project name.
 	MaxProjectName = 64
 	// ProjectNamePattern: lowercase letters, digits, '-' and '_', starting

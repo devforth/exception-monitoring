@@ -5,7 +5,7 @@ import (
 
 	"github.com/devforth/exception-monitoring/internal/ui/contracts"
 	"github.com/devforth/exception-monitoring/internal/ui/requests"
-	"github.com/devforth/exception-monitoring/internal/ui/services"
+	"github.com/devforth/exception-monitoring/internal/ui/session"
 )
 
 func (controller *Controllers) LoginPage(w http.ResponseWriter, r *http.Request) {
@@ -36,10 +36,10 @@ func (controller *Controllers) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch result {
-	case services.LoginBlocked:
-		data.Error = services.TooManyAttempts
+	case session.LoginBlocked:
+		data.Error = session.TooManyAttempts
 		controller.views.Render(w, r, http.StatusTooManyRequests, "login", data)
-	case services.LoginWrongCredentials:
+	case session.LoginWrongCredentials:
 		data.Error = "Wrong username or password."
 		controller.views.Render(w, r, http.StatusUnauthorized, "login", data)
 	default:

@@ -22,13 +22,6 @@ type UserForm struct {
 	Errors            map[string]string
 }
 
-// UserInput is what the user form sends.
-type UserInput struct {
-	Username string
-	Name     string
-	Role     string
-}
-
 // AccountData is the page where users change their own name and password
 // (who they are is $.Viewer).
 type AccountData struct {

@@ -4,13 +4,13 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/devforth/exception-monitoring/internal/ui/contracts"
+	"github.com/devforth/exception-monitoring/internal/services"
 )
 
 // The email step: htmx swaps the "email-step" fragment as the address goes
 // from entered to confirmed (codes: services.Verification).
 
-func (controller *Controllers) renderEmailStep(w http.ResponseWriter, r *http.Request, step contracts.EmailStep) {
+func (controller *Controllers) renderEmailStep(w http.ResponseWriter, r *http.Request, step services.EmailStep) {
 	// The step of an existing connection keeps its address: no "Change email".
 	step.Fixed = r.PostFormValue("address_fixed") != ""
 
@@ -59,5 +59,5 @@ func (controller *Controllers) EmailConfirm(w http.ResponseWriter, r *http.Reque
 
 // EmailChange goes back to entering an address.
 func (controller *Controllers) EmailChange(w http.ResponseWriter, r *http.Request) {
-	controller.renderEmailStep(w, r, contracts.EmailStep{State: "input", Address: r.PostFormValue("address")})
+	controller.renderEmailStep(w, r, services.EmailStep{State: "input", Address: r.PostFormValue("address")})
 }

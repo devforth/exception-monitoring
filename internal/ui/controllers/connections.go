@@ -7,8 +7,8 @@ import (
 	"strconv"
 
 	"github.com/devforth/exception-monitoring/internal/platform/config"
+	"github.com/devforth/exception-monitoring/internal/services"
 	"github.com/devforth/exception-monitoring/internal/storage/store"
-	"github.com/devforth/exception-monitoring/internal/ui/contracts"
 	"github.com/devforth/exception-monitoring/internal/ui/requests"
 )
 
@@ -143,7 +143,7 @@ func (controller *Controllers) UpdateConnection(w http.ResponseWriter, r *http.R
 	redirectAfterPost(w, r, fmt.Sprintf("/notifications/%d?notice=saved", connection.ID))
 }
 
-func (controller *Controllers) renderConnectionForm(w http.ResponseWriter, r *http.Request, connection store.Connection, problems map[string]string, failure string, existing *contracts.Duplicate) {
+func (controller *Controllers) renderConnectionForm(w http.ResponseWriter, r *http.Request, connection store.Connection, problems map[string]string, failure string, existing *services.Duplicate) {
 	view := controller.connectionViews.FormAgain(connection, problems, failure, existing, r.PostFormValue("address"))
 	status := http.StatusOK
 

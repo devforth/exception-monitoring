@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/devforth/exception-monitoring/internal/platform/config"
+	"github.com/devforth/exception-monitoring/internal/platform/text"
 	"github.com/devforth/exception-monitoring/internal/storage/store"
-	"github.com/devforth/exception-monitoring/internal/ui/helpers"
 )
 
 // A list URL can be edited by hand. Before anything else, a list keeps only
@@ -26,27 +26,9 @@ var issueStatuses = []string{store.StatusUnresolved, store.StatusResolved, store
 
 // The level lists of the filters, highest first.
 var (
-	EventLevels = HighestFirst(config.Levels)
-	LogLevels   = HighestFirst(config.LogLevels)
+	EventLevels = config.HighestFirst(config.Levels)
+	LogLevels   = config.HighestFirst(config.LogLevels)
 )
-
-// HighestFirst lists levels for display: config keeps them lowest first.
-func HighestFirst(levels []string) []string {
-	reversed := slices.Clone(levels)
-	slices.Reverse(reversed)
-
-	return reversed
-}
-
-// InLevelOrder orders levels highest first, as the known list does; nil
-// (every level) stays nil.
-func InLevelOrder(levels, known []string) []string {
-	if levels == nil {
-		return nil
-	}
-
-	return slices.DeleteFunc(HighestFirst(known), func(level string) bool { return !slices.Contains(levels, level) })
-}
 
 // ListParams are the parameters a list understands.
 type ListParams struct {
@@ -82,7 +64,7 @@ func CleanListQuery(raw url.Values, params ListParams, projectList config.Projec
 
 	for _, key := range params.single {
 		if value := strings.TrimSpace(raw.Get(key)); value != "" {
-			query.Set(key, helpers.TruncateRunes(value, maxSearchLength))
+			query.Set(key, text.TruncateRunes(value, maxSearchLength))
 		}
 	}
 

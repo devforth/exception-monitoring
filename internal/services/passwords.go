@@ -13,7 +13,7 @@ import (
 )
 
 // PasswordIterations follows the OWASP recommendation for PBKDF2-SHA256. A
-// variable only so tests can lower it (internal/ui/export_test.go): the race
+// variable only so tests can lower it (internal/ui/tests/setup_test.go): the race
 // detector makes 600k iterations take seconds. The count is stored with
 // each hash, so raising it later keeps old passwords working.
 var PasswordIterations = 600_000
