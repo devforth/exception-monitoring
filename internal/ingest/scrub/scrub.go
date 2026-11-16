@@ -55,21 +55,23 @@ func JSON(payload []byte) []byte {
 	encoder := json.NewEncoder(&output)
 	encoder.SetEscapeHTML(false)
 
-	if err := encoder.Encode(value(document)); err != nil {
+	if err := encoder.Encode(Value(document)); err != nil {
 		return payload
 	}
 
 	return bytes.TrimRight(output.Bytes(), "\n")
 }
 
-func value(node any) any {
+// Value removes credentials from an already decoded JSON value in place.
+// Numbers should be decoded with json.Decoder.UseNumber to preserve precision.
+func Value(node any) any {
 	switch typed := node.(type) {
 	case map[string]any:
 		for key, child := range typed {
 			if IsSensitiveKey(key) {
 				typed[key] = filtered(child)
 			} else {
-				typed[key] = value(child)
+				typed[key] = Value(child)
 			}
 		}
 
@@ -85,7 +87,7 @@ func value(node any) any {
 		}
 
 		for index, child := range typed {
-			typed[index] = value(child)
+			typed[index] = Value(child)
 		}
 
 		return typed

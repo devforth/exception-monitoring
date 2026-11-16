@@ -308,7 +308,7 @@ type EventFilter struct {
 	Limit    int
 }
 
-func (store *Store) ListEvents(ctx context.Context, filter EventFilter) ([]EventSummary, error) {
+func (filter EventFilter) where() (string, []any) {
 	var (
 		where []string
 		args  []any
@@ -319,20 +319,23 @@ func (store *Store) ListEvents(ctx context.Context, filter EventFilter) ([]Event
 	}
 
 	if filter.TraceID != "" {
-		where, args = append(where, "trace_id = ?"), append(args, filter.TraceID)
+		where, args = append(where, indexedEquals("trace_id")), append(args, filter.TraceID)
 	}
 
 	if filter.BeforeID != 0 {
 		where, args = append(where, "id < ?"), append(args, filter.BeforeID)
 	}
 
-	query := `SELECT ` + eventSummaryColumns + ` FROM events`
-
-	if len(where) > 0 {
-		query += " WHERE " + strings.Join(where, " AND ")
+	if len(where) == 0 {
+		return "", args
 	}
 
-	query += " ORDER BY id DESC LIMIT ?"
+	return " WHERE " + strings.Join(where, " AND "), args
+}
+
+func (store *Store) ListEvents(ctx context.Context, filter EventFilter) ([]EventSummary, error) {
+	where, args := filter.where()
+	query := `SELECT ` + eventSummaryColumns + ` FROM events` + where + " ORDER BY id DESC LIMIT ?"
 
 	args = append(args, filter.Limit)
 
@@ -423,11 +426,11 @@ func (filter LogFilter) where() (string, []any) {
 	}
 
 	if filter.TraceID != "" {
-		where, args = append(where, "trace_id = ?"), append(args, filter.TraceID)
+		where, args = append(where, indexedEquals("trace_id")), append(args, filter.TraceID)
 	}
 
-	if condition, spanArgs := inCondition("span_id", filter.SpanIDs); condition != "" {
-		where, args = append(where, condition), append(args, spanArgs...)
+	if _, spanArgs := inCondition("span_id", filter.SpanIDs); len(spanArgs) > 0 {
+		where, args = append(where, indexedIn("span_id", len(spanArgs))), append(args, spanArgs...)
 	}
 
 	if !filter.Since.IsZero() {
@@ -598,9 +601,32 @@ func inCondition[T any](column string, values []T) (string, []any) {
 	return column + " IN (" + placeholders(len(args)) + ")", args
 }
 
+// indexedEquals and indexedIn compare a trace or span column, whose index
+// is partial (it leaves out empty values, most rows of some tables). SQLite
+// uses a partial index only when the query implies its condition, which a
+// bound parameter never does, so the condition is written out: without it
+// every lookup scans the whole table.
+func indexedEquals(column string) string {
+	return column + " = ? AND " + column + " != ''"
+}
+
+func indexedIn(column string, count int) string {
+	return "(" + column + " IN (" + placeholders(count) + ") AND " + column + " != '')"
+}
+
 // placeholders returns "?, ?, ?" for an IN (...) list of count values.
 func placeholders(count int) string {
 	return strings.TrimSuffix(strings.Repeat("?, ", count), ", ")
+}
+
+// eventsBySpanQuery finds the events whose span or parent span is one of
+// count spans, newest first, so a request with several errors links to the
+// latest one.
+func eventsBySpanQuery(count int) string {
+	return `SELECT events.trace_id, events.span_id, events.parent_span_id, issues.id, issues.title
+		FROM events JOIN issues ON issues.id = events.issue_id
+		WHERE ` + indexedIn("events.span_id", count) + ` OR ` + indexedIn("events.parent_span_id", count) + `
+		ORDER BY events.id DESC`
 }
 
 // LogIssue is the issue of the error raised in the same request as a log line.
@@ -633,14 +659,8 @@ func (store *Store) IssuesForLogs(ctx context.Context, logs []LogRecord) (map[in
 	}
 
 	args = append(args, args...)
-	list := placeholders(len(spans))
 
-	// Newest events first, so a request with several errors links to the latest one.
-	rows, err := store.DB.QueryContext(ctx, `
-		SELECT events.trace_id, events.span_id, events.parent_span_id, issues.id, issues.title
-		FROM events JOIN issues ON issues.id = events.issue_id
-		WHERE events.span_id IN (`+list+`) OR events.parent_span_id IN (`+list+`)
-		ORDER BY events.id DESC`, args...)
+	rows, err := store.DB.QueryContext(ctx, eventsBySpanQuery(len(spans)), args...)
 
 	if err != nil {
 		return nil, err

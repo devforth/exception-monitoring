@@ -11,30 +11,17 @@
 //     integration and package lists of sdk (its name and version stay);
 //   - breadcrumbs beyond the newest maxBreadcrumbs.
 //
-// Everything else stays as the SDK sent it. A payload that is not a JSON
-// object is returned unchanged: the parser deals with it.
+// Everything else stays as the SDK sent it.
 package compact
-
-import (
-	"bytes"
-	"encoding/json"
-)
 
 // maxBreadcrumbs: the last steps before the error tell the story; SDKs keep
 // up to 100.
 const maxBreadcrumbs = 50
 
-// Event returns the event payload without what does not help a fix.
-func Event(payload []byte) []byte {
-	decoder := json.NewDecoder(bytes.NewReader(payload))
-	decoder.UseNumber() // keep numbers exactly as sent
-
-	var event map[string]any
-
-	if err := decoder.Decode(&event); err != nil || event == nil {
-		return payload
-	}
-
+// EventFields drops, in place, what does not help a fix from an event
+// decoded with json.Decoder.UseNumber (ingest decodes it once for this and
+// package scrub).
+func EventFields(event map[string]any) {
 	delete(event, "modules")
 	delete(event, "debug_meta")
 
@@ -60,17 +47,6 @@ func Event(payload []byte) []byte {
 	}
 
 	compactStacktrace(event["stacktrace"])
-
-	var output bytes.Buffer
-
-	encoder := json.NewEncoder(&output)
-	encoder.SetEscapeHTML(false)
-
-	if err := encoder.Encode(event); err != nil {
-		return payload
-	}
-
-	return bytes.TrimRight(output.Bytes(), "\n")
 }
 
 // values returns the list of {"values": [...]} or of a bare list.

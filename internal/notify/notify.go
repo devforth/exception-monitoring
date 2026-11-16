@@ -188,7 +188,11 @@ type worker struct {
 // window is the flood limit state of one connection.
 type window struct {
 	sent int
-	held []Notification
+	// held counts the notifications over the limit; examples keeps the first
+	// maxSummaryItems of them for the summary. Only those are kept: a flood of
+	// errors with large events must not pile up in memory until the window ends.
+	held     int
+	examples []Notification
 }
 
 // New starts the goroutines. Without a store Notify does nothing.
@@ -345,8 +349,8 @@ func (notifier *Notifier) dispatch() {
 
 	flush := func() {
 		for connectionID, current := range windows {
-			if len(current.held) > 0 {
-				summary := Summary{Count: len(current.held), Window: notifier.options.Window, Items: current.held[:min(len(current.held), maxSummaryItems)]}
+			if current.held > 0 {
+				summary := Summary{Count: current.held, Window: notifier.options.Window, Items: current.examples}
 				notifier.enqueue(connectionID, kindSummary, summary, nil)
 			}
 		}
@@ -402,7 +406,15 @@ func (notifier *Notifier) route(notification Notification, windows map[int64]*wi
 
 			current.sent++
 		} else {
-			current.held = append(current.held, notification)
+			current.held++
+
+			// The summary shows what an issue was about, never its event:
+			// keeping the event (up to 20 MB) would bring the memory back.
+			if len(current.examples) < maxSummaryItems {
+				example := notification
+				example.Event = nil
+				current.examples = append(current.examples, example)
+			}
 		}
 	}
 }

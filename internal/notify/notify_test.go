@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/devforth/exception-monitoring/internal/ingest/sentry"
 	"github.com/devforth/exception-monitoring/internal/storage/store"
 )
 
@@ -575,4 +576,37 @@ func TestCloseIsSafe(t *testing.T) {
 
 	// Without a store nothing runs.
 	closeNotifier(t, New(Options{}))
+}
+
+// A flood keeps only what its summary shows: the count and the first
+// maxSummaryItems notifications, not every event until the window ends.
+func TestFloodKeepsOnlySummaryExamples(t *testing.T) {
+	setup := newSetup(t)
+	setup.connect(&fakeChannel{}, nil)
+	notifier := &Notifier{ctx: context.Background(), options: Options{Store: setup.database, MaxPerWindow: 5}}
+	connections, err := setup.database.ListConnections(t.Context())
+
+	if err != nil || len(connections) != 1 {
+		t.Fatalf("connections = %v, %v", connections, err)
+	}
+
+	windows := map[int64]*window{connections[0].ID: {sent: 5}} // the direct quota is used up
+
+	for index := range 1000 {
+		notification := issue(index, "error")
+		notification.Event = &sentry.Event{Raw: []byte(`{"message":"large"}`)}
+		notifier.route(notification, windows)
+	}
+
+	current := windows[connections[0].ID]
+
+	if current.held != 1000 || len(current.examples) != maxSummaryItems || current.examples[0].IssueID != issue(0, "error").IssueID {
+		t.Fatalf("held %d, kept %d examples", current.held, len(current.examples))
+	}
+
+	for _, example := range current.examples {
+		if example.Event != nil {
+			t.Fatal("an example keeps its event, which the summary never shows")
+		}
+	}
 }

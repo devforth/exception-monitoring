@@ -15,7 +15,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/devforth/exception-monitoring/internal/ingest/compact"
 	"github.com/devforth/exception-monitoring/internal/ingest/scrub"
 	"github.com/devforth/exception-monitoring/internal/ingest/sentry"
 	"github.com/devforth/exception-monitoring/internal/platform/config"
@@ -183,7 +182,7 @@ func (handler *Handler) process(ctx context.Context, project config.Project, env
 			// Credentials (cookies, Authorization, tokens) are removed before
 			// anything is parsed or stored (package scrub), and so is what
 			// does not help a fix, such as library source (package compact).
-			event, err := sentry.ParseEvent(compact.Event(scrub.JSON(item.Payload)), envelope.Header.EventID, received)
+			event, err := sentry.ParseEvent(prepareEvent(item.Payload), envelope.Header.EventID, received)
 
 			if err != nil {
 				return nil, reject(http.StatusBadRequest, "item %d: %v", index+1, err)

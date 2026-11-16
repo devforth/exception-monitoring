@@ -1,6 +1,7 @@
 package compact
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -29,7 +30,7 @@ func TestEventDropsWhatDoesNotHelpAFix(t *testing.T) {
 	  "request": {"url": "https://example.com/orders"}
 	}`
 
-	compacted := string(Event([]byte(payload)))
+	compacted := string(compactJSON([]byte(payload)))
 
 	for _, gone := range []string{`"modules"`, "lodash", "4.19.2", "debug_meta", "integrations", "npm:@sentry/node", "library line", "library vars", `"step 29"`} {
 		if strings.Contains(compacted, gone) {
@@ -59,15 +60,42 @@ func TestEventDropsWhatDoesNotHelpAFix(t *testing.T) {
 func TestEventKeepsLibrarySourceWithoutAppFrames(t *testing.T) {
 	payload := `{"exception": {"values": [{"type": "Error", "stacktrace": {"frames": [{"filename": "a.js", "context_line": "only source"}]}}]}}`
 
-	if compacted := string(Event([]byte(payload))); !strings.Contains(compacted, "only source") {
+	if compacted := string(compactJSON([]byte(payload))); !strings.Contains(compacted, "only source") {
 		t.Fatalf("source dropped: %s", compacted)
 	}
 }
 
 func TestEventLeavesOtherInputAlone(t *testing.T) {
 	for _, payload := range []string{"not json", `["a list"]`, "null"} {
-		if got := string(Event([]byte(payload))); got != payload {
-			t.Errorf("Event(%q) = %q", payload, got)
+		if got := string(compactJSON([]byte(payload))); got != payload {
+			t.Errorf("compactJSON(%q) = %q", payload, got)
 		}
 	}
+}
+
+// compactJSON runs EventFields on a payload the way ingest does: decoded with
+// UseNumber, written back without HTML escaping; anything but a JSON object
+// is returned unchanged.
+func compactJSON(payload []byte) []byte {
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.UseNumber()
+
+	var event map[string]any
+
+	if err := decoder.Decode(&event); err != nil || event == nil {
+		return payload
+	}
+
+	EventFields(event)
+
+	var output bytes.Buffer
+
+	encoder := json.NewEncoder(&output)
+	encoder.SetEscapeHTML(false)
+
+	if err := encoder.Encode(event); err != nil {
+		return payload
+	}
+
+	return bytes.TrimRight(output.Bytes(), "\n")
 }

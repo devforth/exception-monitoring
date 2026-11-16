@@ -354,6 +354,11 @@ UPDATE users SET name = username WHERE name = '';
 -- is not stored, so the token exchange cannot look it up.
 ALTER TABLE oauth_codes ADD COLUMN client_name TEXT NOT NULL DEFAULT '';
 `},
+	{21, `
+-- The issue list as it opens (a status, newest first) and the unresolved
+-- count of every page read this index instead of sorting all issues.
+CREATE INDEX issues_by_status_last_seen ON issues (status, last_seen DESC, id DESC);
+`},
 }
 
 func migrate(ctx context.Context, db *sql.DB, migrationList []migration) error {
