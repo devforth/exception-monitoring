@@ -27,6 +27,7 @@ func (server *Server) authorizationServerMetadata(w http.ResponseWriter, r *http
 		"authorization_endpoint":                         server.URL(r, AuthorizePath),
 		"token_endpoint":                                 server.URL(r, TokenPath),
 		"registration_endpoint":                          server.URL(r, RegisterPath),
+		"client_id_metadata_document_supported":          true,
 		"response_types_supported":                       []string{"code"},
 		"grant_types_supported":                          []string{"authorization_code", "refresh_token"},
 		"code_challenge_methods_supported":               []string{"S256"},

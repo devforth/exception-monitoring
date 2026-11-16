@@ -68,6 +68,9 @@ type Server struct {
 	// ResourcePath is the MCP endpoint the tokens are for.
 	ResourcePath string
 	Now          func() time.Time // nil means time.Now
+	// MetadataClient fetches client metadata documents; nil is the client
+	// that reaches only public addresses (tests point it at a local server).
+	MetadataClient *http.Client
 }
 
 func (server *Server) now() time.Time {

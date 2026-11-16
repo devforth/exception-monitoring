@@ -30,7 +30,7 @@ func (controller *Controllers) AuthorizePage(w http.ResponseWriter, r *http.Requ
 
 	allowAuthorizationRedirect(w, request)
 	controller.views.Render(w, r, http.StatusOK, "authorize", contracts.AuthorizeView{
-		ClientName: request.ClientName, RedirectURI: request.RedirectURI, Params: params,
+		ClientName: request.ClientName, ClientSite: request.ClientSite(), RedirectURI: request.RedirectURI, Params: params,
 		CSRFToken: controller.auth.FormToken(r, oauth.AuthorizePath+"?"+params.Encode()),
 	})
 }

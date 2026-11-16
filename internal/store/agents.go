@@ -26,6 +26,7 @@ type OAuthClient struct {
 type OAuthCode struct {
 	UserID        int64 // who allowed the agent
 	ClientID      string
+	ClientName    string
 	RedirectURI   string
 	CodeChallenge string
 	ExpiresAt     time.Time
@@ -54,8 +55,9 @@ type GrantTokens struct {
 }
 
 // unusedClientAge: clients that registered but never connected are dropped
-// after this; registration is open, so they must not pile up.
-const unusedClientAge = 24 * time.Hour
+// after this; registration is open, so they must not pile up. An agent
+// registers right before it opens the consent page, so an hour is plenty.
+const unusedClientAge = time.Hour
 
 const maxOAuthClients = 1024
 
@@ -91,8 +93,26 @@ func (store *Store) RegisterOAuthClient(ctx context.Context, client OAuthClient)
 		return err
 	}
 
+	// Full: the oldest clients that never connected make room, so a flood
+	// of registrations cannot keep a real agent out.
 	if count >= maxOAuthClients {
-		return ErrOAuthCapacity
+		_, err = transaction.ExecContext(ctx, `DELETE FROM oauth_clients WHERE client_id IN (
+			SELECT client_id FROM oauth_clients
+			WHERE client_id NOT IN (SELECT client_id FROM agent_grants)
+				AND client_id NOT IN (SELECT client_id FROM oauth_codes WHERE expires_at > ?)
+			ORDER BY created_at LIMIT ?)`, formatTime(client.CreatedAt), count-maxOAuthClients+1)
+
+		if err != nil {
+			return err
+		}
+
+		if err := transaction.QueryRowContext(ctx, `SELECT COUNT(*) FROM oauth_clients`).Scan(&count); err != nil {
+			return err
+		}
+
+		if count >= maxOAuthClients {
+			return ErrOAuthCapacity
+		}
 	}
 
 	uris, err := json.Marshal(client.RedirectURIs)
@@ -141,8 +161,8 @@ func (store *Store) CreateOAuthCode(ctx context.Context, codeHash string, code O
 		return err
 	}
 
-	_, err := store.DB.ExecContext(ctx, `INSERT INTO oauth_codes (code_hash, user_id, client_id, redirect_uri, code_challenge, expires_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		codeHash, code.UserID, code.ClientID, code.RedirectURI, code.CodeChallenge, formatTime(code.ExpiresAt))
+	_, err := store.DB.ExecContext(ctx, `INSERT INTO oauth_codes (code_hash, user_id, client_id, client_name, redirect_uri, code_challenge, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		codeHash, code.UserID, code.ClientID, code.ClientName, code.RedirectURI, code.CodeChallenge, formatTime(code.ExpiresAt))
 
 	return err
 }
@@ -156,8 +176,8 @@ func (store *Store) TakeOAuthCode(ctx context.Context, codeHash string, now time
 	)
 
 	err := store.DB.QueryRowContext(ctx, `DELETE FROM oauth_codes WHERE code_hash = ? AND user_id IS NOT NULL
-		RETURNING user_id, client_id, redirect_uri, code_challenge, expires_at`, codeHash).
-		Scan(&code.UserID, &code.ClientID, &code.RedirectURI, &code.CodeChallenge, &expiresAt)
+		RETURNING user_id, client_id, client_name, redirect_uri, code_challenge, expires_at`, codeHash).
+		Scan(&code.UserID, &code.ClientID, &code.ClientName, &code.RedirectURI, &code.CodeChallenge, &expiresAt)
 
 	if errors.Is(err, sql.ErrNoRows) {
 		return code, ErrNotFound

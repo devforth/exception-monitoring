@@ -77,19 +77,13 @@ func (server *Server) redeemCode(r *http.Request) (map[string]any, error) {
 		return nil, oauthError("invalid_grant", "code_verifier does not match the code challenge")
 	}
 
-	client, err := server.Store.GetOAuthClient(r.Context(), code.ClientID)
-
-	if err != nil {
-		return nil, err
-	}
-
 	access, refresh, tokens, err := server.newTokens()
 
 	if err != nil {
 		return nil, err
 	}
 
-	grant := store.Grant{UserID: code.UserID, Kind: store.GrantOAuth, ClientID: client.ID, Name: client.Name, CreatedAt: server.now()}
+	grant := store.Grant{UserID: code.UserID, Kind: store.GrantOAuth, ClientID: code.ClientID, Name: clientName(code.ClientName), CreatedAt: server.now()}
 
 	if _, err := server.Store.CreateGrant(r.Context(), grant, tokens); err != nil {
 		return nil, err

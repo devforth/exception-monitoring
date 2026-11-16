@@ -3,7 +3,6 @@ package oauth
 import (
 	"context"
 	"encoding/base64"
-	"errors"
 	"net/http"
 	"net/url"
 	"slices"
@@ -22,6 +21,19 @@ type Request struct {
 	// Params are the request's query parameters: the consent form posts
 	// them back, and they are checked again then.
 	Params url.Values
+}
+
+// ClientSite is the host that published the agent's metadata document,
+// empty for a registered agent: unlike the name, which any agent can choose,
+// it cannot be forged, so the consent page shows it.
+func (request Request) ClientSite() string {
+	if !isClientIDURL(request.ClientID) {
+		return ""
+	}
+
+	parsed, _ := url.Parse(request.ClientID)
+
+	return parsed.Hostname()
 }
 
 // RedirectOrigin is where the browser is sent back to, for the page's CSP.
@@ -56,11 +68,7 @@ func (server *Server) CheckRequest(ctx context.Context, r *http.Request, params 
 		return request, err
 	}
 
-	client, err := server.Store.GetOAuthClient(ctx, request.ClientID)
-
-	if errors.Is(err, store.ErrNotFound) {
-		return request, oauthError("invalid_client", "this agent is not registered here: add the server to the agent again")
-	}
+	client, err := server.client(ctx, request.ClientID)
 
 	if err != nil {
 		return request, err
@@ -93,7 +101,7 @@ func (server *Server) Approve(ctx context.Context, r *http.Request, request Requ
 	}
 
 	err = server.Store.CreateOAuthCode(ctx, hash(code), store.OAuthCode{
-		UserID: userID, ClientID: request.ClientID, RedirectURI: request.RedirectURI, CodeChallenge: request.CodeChallenge,
+		UserID: userID, ClientID: request.ClientID, ClientName: request.ClientName, RedirectURI: request.RedirectURI, CodeChallenge: request.CodeChallenge,
 		ExpiresAt: server.now().Add(codeTTL),
 	}, server.now())
 

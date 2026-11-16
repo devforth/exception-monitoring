@@ -6,8 +6,8 @@
   {{if .Error}}
   <p class="error" role="alert">{{.Error}}</p>
   {{else}}
-  <p><strong>{{.ClientName}}</strong> is asking to access {{appName}}.</p>
-  <p>This agent will be able to list projects and issues, read error details and logs, and change issue statuses.</p>
+  <p><strong>{{.ClientName}}</strong>{{with .ClientSite}} (published by <code>{{.}}</code>){{end}} is asking to access {{appName}}.</p>
+  <p>This agent will act as you: list projects and issues, read error details and logs, and change issue statuses.{{if $.Viewer.CanAdminister}} As you are an admin, it can also manage projects, users and notification connections, asking you before each change.{{end}}</p>
   <p class="muted">Only allow an agent you started connecting. You will return to <code>{{.RedirectURI}}</code>.</p>
   <form method="post" action="/oauth/authorize">
     {{range $name, $values := .Params}}{{range $values}}

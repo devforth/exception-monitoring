@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/devforth/exception-monitoring/internal/store"
 )
@@ -54,15 +53,7 @@ func (server *Server) register(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	name := strings.TrimSpace(request.ClientName)
-
-	if name == "" {
-		name = "Unnamed agent"
-	}
-
-	if utf8.RuneCountInString(name) > maxClientName {
-		name = string([]rune(name)[:maxClientName])
-	}
+	name := clientName(request.ClientName)
 
 	random := make([]byte, 16)
 

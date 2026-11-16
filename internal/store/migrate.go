@@ -349,6 +349,11 @@ CREATE INDEX oauth_codes_by_user ON oauth_codes (user_id);
 -- A user without a name is named after the username (as saved from now on).
 UPDATE users SET name = username WHERE name = '';
 `},
+	{20, `
+-- A code keeps the agent's name: a client known by its metadata document
+-- is not stored, so the token exchange cannot look it up.
+ALTER TABLE oauth_codes ADD COLUMN client_name TEXT NOT NULL DEFAULT '';
+`},
 }
 
 func migrate(ctx context.Context, db *sql.DB, migrationList []migration) error {

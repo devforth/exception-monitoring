@@ -19,17 +19,24 @@ func TestOAuthClientCapacityAndCleanup(t *testing.T) {
 	defer closeDatabase(t, database)
 
 	now := time.Date(2026, 11, 13, 12, 0, 0, 0, time.UTC)
+
+	// A full table of clients that never connected, client "1" the oldest.
 	_, err = database.DB.ExecContext(ctx, `WITH RECURSIVE clients(id) AS (SELECT 1 UNION ALL SELECT id+1 FROM clients WHERE id < ?)
- INSERT INTO oauth_clients (client_id,name,redirect_uris,created_at) SELECT CAST(id AS TEXT),'Client','[]',? FROM clients`, maxOAuthClients, formatTime(now))
+ INSERT INTO oauth_clients (client_id,name,redirect_uris,created_at) SELECT CAST(id AS TEXT),'Client','[]',strftime('%Y-%m-%dT%H:%M:%fZ', ?, '+' || id || ' seconds') FROM clients`,
+		maxOAuthClients, now.Format(time.RFC3339))
 
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	client := OAuthClient{ID: "new-client", Name: "New client", RedirectURIs: []string{"https://client.example/callback"}, CreatedAt: now}
+	count := func() int {
+		var clients int
 
-	if err := database.RegisterOAuthClient(ctx, client); !errors.Is(err, ErrOAuthCapacity) {
-		t.Fatalf("capacity not enforced: %v", err)
+		if err := database.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM oauth_clients`).Scan(&clients); err != nil {
+			t.Fatal(err)
+		}
+
+		return clients
 	}
 
 	user, err := database.CreateUser(ctx, User{Username: "admin", Role: RoleSuperadmin, CreatedAt: now}, "x")
@@ -38,29 +45,57 @@ func TestOAuthClientCapacityAndCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Old clients with live authorization codes must survive cleanup.
-	if err := database.CreateOAuthCode(ctx, "pending-code", OAuthCode{UserID: user, ClientID: "1", RedirectURI: "https://client.example/callback", CodeChallenge: "challenge", ExpiresAt: now.Add(26 * time.Hour)}, now); err != nil {
+	// Client "2" is being authorized: a live code keeps it.
+	if err := database.CreateOAuthCode(ctx, "pending-code", OAuthCode{UserID: user, ClientID: "2", RedirectURI: "https://client.example/callback", CodeChallenge: "challenge", ExpiresAt: now.Add(26 * time.Hour)}, now); err != nil {
 		t.Fatal(err)
 	}
 
-	client.CreatedAt = now.Add(25 * time.Hour)
+	// Full: a flood of registrations cannot keep a real agent out, the
+	// oldest unused client makes room.
+	client := OAuthClient{ID: "new-client", Name: "New client", RedirectURIs: []string{"https://client.example/callback"}, CreatedAt: now.Add(time.Minute)}
+
+	if err := database.RegisterOAuthClient(ctx, client); err != nil {
+		t.Fatalf("full table refused a registration: %v", err)
+	}
+
+	if _, err := database.GetOAuthClient(ctx, "1"); !errors.Is(err, ErrNotFound) || count() != maxOAuthClients {
+		t.Fatalf("oldest unused client kept (%v), %d clients", err, count())
+	}
+
+	// After unusedClientAge the unused ones go; the one being authorized stays.
+	client = OAuthClient{ID: "later-client", Name: "Later client", RedirectURIs: []string{"https://client.example/callback"}, CreatedAt: now.Add(unusedClientAge + time.Hour)}
 
 	if err := database.RegisterOAuthClient(ctx, client); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := database.GetOAuthClient(ctx, "1"); err != nil {
+	if _, err := database.GetOAuthClient(ctx, "2"); err != nil {
 		t.Fatal("pending authorization lost its client", err)
 	}
 
-	var count int
+	if clients := count(); clients != 2 {
+		t.Fatalf("unused clients not cleaned up: %d", clients)
+	}
 
-	if err := database.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM oauth_clients`).Scan(&count); err != nil {
+	// Every client in use: the table is full for real.
+	_, err = database.DB.ExecContext(ctx, `WITH RECURSIVE clients(id) AS (SELECT 1 UNION ALL SELECT id+1 FROM clients WHERE id < ?)
+ INSERT INTO oauth_clients (client_id,name,redirect_uris,created_at) SELECT 'used-' || id,'Client','[]',? FROM clients`, maxOAuthClients, formatTime(client.CreatedAt))
+
+	if err != nil {
 		t.Fatal(err)
 	}
 
-	if count != 2 {
-		t.Fatalf("unused clients not cleaned up: %d", count)
+	_, err = database.DB.ExecContext(ctx, `INSERT INTO oauth_codes (code_hash, user_id, client_id, redirect_uri, code_challenge, expires_at)
+		SELECT 'code-' || client_id, ?, client_id, 'https://client.example/callback', 'challenge', ? FROM oauth_clients`, user, formatTime(client.CreatedAt.Add(time.Hour)))
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	client = OAuthClient{ID: "one-more", Name: "One more", RedirectURIs: []string{"https://client.example/callback"}, CreatedAt: client.CreatedAt}
+
+	if err := database.RegisterOAuthClient(ctx, client); !errors.Is(err, ErrOAuthCapacity) {
+		t.Fatalf("capacity with every client in use: %v", err)
 	}
 }
 
