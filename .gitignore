@@ -4,7 +4,7 @@
 
 # Logs
 *.log
-logs/
+/logs/
 
 # Local data (SQLite database, volumes)
 /data/

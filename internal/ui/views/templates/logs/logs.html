@@ -1,0 +1,60 @@
+{{define "title"}}Logs{{end}}
+
+{{define "content"}}
+{{with .Data}}
+<h1>Logs</h1>
+
+<form class="filters" id="log-filters" method="get" action="/logs"
+      hx-get="/logs" hx-target="#log-list" hx-swap="outerHTML"
+      hx-trigger="input delay:300ms, submit" hx-push-url="true" hx-sync="this:replace">
+  {{template "picker" .Projects}}
+
+  {{template "picker" .Levels}}
+
+  <input type="search" name="query" value="{{.Query}}" placeholder="Search text" aria-label="Search">
+  <input type="search" name="trace_id" value="{{.TraceID}}" placeholder="Trace ID" aria-label="Trace ID">
+
+  {{template "date-range" .Dates}}
+</form>
+
+{{template "log-list" $}}
+{{end}}
+{{end}}
+
+{{define "log-list"}}
+{{with .Data}}
+<div id="log-list">
+  {{template "active-filters" .Filter.LogFilters}}
+  {{if .Logs}}
+  <table class="list compact logs">
+    <thead><tr><th>Time</th><th>Level</th><th>Project</th><th>Message</th></tr></thead>
+    <tbody>
+      {{template "log-rows" $}}
+    </tbody>
+  </table>
+  {{template "pager" .Pager}}
+  {{else}}
+  <p class="empty">No logs match these filters.</p>
+  {{end}}
+</div>
+{{end}}
+{{end}}
+
+{{define "log-rows"}}
+{{with .Data}}
+{{range .Logs}}
+<tr>
+  <td class="nowrap">{{template "time" .Timestamp}}</td>
+  <td class="nowrap">{{template "badge" (levelBadge .Level $.Data.Filter)}}</td>
+  <td>{{template "badge" (projectBadge .ProjectName $.Data.Filter)}}</td>
+  <td>
+    {{template "log-body" .Body}}
+    <div class="log-meta small">
+      {{with .Issue}}<a href="/issues/{{.IssueID}}">Issue: {{.Title}}</a>{{end}}
+      {{with .TraceID}}<a class="muted" href="/logs?trace_id={{.}}">trace {{short . 8}}</a>{{end}}
+    </div>
+  </td>
+</tr>
+{{end}}
+{{end}}
+{{end}}
