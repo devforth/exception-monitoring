@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/devforth/exception-monitoring/internal/logging"
+	"github.com/devforth/exception-monitoring/internal/platform/logging"
 )
 
 // Project is a source of events (e.g. "backend", "frontend") with its own DSN.

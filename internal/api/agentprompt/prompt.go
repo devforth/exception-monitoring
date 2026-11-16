@@ -23,7 +23,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/devforth/exception-monitoring/internal/sentry"
+	"github.com/devforth/exception-monitoring/internal/ingest/sentry"
 )
 
 const (

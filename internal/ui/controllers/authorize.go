@@ -4,7 +4,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/devforth/exception-monitoring/internal/oauth"
+	"github.com/devforth/exception-monitoring/internal/api/oauth"
 	"github.com/devforth/exception-monitoring/internal/ui/contracts"
 	"github.com/devforth/exception-monitoring/internal/ui/middleware"
 	"github.com/devforth/exception-monitoring/internal/ui/requests"

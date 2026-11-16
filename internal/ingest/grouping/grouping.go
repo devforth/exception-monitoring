@@ -26,7 +26,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/devforth/exception-monitoring/internal/sentry"
+	"github.com/devforth/exception-monitoring/internal/ingest/sentry"
 )
 
 // Fingerprint returns the grouping hash of the event: 32 hex characters.

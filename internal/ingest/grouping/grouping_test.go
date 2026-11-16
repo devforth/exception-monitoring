@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/devforth/exception-monitoring/internal/fixtures"
-	"github.com/devforth/exception-monitoring/internal/sentry"
+	"github.com/devforth/exception-monitoring/internal/ingest/sentry"
 )
 
 func fixtureEvent(t *testing.T, name string) *sentry.Event {

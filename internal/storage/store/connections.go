@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/devforth/exception-monitoring/internal/config"
+	"github.com/devforth/exception-monitoring/internal/platform/config"
 )
 
 // Destination is where messages go: an email address or a chat. An email

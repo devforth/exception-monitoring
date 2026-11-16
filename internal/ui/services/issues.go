@@ -7,9 +7,9 @@ import (
 	"slices"
 	"time"
 
-	"github.com/devforth/exception-monitoring/internal/agentprompt"
-	"github.com/devforth/exception-monitoring/internal/sentry"
-	"github.com/devforth/exception-monitoring/internal/store"
+	"github.com/devforth/exception-monitoring/internal/api/agentprompt"
+	"github.com/devforth/exception-monitoring/internal/ingest/sentry"
+	"github.com/devforth/exception-monitoring/internal/storage/store"
 )
 
 // Issues: the issue list and pages, the actions on issues and the logs

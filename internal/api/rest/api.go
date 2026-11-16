@@ -1,4 +1,4 @@
-// Package api serves the catalog of package endpoints as a REST API under
+// Package rest serves the request catalog (package catalog) as a REST API under
 // /api/v1/, behind the API token and the IP allowlist. Each endpoint is
 // /api/v1/<name>: a GET with the input as query parameters when it only
 // reads (?project=backend&limit=50; a list field takes repeated or
@@ -7,7 +7,7 @@
 //
 // Lists return {"items": [...], "next_cursor": "..."}; pass next_cursor as
 // cursor to get the next page. No next_cursor means the last page.
-package api
+package rest
 
 import (
 	"encoding/json"
@@ -19,10 +19,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/devforth/exception-monitoring/internal/access"
-	"github.com/devforth/exception-monitoring/internal/endpoints"
-	"github.com/devforth/exception-monitoring/internal/httpjson"
-	"github.com/devforth/exception-monitoring/internal/store"
+	"github.com/devforth/exception-monitoring/internal/api/catalog"
+	"github.com/devforth/exception-monitoring/internal/server/access"
+	"github.com/devforth/exception-monitoring/internal/server/httpjson"
+	"github.com/devforth/exception-monitoring/internal/storage/store"
 )
 
 // Prefix is where the endpoints are served.
@@ -33,19 +33,19 @@ const maxBody = 1 << 16
 
 type Handler struct {
 	logger         *slog.Logger
-	catalog        []endpoints.Endpoint
+	endpoints      []catalog.Endpoint
 	publicURL      string
 	trustedProxies []netip.Prefix
 }
 
 // New serves the catalog; publicURL and trustedProxies give the server's
 // address for DSNs, as on the Projects page.
-func New(logger *slog.Logger, catalog []endpoints.Endpoint, publicURL string, trustedProxies []netip.Prefix) *Handler {
-	return &Handler{logger: logger, catalog: catalog, publicURL: publicURL, trustedProxies: trustedProxies}
+func New(logger *slog.Logger, endpoints []catalog.Endpoint, publicURL string, trustedProxies []netip.Prefix) *Handler {
+	return &Handler{logger: logger, endpoints: endpoints, publicURL: publicURL, trustedProxies: trustedProxies}
 }
 
 // Route is the method and path of an endpoint.
-func Route(endpoint endpoints.Endpoint) string {
+func Route(endpoint catalog.Endpoint) string {
 	method := http.MethodPost
 
 	if endpoint.ReadOnly {
@@ -58,7 +58,7 @@ func Route(endpoint endpoints.Endpoint) string {
 // Register adds the routes to router, each wrapped with protect (IP
 // allowlist and token).
 func (handler *Handler) Register(router *http.ServeMux, protect func(http.Handler) http.Handler) {
-	for _, endpoint := range handler.catalog {
+	for _, endpoint := range handler.endpoints {
 		// Agent-only endpoints act as a user; the token is none.
 		if !endpoint.AgentsOnly {
 			router.Handle(Route(endpoint), protect(handler.serve(endpoint)))
@@ -75,7 +75,7 @@ func (handler *Handler) Register(router *http.ServeMux, protect func(http.Handle
 // apiActor is who changes a status through the REST API: its one token.
 var apiActor = store.Actor{Name: "API token", Source: store.SourceAPI}
 
-func (handler *Handler) serve(endpoint endpoints.Endpoint) http.Handler {
+func (handler *Handler) serve(endpoint catalog.Endpoint) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		input, err := readInput(endpoint, w, r)
 
@@ -84,7 +84,7 @@ func (handler *Handler) serve(endpoint endpoints.Endpoint) http.Handler {
 			return
 		}
 
-		call := endpoints.Call{ByToken: true, Actor: apiActor, Address: access.PublicURL(r, handler.publicURL, handler.trustedProxies)}
+		call := catalog.Call{ByToken: true, Actor: apiActor, Address: access.PublicURL(r, handler.publicURL, handler.trustedProxies)}
 		output, err := endpoint.Run(r.Context(), call, input)
 
 		if err != nil {
@@ -92,7 +92,7 @@ func (handler *Handler) serve(endpoint endpoints.Endpoint) http.Handler {
 			return
 		}
 
-		if text, ok := output.(endpoints.Text); ok {
+		if text, ok := output.(catalog.Text); ok {
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 			_, _ = io.WriteString(w, string(text)) // the client went away; nothing to do
 
@@ -103,8 +103,8 @@ func (handler *Handler) serve(endpoint endpoints.Endpoint) http.Handler {
 	})
 }
 
-func (handler *Handler) fail(w http.ResponseWriter, r *http.Request, endpoint endpoints.Endpoint, err error) {
-	message, notFound, ok := endpoints.Outcome(err)
+func (handler *Handler) fail(w http.ResponseWriter, r *http.Request, endpoint catalog.Endpoint, err error) {
+	message, notFound, ok := catalog.Outcome(err)
 
 	switch {
 	case !ok:
@@ -119,7 +119,7 @@ func (handler *Handler) fail(w http.ResponseWriter, r *http.Request, endpoint en
 
 // readInput is the query (GET) or the JSON body (POST) as the endpoint's
 // input object; the endpoint validates it against its schema.
-func readInput(endpoint endpoints.Endpoint, w http.ResponseWriter, r *http.Request) (map[string]any, error) {
+func readInput(endpoint catalog.Endpoint, w http.ResponseWriter, r *http.Request) (map[string]any, error) {
 	if r.Method == http.MethodGet {
 		return queryInput(endpoint, r)
 	}
@@ -147,7 +147,7 @@ func readInput(endpoint endpoints.Endpoint, w http.ResponseWriter, r *http.Reque
 }
 
 // queryInput converts query strings to the types of the input fields.
-func queryInput(endpoint endpoints.Endpoint, r *http.Request) (map[string]any, error) {
+func queryInput(endpoint catalog.Endpoint, r *http.Request) (map[string]any, error) {
 	input := map[string]any{}
 
 	for name, values := range r.URL.Query() {

@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/devforth/exception-monitoring/internal/store"
+	"github.com/devforth/exception-monitoring/internal/storage/store"
 )
 
 var (

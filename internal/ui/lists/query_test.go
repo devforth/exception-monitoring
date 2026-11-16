@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/devforth/exception-monitoring/internal/config"
+	"github.com/devforth/exception-monitoring/internal/platform/config"
 )
 
 var testProjects = config.Projects{{ID: 1, Name: "backend"}, {ID: 2, Name: "frontend"}}

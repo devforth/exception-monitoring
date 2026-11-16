@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/devforth/exception-monitoring/internal/store"
+	"github.com/devforth/exception-monitoring/internal/storage/store"
 )
 
 // token trades a code or a refresh token for new tokens.

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/devforth/exception-monitoring/internal/config"
+	"github.com/devforth/exception-monitoring/internal/platform/config"
 )
 
 // RetentionDifferences lists a project's own retention, e.g. "logs 3 days".

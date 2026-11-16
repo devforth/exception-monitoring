@@ -3,7 +3,7 @@ package lists
 import (
 	"net/url"
 
-	"github.com/devforth/exception-monitoring/internal/config"
+	"github.com/devforth/exception-monitoring/internal/platform/config"
 )
 
 // Badge is a project or level badge, the one "badge" partial for both:

@@ -10,7 +10,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/devforth/exception-monitoring/internal/store"
+	"github.com/devforth/exception-monitoring/internal/storage/store"
 )
 
 // maxRedirectURIs and maxClientName bound what an open endpoint stores.

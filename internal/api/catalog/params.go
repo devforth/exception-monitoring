@@ -1,4 +1,4 @@
-package endpoints
+package catalog
 
 import (
 	"slices"
@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/devforth/exception-monitoring/internal/config"
+	"github.com/devforth/exception-monitoring/internal/platform/config"
 )
 
 // Lists return DefaultLimit rows unless limit says otherwise, MaxLimit at most.

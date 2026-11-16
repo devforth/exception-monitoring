@@ -10,8 +10,8 @@ import (
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/devforth/exception-monitoring/internal/mcp"
-	"github.com/devforth/exception-monitoring/internal/store"
+	"github.com/devforth/exception-monitoring/internal/api/mcp"
+	"github.com/devforth/exception-monitoring/internal/storage/store"
 )
 
 // as is the server seen by an agent of a new user with role.

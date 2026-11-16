@@ -17,17 +17,17 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/devforth/exception-monitoring/internal/config"
-	"github.com/devforth/exception-monitoring/internal/endpoints"
+	"github.com/devforth/exception-monitoring/internal/api/catalog"
+	"github.com/devforth/exception-monitoring/internal/api/mcp"
+	"github.com/devforth/exception-monitoring/internal/api/oauth"
 	"github.com/devforth/exception-monitoring/internal/fixtures"
 	"github.com/devforth/exception-monitoring/internal/ingest"
-	"github.com/devforth/exception-monitoring/internal/mcp"
 	"github.com/devforth/exception-monitoring/internal/notify"
-	"github.com/devforth/exception-monitoring/internal/oauth"
-	"github.com/devforth/exception-monitoring/internal/projects"
-	"github.com/devforth/exception-monitoring/internal/secret"
+	"github.com/devforth/exception-monitoring/internal/platform/config"
+	"github.com/devforth/exception-monitoring/internal/platform/secret"
 	"github.com/devforth/exception-monitoring/internal/server"
-	"github.com/devforth/exception-monitoring/internal/store"
+	"github.com/devforth/exception-monitoring/internal/storage/projects"
+	"github.com/devforth/exception-monitoring/internal/storage/store"
 	"github.com/devforth/exception-monitoring/internal/ui"
 	"github.com/devforth/exception-monitoring/internal/ui/services"
 )
@@ -148,7 +148,7 @@ func startServer(t *testing.T, database *store.Store, adminUsername, adminPasswo
 		Database: database,
 		Ingest:   ingest.New(logger, settings, registry, ingest.StoreSink{Store: database, Logger: logger}),
 		UI:       webUI,
-		MCP: mcp.New(logger, database, endpoints.New(database, registry, services.New(services.Dependencies{
+		MCP: mcp.New(logger, database, catalog.New(database, registry, services.New(services.Dependencies{
 			Logger: logger, Store: database, Registry: registry, Settings: settings, Factory: factory, OAuth: authorization,
 		})), authorization, config.DefaultAppName, "test"),
 	}).Handler()

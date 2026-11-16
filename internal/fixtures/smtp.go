@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/devforth/exception-monitoring/internal/config"
+	"github.com/devforth/exception-monitoring/internal/platform/config"
 )
 
 // SMTPSession is what the fake SMTP server received in one session.

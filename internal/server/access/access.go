@@ -11,7 +11,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/devforth/exception-monitoring/internal/httpjson"
+	"github.com/devforth/exception-monitoring/internal/server/httpjson"
 )
 
 // ClientIP returns the address of the client that made the request.

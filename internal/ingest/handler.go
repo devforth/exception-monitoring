@@ -15,11 +15,11 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/devforth/exception-monitoring/internal/compact"
-	"github.com/devforth/exception-monitoring/internal/config"
-	"github.com/devforth/exception-monitoring/internal/httpjson"
-	"github.com/devforth/exception-monitoring/internal/scrub"
-	"github.com/devforth/exception-monitoring/internal/sentry"
+	"github.com/devforth/exception-monitoring/internal/ingest/compact"
+	"github.com/devforth/exception-monitoring/internal/ingest/scrub"
+	"github.com/devforth/exception-monitoring/internal/ingest/sentry"
+	"github.com/devforth/exception-monitoring/internal/platform/config"
+	"github.com/devforth/exception-monitoring/internal/server/httpjson"
 )
 
 // Sink receives parsed data. Its errors are returned to the SDK as 500.

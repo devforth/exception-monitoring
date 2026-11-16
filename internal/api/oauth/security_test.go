@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/devforth/exception-monitoring/internal/access"
-	"github.com/devforth/exception-monitoring/internal/store"
+	"github.com/devforth/exception-monitoring/internal/server/access"
+	"github.com/devforth/exception-monitoring/internal/storage/store"
 )
 
 // testUserID is the user testAuthorization creates.

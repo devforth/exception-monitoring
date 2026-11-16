@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/devforth/exception-monitoring/internal/endpoints"
+	"github.com/devforth/exception-monitoring/internal/api/catalog"
 )
 
 //go:embed instructions.md skills/*/SKILL.md
@@ -27,7 +27,7 @@ var skills = []agentSkill{
 }
 
 // fetchSkill is a tool for agents only, not part of the REST API.
-var fetchSkill = endpoints.Define(endpoints.Endpoint{
+var fetchSkill = catalog.Define(catalog.Endpoint{
 	Name:        "fetch_skill",
 	Description: "Detailed guidance by name: fetch-data, analyze-errors or update-issue-status. Only when the server instructions do not settle the task; reuse a skill already loaded.",
 	ReadOnly:    true,
@@ -57,7 +57,7 @@ type fetchSkillInput struct {
 	Name string `json:"name" jsonschema:"fetch-data, analyze-errors or update-issue-status."`
 }
 
-func readSkill(_ context.Context, _ endpoints.Call, input fetchSkillInput) (endpoints.Text, error) {
+func readSkill(_ context.Context, _ catalog.Call, input fetchSkillInput) (catalog.Text, error) {
 	for _, skill := range skills {
 		if skill.name != input.Name {
 			continue
@@ -69,8 +69,8 @@ func readSkill(_ context.Context, _ endpoints.Call, input fetchSkillInput) (endp
 			return "", err
 		}
 
-		return endpoints.Text(content), nil
+		return catalog.Text(content), nil
 	}
 
-	return "", endpoints.Invalid("unknown skill %q: use fetch-data, analyze-errors or update-issue-status", input.Name)
+	return "", catalog.Invalid("unknown skill %q: use fetch-data, analyze-errors or update-issue-status", input.Name)
 }

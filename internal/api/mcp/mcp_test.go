@@ -19,15 +19,15 @@ import (
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/devforth/exception-monitoring/internal/config"
-	"github.com/devforth/exception-monitoring/internal/endpoints"
+	"github.com/devforth/exception-monitoring/internal/api/catalog"
+	"github.com/devforth/exception-monitoring/internal/api/mcp"
+	"github.com/devforth/exception-monitoring/internal/api/oauth"
 	"github.com/devforth/exception-monitoring/internal/fixtures"
 	"github.com/devforth/exception-monitoring/internal/ingest"
-	"github.com/devforth/exception-monitoring/internal/mcp"
-	"github.com/devforth/exception-monitoring/internal/oauth"
-	"github.com/devforth/exception-monitoring/internal/projects"
+	"github.com/devforth/exception-monitoring/internal/platform/config"
 	"github.com/devforth/exception-monitoring/internal/server"
-	"github.com/devforth/exception-monitoring/internal/store"
+	"github.com/devforth/exception-monitoring/internal/storage/projects"
+	"github.com/devforth/exception-monitoring/internal/storage/store"
 	"github.com/devforth/exception-monitoring/internal/ui/services"
 )
 
@@ -83,7 +83,7 @@ func newTestServer(t *testing.T, configure ...func(*config.Config)) *testServer 
 		Logger:   logger,
 		Database: database,
 		Ingest:   ingest.New(logger, settings, registry, ingest.StoreSink{Store: database, Logger: logger}),
-		MCP:      mcp.New(logger, database, endpoints.New(database, registry, all), authorization, config.DefaultAppName, "test"),
+		MCP:      mcp.New(logger, database, catalog.New(database, registry, all), authorization, config.DefaultAppName, "test"),
 	}).Handler()
 
 	for _, fixture := range fixtures.All(t) {

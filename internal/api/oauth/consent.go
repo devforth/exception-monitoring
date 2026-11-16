@@ -7,7 +7,7 @@ import (
 	"net/url"
 	"slices"
 
-	"github.com/devforth/exception-monitoring/internal/store"
+	"github.com/devforth/exception-monitoring/internal/storage/store"
 )
 
 // Request is an authorization request the consent page shows: which agent

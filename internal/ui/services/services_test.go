@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/devforth/exception-monitoring/internal/config"
 	"github.com/devforth/exception-monitoring/internal/notify"
-	"github.com/devforth/exception-monitoring/internal/secret"
-	"github.com/devforth/exception-monitoring/internal/store"
+	"github.com/devforth/exception-monitoring/internal/platform/config"
+	"github.com/devforth/exception-monitoring/internal/platform/secret"
+	"github.com/devforth/exception-monitoring/internal/storage/store"
 )
 
 func openStore(t *testing.T) *store.Store {

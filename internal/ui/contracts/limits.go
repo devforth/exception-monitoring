@@ -1,6 +1,6 @@
 package contracts
 
-import "github.com/devforth/exception-monitoring/internal/config"
+import "github.com/devforth/exception-monitoring/internal/platform/config"
 
 // Limits of UI fields that config does not hold.
 const (

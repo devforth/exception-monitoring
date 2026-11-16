@@ -33,8 +33,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/devforth/exception-monitoring/internal/access"
-	"github.com/devforth/exception-monitoring/internal/store"
+	"github.com/devforth/exception-monitoring/internal/server/access"
+	"github.com/devforth/exception-monitoring/internal/storage/store"
 )
 
 // Paths of the endpoints, below the server's address (PUBLIC_URL).

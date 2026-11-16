@@ -17,8 +17,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/devforth/exception-monitoring/internal/config"
-	"github.com/devforth/exception-monitoring/internal/store"
+	"github.com/devforth/exception-monitoring/internal/platform/config"
+	"github.com/devforth/exception-monitoring/internal/storage/store"
 )
 
 // DefaultInterval between cleanups. The size limit is checked as often, so

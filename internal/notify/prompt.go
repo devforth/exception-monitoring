@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/devforth/exception-monitoring/internal/agentprompt"
+	"github.com/devforth/exception-monitoring/internal/api/agentprompt"
 )
 
 // agentPrompt is the prompt for a coding agent that every channel sends with

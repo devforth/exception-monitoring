@@ -16,7 +16,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/devforth/exception-monitoring/internal/config"
+	"github.com/devforth/exception-monitoring/internal/platform/config"
 )
 
 // The public keys the fixtures were recorded with (the sentry-playground DSNs).

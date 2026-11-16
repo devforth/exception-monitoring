@@ -1,9 +1,9 @@
-// Package endpoints is the one catalog of the server's API: every request
+// Package catalog is the one catalog of the server's API: every request
 // is declared here once, with its name, description, input (a struct whose
 // jsonschema tags describe the fields) and handler. The transports are built
 // from it, so an endpoint added here is served both ways:
 //
-//   - package api serves it over REST: GET /api/v1/<name>?<input> when it
+//   - package rest serves it over REST: GET /api/v1/<name>?<input> when it
 //     only reads, POST /api/v1/<name> with the input as JSON otherwise;
 //   - package mcp offers it to coding agents as the tool <name>, to the
 //     users whose role allows it (Admin).
@@ -15,7 +15,7 @@
 // the output goes to an agent's model provider) and the decoded input, and
 // return a value written as JSON, or Text written as it is. What a user may
 // change is checked again by the services the handlers call.
-package endpoints
+package catalog
 
 import (
 	"bytes"
@@ -30,8 +30,8 @@ import (
 
 	"github.com/google/jsonschema-go/jsonschema"
 
-	"github.com/devforth/exception-monitoring/internal/agentprompt"
-	"github.com/devforth/exception-monitoring/internal/store"
+	"github.com/devforth/exception-monitoring/internal/api/agentprompt"
+	"github.com/devforth/exception-monitoring/internal/storage/store"
 	"github.com/devforth/exception-monitoring/internal/ui/services"
 )
 

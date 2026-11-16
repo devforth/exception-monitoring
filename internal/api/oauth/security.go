@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/devforth/exception-monitoring/internal/access"
+	"github.com/devforth/exception-monitoring/internal/server/access"
 )
 
 // guard protects every OAuth endpoint and MCP itself. Native agents omit

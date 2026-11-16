@@ -11,11 +11,11 @@
 // What a tool returns goes to the agent's model provider, so it follows the
 // rules of the agent prompt (package agentprompt): event details come from
 // agentprompt.Build, and free text in lists (titles, log lines) goes
-// through agentprompt.Redact (endpoints.Call.ForAgent). Raw payloads and log
-// attributes are not exposed: those endpoints are HiddenFromAgents.
+// through agentprompt.Redact (catalog.Call.ForAgent). Raw payloads and log
+// attributes are not exposed: those endpoints are RESTOnly.
 //
 // The tools are not declared here: they are the endpoints of package
-// endpoints (the same as the REST API), plus fetch_skill. An agent acts for
+// catalog (the same as the REST API), plus fetch_skill. An agent acts for
 // the user who connected it, and is offered only the tools that user's role
 // allows: one server per role, chosen per request by the user's current role.
 package mcp
@@ -29,11 +29,11 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/devforth/exception-monitoring/internal/access"
-	"github.com/devforth/exception-monitoring/internal/config"
-	"github.com/devforth/exception-monitoring/internal/endpoints"
-	"github.com/devforth/exception-monitoring/internal/oauth"
-	"github.com/devforth/exception-monitoring/internal/store"
+	"github.com/devforth/exception-monitoring/internal/api/catalog"
+	"github.com/devforth/exception-monitoring/internal/api/oauth"
+	"github.com/devforth/exception-monitoring/internal/platform/config"
+	"github.com/devforth/exception-monitoring/internal/server/access"
+	"github.com/devforth/exception-monitoring/internal/storage/store"
 )
 
 // Path is where agents connect.
@@ -50,7 +50,7 @@ type Handler struct {
 var roles = []string{store.RoleSuperadmin, store.RoleAdmin, store.RoleUser}
 
 // New builds the MCP servers from the catalog; appName (APP_NAME) names them to agents.
-func New(logger *slog.Logger, database *store.Store, catalog []endpoints.Endpoint, authorization *oauth.Server, appName, version string) *Handler {
+func New(logger *slog.Logger, database *store.Store, endpoints []catalog.Endpoint, authorization *oauth.Server, appName, version string) *Handler {
 	handler := &Handler{oauth: authorization, logger: logger, store: database}
 	servers := map[string]*sdk.Server{}
 
@@ -58,7 +58,7 @@ func New(logger *slog.Logger, database *store.Store, catalog []endpoints.Endpoin
 		server := sdk.NewServer(&sdk.Implementation{Name: config.AppSlug(appName), Title: appName, Version: version},
 			&sdk.ServerOptions{Instructions: serverInstructions(appName)})
 
-		for _, endpoint := range agentEndpoints(catalog, store.User{ID: 1, Role: role}) {
+		for _, endpoint := range agentEndpoints(endpoints, store.User{ID: 1, Role: role}) {
 			server.AddTool(tool(endpoint), handler.run(endpoint))
 		}
 
@@ -66,7 +66,7 @@ func New(logger *slog.Logger, database *store.Store, catalog []endpoints.Endpoin
 	}
 
 	handler.http = sdk.NewStreamableHTTPHandler(func(r *http.Request) *sdk.Server {
-		caller, ok := r.Context().Value(callerKey{}).(endpoints.Call)
+		caller, ok := r.Context().Value(callerKey{}).(catalog.Call)
 
 		if !ok {
 			return nil // the SDK answers 400; Protect has let no such request through
@@ -89,11 +89,11 @@ func New(logger *slog.Logger, database *store.Store, catalog []endpoints.Endpoin
 
 // agentEndpoints are the tools viewer may use: the catalog without the
 // REST-only endpoints and those of other roles, plus fetch_skill.
-func agentEndpoints(catalog []endpoints.Endpoint, viewer store.User) []endpoints.Endpoint {
-	var tools []endpoints.Endpoint
+func agentEndpoints(endpoints []catalog.Endpoint, viewer store.User) []catalog.Endpoint {
+	var tools []catalog.Endpoint
 
-	for _, endpoint := range append(catalog, fetchSkill) {
-		if endpoint.AllowedFor(endpoints.Call{Viewer: viewer}) {
+	for _, endpoint := range append(endpoints, fetchSkill) {
+		if endpoint.AllowedFor(catalog.Call{Viewer: viewer}) {
 			tools = append(tools, endpoint)
 		}
 	}
@@ -101,7 +101,7 @@ func agentEndpoints(catalog []endpoints.Endpoint, viewer store.User) []endpoints
 	return tools
 }
 
-func tool(endpoint endpoints.Endpoint) *sdk.Tool {
+func tool(endpoint catalog.Endpoint) *sdk.Tool {
 	annotations := &sdk.ToolAnnotations{ReadOnlyHint: endpoint.ReadOnly}
 
 	if !endpoint.ReadOnly {
@@ -115,19 +115,19 @@ func tool(endpoint endpoints.Endpoint) *sdk.Tool {
 // run calls the endpoint for the user the agent acts for. Errors become
 // tool errors the agent reads: input mistakes and missing records as they
 // are, anything else logged and reported without details.
-func (handler *Handler) run(endpoint endpoints.Endpoint) sdk.ToolHandler {
+func (handler *Handler) run(endpoint catalog.Endpoint) sdk.ToolHandler {
 	return func(ctx context.Context, request *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
-		call, ok := ctx.Value(callerKey{}).(endpoints.Call)
+		call, ok := ctx.Value(callerKey{}).(catalog.Call)
 
 		if !ok {
-			return handler.failed(endpoint, endpoints.ErrNotFound)
+			return handler.failed(endpoint, catalog.ErrNotFound)
 		}
 
 		var input map[string]any
 
 		if len(request.Params.Arguments) > 0 {
 			if err := json.Unmarshal(request.Params.Arguments, &input); err != nil {
-				return handler.failed(endpoint, endpoints.Invalid("arguments must be a JSON object"))
+				return handler.failed(endpoint, catalog.Invalid("arguments must be a JSON object"))
 			}
 		}
 
@@ -137,7 +137,7 @@ func (handler *Handler) run(endpoint endpoints.Endpoint) sdk.ToolHandler {
 			return handler.failed(endpoint, err)
 		}
 
-		if text, ok := output.(endpoints.Text); ok {
+		if text, ok := output.(catalog.Text); ok {
 			return textResult(string(text)), nil
 		}
 
@@ -155,8 +155,8 @@ func textResult(content string) *sdk.CallToolResult {
 	return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: content}}}
 }
 
-func (handler *Handler) failed(endpoint endpoints.Endpoint, err error) (*sdk.CallToolResult, error) {
-	message, _, ok := endpoints.Outcome(err)
+func (handler *Handler) failed(endpoint catalog.Endpoint, err error) (*sdk.CallToolResult, error) {
+	message, _, ok := catalog.Outcome(err)
 
 	if !ok {
 		handler.logger.Error("mcp tool failed", "tool", endpoint.Name, "err", err)
@@ -182,7 +182,7 @@ type ToolInfo struct {
 func Tools(viewer store.User) []ToolInfo {
 	var list []ToolInfo
 
-	for _, endpoint := range agentEndpoints(endpoints.New(nil, nil, nil), viewer) {
+	for _, endpoint := range agentEndpoints(catalog.New(nil, nil, nil), viewer) {
 		list = append(list, ToolInfo{Name: endpoint.Name, Description: endpoint.Description, ReadOnly: endpoint.ReadOnly})
 	}
 
@@ -222,7 +222,7 @@ func (handler *Handler) withCaller(next http.Handler) http.Handler {
 		}
 
 		address := access.PublicURL(r, handler.oauth.PublicURL, handler.oauth.TrustedProxies)
-		call := endpoints.Call{Viewer: viewer, Actor: viewer.Actor(store.SourceMCP), ForAgent: true, Address: address}
+		call := catalog.Call{Viewer: viewer, Actor: viewer.Actor(store.SourceMCP), ForAgent: true, Address: address}
 
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), callerKey{}, call)))
 	})

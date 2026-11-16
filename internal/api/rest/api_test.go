@@ -1,6 +1,6 @@
 // Tests run the whole server (ingest + API) against a real database filled
 // by replaying the recorded SDK requests.
-package api_test
+package rest_test
 
 import (
 	"bytes"
@@ -17,14 +17,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/devforth/exception-monitoring/internal/api"
-	"github.com/devforth/exception-monitoring/internal/config"
-	"github.com/devforth/exception-monitoring/internal/endpoints"
+	"github.com/devforth/exception-monitoring/internal/api/catalog"
+	"github.com/devforth/exception-monitoring/internal/api/rest"
 	"github.com/devforth/exception-monitoring/internal/fixtures"
 	"github.com/devforth/exception-monitoring/internal/ingest"
-	"github.com/devforth/exception-monitoring/internal/projects"
+	"github.com/devforth/exception-monitoring/internal/platform/config"
 	"github.com/devforth/exception-monitoring/internal/server"
-	"github.com/devforth/exception-monitoring/internal/store"
+	"github.com/devforth/exception-monitoring/internal/storage/projects"
+	"github.com/devforth/exception-monitoring/internal/storage/store"
 	"github.com/devforth/exception-monitoring/internal/ui/services"
 )
 
@@ -74,7 +74,7 @@ func newTestServer(t *testing.T, allowedIPs ...string) *testServer {
 		Logger:     logger,
 		Database:   database,
 		Ingest:     ingest.New(logger, settings, registry, ingest.StoreSink{Store: database, Logger: logger}),
-		API:        api.New(logger, endpoints.New(database, registry, all), "", nil),
+		API:        rest.New(logger, catalog.New(database, registry, all), "", nil),
 		APIToken:   token,
 		AllowedIPs: allowed,
 	}).Handler()
@@ -198,16 +198,16 @@ func TestAccessControl(t *testing.T) {
 func TestRoutesFollowTheCatalog(t *testing.T) {
 	server := newTestServer(t)
 
-	for _, endpoint := range endpoints.New(nil, nil, nil) {
+	for _, endpoint := range catalog.New(nil, nil, nil) {
 		if endpoint.AgentsOnly {
-			if response := server.do(http.MethodPost, api.Prefix+endpoint.Name, ""); !strings.Contains(response.Body.String(), "unknown API endpoint") {
+			if response := server.do(http.MethodPost, rest.Prefix+endpoint.Name, ""); !strings.Contains(response.Body.String(), "unknown API endpoint") {
 				t.Errorf("agent-only %s is a REST route: %d", endpoint.Name, response.Code)
 			}
 
 			continue
 		}
 
-		route := api.Route(endpoint)
+		route := rest.Route(endpoint)
 		method, path, _ := strings.Cut(route, " ")
 
 		if want := map[bool]string{true: http.MethodGet, false: http.MethodPost}[endpoint.ReadOnly]; method != want {

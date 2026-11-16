@@ -3,7 +3,7 @@ package oauth
 import (
 	"net/http"
 
-	"github.com/devforth/exception-monitoring/internal/config"
+	"github.com/devforth/exception-monitoring/internal/platform/config"
 )
 
 func (server *Server) protectedResourceMetadata(w http.ResponseWriter, r *http.Request) {

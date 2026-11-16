@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/devforth/exception-monitoring/internal/sentry"
+	"github.com/devforth/exception-monitoring/internal/ingest/sentry"
 )
 
 // An event with everything an SDK may send that must not leave the server,

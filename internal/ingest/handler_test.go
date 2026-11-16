@@ -17,9 +17,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/devforth/exception-monitoring/internal/config"
 	"github.com/devforth/exception-monitoring/internal/fixtures"
-	"github.com/devforth/exception-monitoring/internal/sentry"
+	"github.com/devforth/exception-monitoring/internal/ingest/sentry"
+	"github.com/devforth/exception-monitoring/internal/platform/config"
 )
 
 // fakeSink records what the handler stores.

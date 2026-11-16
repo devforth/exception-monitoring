@@ -4,7 +4,7 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/devforth/exception-monitoring/internal/store"
+	"github.com/devforth/exception-monitoring/internal/storage/store"
 	"github.com/devforth/exception-monitoring/internal/ui/contracts"
 )
 
