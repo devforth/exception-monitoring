@@ -1,0 +1,11 @@
+{{define "title"}}Page not found{{end}}
+
+{{/* Also what a page the viewer's role does not allow looks like. */}}
+{{define "content"}}
+<section class="not-found">
+  <p class="not-found-code">404</p>
+  <h1>Page not found</h1>
+  <p class="muted">The page does not exist or was removed.</p>
+  <a class="button primary" href="/issues">Back to issues</a>
+</section>
+{{end}}

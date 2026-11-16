@@ -12,6 +12,7 @@ import (
 
 	"github.com/devforth/exception-monitoring/internal/agentprompt"
 	"github.com/devforth/exception-monitoring/internal/config"
+	"github.com/devforth/exception-monitoring/internal/oauth"
 	"github.com/devforth/exception-monitoring/internal/sentry"
 	"github.com/devforth/exception-monitoring/internal/store"
 	"github.com/devforth/exception-monitoring/internal/ui/services"
@@ -377,7 +378,9 @@ type updateIssueStatusInput struct {
 }
 
 // updateIssueStatus changes one or many issues at once: all or none.
-func (handler *Handler) updateIssueStatus(ctx context.Context, _ *sdk.CallToolRequest, input updateIssueStatusInput) (*sdk.CallToolResult, any, error) {
+// The change is recorded in the issues' history as made by the user the
+// agent acts for.
+func (handler *Handler) updateIssueStatus(ctx context.Context, request *sdk.CallToolRequest, input updateIssueStatusInput) (*sdk.CallToolResult, any, error) {
 	ids, err := store.NormalizeIssueIDs(input.IssueIDs)
 
 	if err != nil {
@@ -390,7 +393,14 @@ func (handler *Handler) updateIssueStatus(ctx context.Context, _ *sdk.CallToolRe
 		return handler.failed("update_issue_status", invalid("status must be resolved, ignored or unresolved"))
 	}
 
-	issues, err := handler.store.SetIssuesStatus(ctx, ids, input.Status)
+	grant, ok := oauth.GrantOf(request.Extra.TokenInfo)
+
+	if !ok {
+		return handler.failed("update_issue_status", errors.New("the request carries no grant"))
+	}
+
+	actor := store.Actor{UserID: grant.UserID, Name: grant.UserName, Source: store.SourceMCP}
+	issues, err := handler.store.SetIssuesStatus(ctx, ids, input.Status, actor)
 
 	if errors.Is(err, store.ErrNotFound) {
 		return handler.failed("update_issue_status", invalid("one or more issue IDs were not found; no status changed"))

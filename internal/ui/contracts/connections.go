@@ -8,9 +8,6 @@ import (
 	"github.com/devforth/exception-monitoring/internal/ui/helpers"
 )
 
-// MaxConnectionName is the longest name a connection can have.
-const MaxConnectionName = 100
-
 type TypeChoice struct {
 	Value, Label, Reason string
 	Available, Selected  bool
@@ -51,7 +48,7 @@ type ChatTest struct {
 	Message string
 }
 
-// ConnectionView is what templates/connection.html shows: the form of a new
+// ConnectionView is what templates/notifications/connection.html shows: the form of a new
 // or an existing connection, with errors after a failed save.
 type ConnectionView struct {
 	ID int64

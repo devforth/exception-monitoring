@@ -93,7 +93,7 @@
   {{/* Locked until the email address is confirmed (app.js unlocks it when the step reports it). */}}
   <fieldset class="connection-rest" {{if .RestLocked}}disabled{{end}}>
     <label>Name
-      <input name="name" value="{{.Name}}" maxlength="100" placeholder="{{.NamePlaceholder}}"
+      <input name="name" value="{{.Name}}" maxlength="{{limits.ConnectionName}}" placeholder="{{.NamePlaceholder}}"
              data-placeholder-telegram="the name of the chat, from Telegram" data-placeholder-slack="Slack">
     </label>
     <p class="muted small">Optional: left empty, it is filled in when saved.</p>
@@ -175,7 +175,7 @@
   {{end}}
   {{if eq .State "code"}}
   <span class="inline-form">
-    <input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123456" aria-label="Confirmation code">
+    <input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="{{limits.VerificationCode}}" placeholder="123456" aria-label="Confirmation code">
     <button type="button" class="primary" hx-post="/notifications/email/confirm" hx-target="closest .email-step" hx-swap="outerHTML">Confirm</button>
   </span>
   {{end}}

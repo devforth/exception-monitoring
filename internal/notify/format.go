@@ -74,6 +74,14 @@ func (summary Summary) note() string {
 }
 
 // truncate cuts text to at most limit characters (not bytes), adding "…".
+// How much of free text a message keeps.
+const (
+	titleLength      = 300 // the title of the issue a message is about
+	shortTitleLength = 150 // a title in a summary list or an email subject
+	detailsLength    = 500
+	breadcrumbLength = 300
+)
+
 func truncate(text string, limit int) string {
 	runes := []rune(text)
 

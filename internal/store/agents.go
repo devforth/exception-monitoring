@@ -24,15 +24,19 @@ type OAuthClient struct {
 
 // OAuthCode is an authorization code waiting to be traded for tokens.
 type OAuthCode struct {
+	UserID        int64 // who allowed the agent
 	ClientID      string
 	RedirectURI   string
 	CodeChallenge string
 	ExpiresAt     time.Time
 }
 
-// Grant is a connected agent or the personal token, without its secrets.
+// Grant is a connected agent or a personal token, without its secrets. It
+// acts for UserID.
 type Grant struct {
 	ID         int64
+	UserID     int64
+	UserName   string // the user's display name, read with the grant
 	Kind       string
 	ClientID   string
 	Name       string
@@ -137,8 +141,8 @@ func (store *Store) CreateOAuthCode(ctx context.Context, codeHash string, code O
 		return err
 	}
 
-	_, err := store.DB.ExecContext(ctx, `INSERT INTO oauth_codes (code_hash, client_id, redirect_uri, code_challenge, expires_at) VALUES (?, ?, ?, ?, ?)`,
-		codeHash, code.ClientID, code.RedirectURI, code.CodeChallenge, formatTime(code.ExpiresAt))
+	_, err := store.DB.ExecContext(ctx, `INSERT INTO oauth_codes (code_hash, user_id, client_id, redirect_uri, code_challenge, expires_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		codeHash, code.UserID, code.ClientID, code.RedirectURI, code.CodeChallenge, formatTime(code.ExpiresAt))
 
 	return err
 }
@@ -151,8 +155,9 @@ func (store *Store) TakeOAuthCode(ctx context.Context, codeHash string, now time
 		expiresAt string
 	)
 
-	err := store.DB.QueryRowContext(ctx, `DELETE FROM oauth_codes WHERE code_hash = ? RETURNING client_id, redirect_uri, code_challenge, expires_at`, codeHash).
-		Scan(&code.ClientID, &code.RedirectURI, &code.CodeChallenge, &expiresAt)
+	err := store.DB.QueryRowContext(ctx, `DELETE FROM oauth_codes WHERE code_hash = ? AND user_id IS NOT NULL
+		RETURNING user_id, client_id, redirect_uri, code_challenge, expires_at`, codeHash).
+		Scan(&code.UserID, &code.ClientID, &code.RedirectURI, &code.CodeChallenge, &expiresAt)
 
 	if errors.Is(err, sql.ErrNoRows) {
 		return code, ErrNotFound
@@ -174,9 +179,9 @@ func (store *Store) TakeOAuthCode(ctx context.Context, codeHash string, now time
 // CreateGrant stores a grant with its tokens.
 func (store *Store) CreateGrant(ctx context.Context, grant Grant, tokens GrantTokens) (int64, error) {
 	result, err := store.DB.ExecContext(ctx, `INSERT INTO agent_grants
-		(kind, client_id, name, access_hash, access_expires_at, refresh_hash, refresh_expires_at, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		grant.Kind, grant.ClientID, grant.Name, tokens.AccessHash, optionalTime(tokens.AccessExpiresAt),
+		(user_id, kind, client_id, name, access_hash, access_expires_at, refresh_hash, refresh_expires_at, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		grant.UserID, grant.Kind, grant.ClientID, grant.Name, tokens.AccessHash, optionalTime(tokens.AccessExpiresAt),
 		optionalText(tokens.RefreshHash), optionalTime(tokens.RefreshExpiresAt), formatTime(grant.CreatedAt))
 
 	if err != nil {
@@ -186,8 +191,9 @@ func (store *Store) CreateGrant(ctx context.Context, grant Grant, tokens GrantTo
 	return result.LastInsertId()
 }
 
-// ReplacePersonalToken deletes the personal token, if any, and stores a new one.
-func (store *Store) ReplacePersonalToken(ctx context.Context, accessHash string, now time.Time) error {
+// ReplacePersonalToken deletes the user's personal token, if any, and
+// stores a new one: one per user.
+func (store *Store) ReplacePersonalToken(ctx context.Context, userID int64, accessHash string, now time.Time) error {
 	transaction, err := store.DB.BeginTx(ctx, nil)
 
 	if err != nil {
@@ -196,12 +202,12 @@ func (store *Store) ReplacePersonalToken(ctx context.Context, accessHash string,
 
 	defer transaction.Rollback()
 
-	if _, err := transaction.ExecContext(ctx, `DELETE FROM agent_grants WHERE kind = ?`, GrantToken); err != nil {
+	if _, err := transaction.ExecContext(ctx, `DELETE FROM agent_grants WHERE kind = ? AND user_id = ?`, GrantToken, userID); err != nil {
 		return err
 	}
 
-	_, err = transaction.ExecContext(ctx, `INSERT INTO agent_grants (kind, name, access_hash, created_at) VALUES (?, 'Personal token', ?, ?)`,
-		GrantToken, accessHash, formatTime(now))
+	_, err = transaction.ExecContext(ctx, `INSERT INTO agent_grants (user_id, kind, name, access_hash, created_at) VALUES (?, ?, 'Personal token', ?, ?)`,
+		userID, GrantToken, accessHash, formatTime(now))
 
 	if err != nil {
 		return err
@@ -284,43 +290,58 @@ func (store *Store) RotateGrant(ctx context.Context, clientID, refreshHash strin
 // lastUsedStep: last_used_at is written at most this often, not on every call.
 const lastUsedStep = time.Minute
 
-// UseGrant finds the grant of a valid access token and records the use.
-// ErrNotFound when the token is unknown or expired.
-func (store *Store) UseGrant(ctx context.Context, accessHash string, now time.Time) (Grant, error) {
+// grantFields are the columns scanGrant reads, from agent_grants joined
+// with users: a grant without a user does not work.
+const grantFields = `agent_grants.id, agent_grants.user_id, users.name, users.username,
+	agent_grants.kind, agent_grants.client_id, agent_grants.name, agent_grants.created_at, agent_grants.last_used_at
+	FROM agent_grants JOIN users ON users.id = agent_grants.user_id`
+
+func scanGrant(row scanner) (Grant, error) {
 	var (
-		grant     Grant
-		createdAt string
-		lastUsed  sql.NullString
+		grant              Grant
+		userName, username string
+		createdAt          string
+		lastUsed           sql.NullString
 	)
 
-	err := store.DB.QueryRowContext(ctx, `SELECT id, kind, client_id, name, created_at, last_used_at FROM agent_grants
-		WHERE access_hash = ? AND (access_expires_at IS NULL OR access_expires_at > ?)`, accessHash, formatTime(now)).
-		Scan(&grant.ID, &grant.Kind, &grant.ClientID, &grant.Name, &createdAt, &lastUsed)
+	err := row.Scan(&grant.ID, &grant.UserID, &userName, &username, &grant.Kind, &grant.ClientID, &grant.Name, &createdAt, &lastUsed)
 
 	if errors.Is(err, sql.ErrNoRows) {
 		return grant, ErrNotFound
 	}
 
+	grant.UserName = displayName(userName, username)
+	grant.CreatedAt, grant.LastUsedAt = parseTime(createdAt), parseOptionalTime(lastUsed)
+
+	return grant, err
+}
+
+// UseGrant finds the grant of a valid access token and records the use.
+// ErrNotFound when the token is unknown or expired.
+func (store *Store) UseGrant(ctx context.Context, accessHash string, now time.Time) (Grant, error) {
+	grant, err := scanGrant(store.DB.QueryRowContext(ctx, `SELECT `+grantFields+`
+		WHERE agent_grants.access_hash = ? AND (agent_grants.access_expires_at IS NULL OR agent_grants.access_expires_at > ?)`,
+		accessHash, formatTime(now)))
+
 	if err != nil {
 		return grant, err
 	}
 
-	grant.CreatedAt, _ = time.Parse(timeFormat, createdAt)
 	_, err = store.DB.ExecContext(ctx, `UPDATE agent_grants SET last_used_at = ? WHERE id = ? AND (last_used_at IS NULL OR last_used_at < ?)`,
 		formatTime(now), grant.ID, formatTime(now.Add(-lastUsedStep)))
 
 	return grant, err
 }
 
-// ListGrants lists the connected agents and the personal token, newest
-// first, dropping agents whose refresh token has expired (they would have
-// to connect again anyway).
-func (store *Store) ListGrants(ctx context.Context, now time.Time) ([]Grant, error) {
+// ListGrants lists the connected agents and the personal token of a user,
+// newest first, dropping agents whose refresh token has expired (they would
+// have to connect again anyway).
+func (store *Store) ListGrants(ctx context.Context, userID int64, now time.Time) ([]Grant, error) {
 	if _, err := store.DB.ExecContext(ctx, `DELETE FROM agent_grants WHERE kind = ? AND refresh_expires_at <= ?`, GrantOAuth, formatTime(now)); err != nil {
 		return nil, err
 	}
 
-	rows, err := store.DB.QueryContext(ctx, `SELECT id, kind, client_id, name, created_at, last_used_at FROM agent_grants ORDER BY id DESC`)
+	rows, err := store.DB.QueryContext(ctx, `SELECT `+grantFields+` WHERE agent_grants.user_id = ? ORDER BY agent_grants.id DESC`, userID)
 
 	if err != nil {
 		return nil, err
@@ -331,27 +352,21 @@ func (store *Store) ListGrants(ctx context.Context, now time.Time) ([]Grant, err
 	var grants []Grant
 
 	for rows.Next() {
-		var (
-			grant     Grant
-			createdAt string
-			lastUsed  sql.NullString
-		)
+		grant, err := scanGrant(rows)
 
-		if err := rows.Scan(&grant.ID, &grant.Kind, &grant.ClientID, &grant.Name, &createdAt, &lastUsed); err != nil {
+		if err != nil {
 			return nil, err
-		}
-
-		grant.CreatedAt, _ = time.Parse(timeFormat, createdAt)
-
-		if lastUsed.Valid {
-			used, _ := time.Parse(timeFormat, lastUsed.String)
-			grant.LastUsedAt = &used
 		}
 
 		grants = append(grants, grant)
 	}
 
 	return grants, rows.Err()
+}
+
+// GetGrant reads a grant (to check whose it is).
+func (store *Store) GetGrant(ctx context.Context, id int64) (Grant, error) {
+	return scanGrant(store.DB.QueryRowContext(ctx, `SELECT `+grantFields+` WHERE agent_grants.id = ?`, id))
 }
 
 // DeleteGrant disconnects an agent: its tokens stop working at once.
@@ -370,17 +385,20 @@ func (store *Store) DeleteGrant(ctx context.Context, id int64) error {
 		return err
 	}
 
-	result, err := transaction.ExecContext(ctx, `DELETE FROM agent_grants WHERE id = ?`, id)
-
-	if err != nil {
+	if err := affectedOne(transaction.ExecContext(ctx, `DELETE FROM agent_grants WHERE id = ?`, id)); err != nil {
 		return err
 	}
 
-	if rows, err := result.RowsAffected(); err != nil || rows == 0 {
-		return errors.Join(err, ErrNotFound)
-	}
-
 	return transaction.Commit()
+}
+
+// HasPersonalToken reports whether the user has a personal token.
+func (store *Store) HasPersonalToken(ctx context.Context, userID int64) (bool, error) {
+	var exists bool
+
+	err := store.DB.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM agent_grants WHERE kind = ? AND user_id = ?)`, GrantToken, userID).Scan(&exists)
+
+	return exists, err
 }
 
 func optionalTime(value time.Time) any {

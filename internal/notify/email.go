@@ -130,7 +130,7 @@ func (email Email) Send(ctx context.Context, notification Notification) error {
 		breadcrumbs := event.Breadcrumbs[max(0, len(event.Breadcrumbs)-maxEmailBreadcrumbs):]
 
 		for _, breadcrumb := range breadcrumbs {
-			line := breadcrumbLine{Category: breadcrumb.Category, Message: truncate(breadcrumb.Message, 300)}
+			line := breadcrumbLine{Category: breadcrumb.Category, Message: truncate(breadcrumb.Message, breadcrumbLength)}
 
 			if !breadcrumb.Timestamp.IsZero() {
 				line.Time = breadcrumb.Timestamp.UTC().Format("15:04:05")
@@ -145,7 +145,7 @@ func (email Email) Send(ctx context.Context, notification Notification) error {
 	// in the body it would bury the error.
 	prompt := agentPrompt(notification)
 
-	subject := fmt.Sprintf("[%s] %s: %s", notification.Project, notification.Kind.label(), truncate(notification.Title, 150))
+	subject := fmt.Sprintf("[%s] %s: %s", notification.Project, notification.Kind.label(), truncate(notification.Title, shortTitleLength))
 	view.PromptFile = promptFileName(notification)
 	text := email.plainText(notification) + "\nA prompt for a coding agent that reproduces and explains this error is attached (" + view.PromptFile + ").\n"
 
@@ -241,9 +241,9 @@ func (email Email) SendVerificationCode(ctx context.Context, connectionName, cod
 	subject := "Confirm notifications to this address: " + code
 	text := fmt.Sprintf("Your confirmation code for the notification connection %q is:\n\n    %s\n\n"+
 		"Enter it in %s within %s. If you did not add this address, ignore this email.\n",
-		connectionName, code, appNameOr(email.AppName), validFor.Round(time.Minute))
+		connectionName, code, appNameOr(email.AppName), config.HumanDuration(validFor.Round(time.Minute)))
 
-	view := emailView{ConnectionName: connectionName, Code: code, ValidFor: validFor.Round(time.Minute).String()}
+	view := emailView{ConnectionName: connectionName, Code: code, ValidFor: config.HumanDuration(validFor.Round(time.Minute))}
 
 	return email.send(ctx, subject, text, "verification", view)
 }
@@ -344,7 +344,7 @@ func deliver(ctx context.Context, settings config.SMTP, recipients []string, mes
 		err  error
 	)
 
-	if settings.Port == 465 {
+	if settings.Port == config.ImplicitTLSPort {
 		conn, err = (&tls.Dialer{NetDialer: dialer, Config: tlsConfig}).DialContext(ctx, "tcp", address)
 	} else {
 		conn, err = dialer.DialContext(ctx, "tcp", address)
@@ -368,7 +368,7 @@ func deliver(ctx context.Context, settings config.SMTP, recipients []string, mes
 
 	defer func() { _ = client.Close() }()
 
-	if settings.Port != 465 {
+	if settings.Port != config.ImplicitTLSPort {
 		if ok, _ := client.Extension("STARTTLS"); ok {
 			if err := client.StartTLS(tlsConfig); err != nil {
 				return fmt.Errorf("smtp starttls: %w", err)

@@ -12,7 +12,7 @@
   <p class="muted">Name and key are set in <code>PROJECTS</code>; change them there. Retention can be set here.</p>
   {{else}}
   <label>Name
-    <input name="name" value="{{.Name}}" maxlength="64" required pattern="[a-z0-9][a-z0-9_\-]*" placeholder="backend">
+    <input name="name" value="{{.Name}}" maxlength="{{limits.ProjectName}}" required pattern="{{limits.ProjectNamePattern}}" placeholder="backend">
   </label>
   {{with index .Errors "name"}}<p class="field-error">{{.}}</p>{{end}}
   {{end}}
@@ -23,9 +23,12 @@
   {{with index .Errors "color"}}<p class="field-error">{{.}}</p>{{end}}
 
   {{with .DSN}}
-  <label>DSN
-    <input class="dsn" value="{{.}}" readonly>
-  </label>
+  <div class="field">DSN
+    <div class="copy-row dsn-row">
+      <input class="dsn" id="project-dsn" value="{{.}}" readonly aria-label="DSN">
+      {{template "copy-button" (copyButton "project-dsn" "Copy" "Copy the DSN" "DSN copied to clipboard.")}}
+    </div>
+  </div>
   {{else}}
   <p class="muted small">A DSN key is generated when the project is added.</p>
   {{end}}

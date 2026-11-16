@@ -1,4 +1,4 @@
-package ui_test
+package tests
 
 import (
 	"html"
@@ -131,10 +131,18 @@ func TestPersonalAgentTokenLifecycle(t *testing.T) {
 			t.Fatalf("token fragment: %d %s", response.Code, response.Body)
 		}
 
-		match := regexp.MustCompile(`id="mcp-personal-token" value="Bearer ([^"]+)"`).FindStringSubmatch(response.Body.String())
+		match := personalTokenField.FindStringSubmatch(response.Body.String())
 
 		if len(match) != 2 {
 			t.Fatal("missing personal token")
+		}
+
+		// The setup prompt for an agent carries the new token, once.
+		body := html.UnescapeString(response.Body.String())
+		command := `claude mcp add --transport http --scope user exception-monitoring http://example.com/mcp --header "Authorization: Bearer ` + match[1] + `"`
+
+		if !strings.Contains(body, `<textarea id="mcp-setup-prompt" hidden>`) || !strings.Contains(body, command) || !strings.Contains(body, "Copy setup prompt") {
+			t.Fatalf("setup prompt:\n%s", body)
 		}
 
 		return match[1]
@@ -149,7 +157,7 @@ func TestPersonalAgentTokenLifecycle(t *testing.T) {
 	agentAccess(t, server, token, http.StatusOK)
 	page = server.page("/agents?client=other")
 
-	if strings.Contains(page, token) || !strings.Contains(page, "Regenerate token") || !strings.Contains(page, "<time datetime=") {
+	if strings.Contains(page, token) || strings.Contains(page, "mcp-setup-prompt") || !strings.Contains(page, "Regenerate token") || !strings.Contains(page, "<time datetime=") {
 		t.Fatal("token leaked or connection metadata missing")
 	}
 
@@ -162,7 +170,7 @@ func TestPersonalAgentTokenLifecycle(t *testing.T) {
 	agentAccess(t, server, token, http.StatusUnauthorized)
 	agentAccess(t, server, replacement, http.StatusOK)
 	page = server.page("/agents?client=other")
-	action := regexp.MustCompile(`action="(/agents/[0-9]+/disconnect)"`).FindStringSubmatch(page)
+	action := disconnectAction.FindStringSubmatch(page)
 
 	if len(action) != 2 {
 		t.Fatal("missing disconnect button")
@@ -213,7 +221,7 @@ func TestDisconnectOAuthAgent(t *testing.T) {
 		t.Fatal("last activity was not recorded")
 	}
 
-	action := regexp.MustCompile(`action="(/agents/[0-9]+/disconnect)"`).FindStringSubmatch(page)
+	action := disconnectAction.FindStringSubmatch(page)
 
 	if len(action) != 2 {
 		t.Fatal("missing disconnect button")

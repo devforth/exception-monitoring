@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/devforth/exception-monitoring/internal/config"
 	"github.com/devforth/exception-monitoring/internal/sentry"
 )
 
@@ -144,14 +145,9 @@ func CountOrAll(count int) string {
 }
 
 func KeptFor(duration time.Duration) string {
-	switch days := int(duration.Hours() / 24); {
-	case duration == 0:
+	if duration == 0 {
 		return "forever"
-	case days == 1 && duration == 24*time.Hour:
-		return "1 day"
-	case days > 1 && duration%(24*time.Hour) == 0:
-		return strconv.Itoa(days) + " days"
-	default:
-		return duration.String()
 	}
+
+	return config.HumanDuration(duration)
 }

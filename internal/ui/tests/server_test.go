@@ -1,6 +1,6 @@
 // Tests run the whole server (ingest + UI) against a real database filled by
 // replaying the recorded SDK requests, and drive the UI like a browser.
-package ui_test
+package tests
 
 import (
 	"bytes"
@@ -188,13 +188,19 @@ func (server *testServer) page(target string) string {
 	return response.Body.String()
 }
 
+// login logs in as the superadmin created from the env of the test server.
 func (server *testServer) login() {
 	server.t.Helper()
+	server.loginAs("admin", password)
+}
 
-	response := server.post("/login", url.Values{"username": {"admin"}, "password": {password}, "next": {"/issues"}})
+func (server *testServer) loginAs(username, userPassword string) {
+	server.t.Helper()
+
+	response := server.post("/login", url.Values{"username": {username}, "password": {userPassword}, "next": {"/issues"}})
 
 	if response.Code != http.StatusSeeOther {
-		server.t.Fatalf("login: %d %s", response.Code, response.Body)
+		server.t.Fatalf("login as %s: %d %s", username, response.Code, response.Body)
 	}
 
 	for _, cookie := range response.Result().Cookies() {
@@ -206,6 +212,16 @@ func (server *testServer) login() {
 	if server.cookie == nil {
 		server.t.Fatal("login did not set a session cookie")
 	}
+}
+
+// as is another browser on the same server, logged in as username.
+func (server *testServer) as(username, userPassword string) *testServer {
+	server.t.Helper()
+
+	other := &testServer{t: server.t, handler: server.handler, mails: server.mails}
+	other.loginAs(username, userPassword)
+
+	return other
 }
 
 func (server *testServer) ingestFixtures() {
@@ -232,7 +248,12 @@ func (server *testServer) sendEnvelope(target string, body []byte) {
 	}
 }
 
-var issueLink = regexp.MustCompile(`href="/issues/(\d+)"`)
+var (
+	issueLink = regexp.MustCompile(`href="/issues/(\d+)"`)
+	// The personal token just generated, and the disconnect buttons, on the MCP page.
+	personalTokenField = regexp.MustCompile(`id="mcp-personal-token" value="Bearer ([^"]+)"`)
+	disconnectAction   = regexp.MustCompile(`action="(/agents/\d+/disconnect)"`)
+)
 
 // issueIDs lists the issues linked from a page, each once and in order (a
 // list row links its issue from the title and from the open button).

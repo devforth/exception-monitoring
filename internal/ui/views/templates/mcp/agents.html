@@ -59,15 +59,34 @@
     {{else if .PersonalTokenSet}}
     <p class="muted small">A personal token is active. Its value cannot be shown again. Regenerate it if you need a new copy.</p>
     {{end}}
-    <form method="post" action="/agents/token" hx-post="/agents/token" hx-target="#mcp-settings" hx-swap="outerHTML" class="mcp-token-form">
-      <button type="submit" {{if .PersonalTokenSet}}data-confirm="Regenerate the personal token? Clients using the current token will lose access."{{end}}>{{if .PersonalTokenSet}}Regenerate token{{else}}Generate token{{end}}</button>
-    </form>
+    <div class="actions mcp-token-form">
+      <form method="post" action="/agents/token" hx-post="/agents/token" hx-target="#mcp-settings" hx-swap="outerHTML">
+        <button type="submit" {{if .PersonalTokenSet}}data-confirm="Regenerate the personal token? Clients using the current token will lose access."{{end}}>{{if .PersonalTokenSet}}Regenerate token{{else}}Generate token{{end}}</button>
+      </form>
+      {{/* With the token just created: a prompt for an agent to connect itself. */}}
+      {{with .SetupPrompt}}
+      <textarea id="mcp-setup-prompt" hidden>{{.}}</textarea>
+      {{template "copy-button" (copyButton "mcp-setup-prompt" "Copy setup prompt" "Copy a prompt that has a coding agent add this server with the token" "Setup prompt copied: paste it to your agent.")}}
+      {{end}}
+    </div>
   </div>
 
   {{if .IPsRestricted}}<p class="muted small mcp-access-note">Connections are restricted to addresses in <code>ALLOWED_IPS</code>.</p>{{end}}
 
   <section class="mcp-connections">
-    <h2>Connected apps</h2>
+    <div class="page-heading">
+      <h2>Connected apps</h2>
+      {{/* Admins may list and disconnect the apps of another user. */}}
+      {{with .Owners}}
+      <form method="get" action="/agents" class="inline-form">
+        <input type="hidden" name="client" value="{{$.Data.Client}}" data-mcp-client>
+        <select name="user" aria-label="Whose apps" data-submit-on-change>
+          {{range .}}<option value="{{.ID}}" {{if eq .ID $.Data.OwnerID}}selected{{end}}>{{.Name}}{{if eq .ID $.Viewer.ID}} (you){{end}}</option>{{end}}
+        </select>
+        <noscript><button type="submit">Show</button></noscript>
+      </form>
+      {{end}}
+    </div>
     {{if .Connections}}
     <div class="mcp-connections-scroll">
       <table class="list mcp-connections-table">
@@ -75,11 +94,12 @@
         <tbody>
           {{range .Connections}}
           <tr>
-            <td><strong>{{.Name}}</strong><div class="muted small">{{if eq .Kind "token"}}Personal token{{else}}OAuth{{end}}</div></td>
+            <td><strong>{{.Name}}</strong><div class="muted small">{{if .Personal}}Personal token{{else}}OAuth{{end}}</div></td>
             <td><time datetime="{{isoTime .Connected}}" title="{{fullTime .Connected}}">{{.Connected.Format "Jan 02, 2006"}}</time></td>
             <td>{{with .LastActive}}<time datetime="{{isoTime .}}" title="{{fullTime .}}">{{timeAgo .}}</time>{{else}}<span class="muted">Not used yet</span>{{end}}</td>
             <td class="actions-column"><form method="post" action="/agents/{{.ID}}/disconnect">
               <input type="hidden" name="client" value="{{$.Data.Client}}" data-mcp-client>
+              {{if ne $.Data.OwnerID $.Viewer.ID}}<input type="hidden" name="user" value="{{$.Data.OwnerID}}">{{end}}
               <button class="secondary" type="submit" data-confirm="Disconnect this app? Its tokens will stop working immediately.">Disconnect</button>
             </form></td>
           </tr>

@@ -1,13 +1,12 @@
 package controllers
 
 import (
-	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
 
 	"github.com/devforth/exception-monitoring/internal/config"
 	"github.com/devforth/exception-monitoring/internal/mcp"
-	"github.com/devforth/exception-monitoring/internal/store"
 	"github.com/devforth/exception-monitoring/internal/ui/presenters"
 	"github.com/devforth/exception-monitoring/internal/ui/requests"
 )
@@ -20,9 +19,11 @@ func (controller *Controllers) AgentsPage(w http.ResponseWriter, r *http.Request
 }
 
 // renderAgents shows the page; token is a personal token just created,
-// shown this once (only its hash is stored).
+// shown this once (only its hash is stored). Admins may list the agents of
+// a user they manage (?user=).
 func (controller *Controllers) renderAgents(w http.ResponseWriter, r *http.Request, client, token string) {
-	grants, err := controller.agents.Grants(r.Context())
+	owner, _ := strconv.ParseInt(r.URL.Query().Get("user"), 10, 64)
+	page, err := controller.agents.Page(r.Context(), requests.Viewer(r), owner)
 
 	if err != nil {
 		controller.serverError(w, r, err)
@@ -31,8 +32,9 @@ func (controller *Controllers) renderAgents(w http.ResponseWriter, r *http.Reque
 	}
 
 	view := presenters.Agents(presenters.AgentsInput{
-		Endpoint: controller.projects.URL(r, mcp.Path), ServerName: config.MCPServerName(controller.appName), Client: client, Token: token, Grants: grants, Tools: mcp.Tools(),
+		Endpoint: controller.projects.URL(r, mcp.Path), ServerName: config.MCPServerName(controller.appName), Client: client, Token: token, Tools: mcp.Tools(),
 		IPsRestricted: controller.ipsRestricted, Unencrypted: controller.agents.Unencrypted(r),
+		Owner: page.Owner, Owners: page.Owners, Grants: page.Grants, TokenSet: page.TokenSet,
 	})
 
 	if requests.IsHTMX(r) {
@@ -44,9 +46,9 @@ func (controller *Controllers) renderAgents(w http.ResponseWriter, r *http.Reque
 	controller.views.Render(w, r, http.StatusOK, "agents", view)
 }
 
-// NewAgentToken replaces the personal token and shows the new one.
+// NewAgentToken replaces the viewer's personal token and shows the new one.
 func (controller *Controllers) NewAgentToken(w http.ResponseWriter, r *http.Request) {
-	token, err := controller.agents.NewPersonalToken(r.Context())
+	token, err := controller.agents.NewPersonalToken(r.Context(), requests.Viewer(r))
 
 	if err != nil {
 		controller.serverError(w, r, err)
@@ -57,24 +59,24 @@ func (controller *Controllers) NewAgentToken(w http.ResponseWriter, r *http.Requ
 	controller.renderAgents(w, r, "other", token)
 }
 
-// DisconnectAgent revokes a connected agent or the personal token.
+// DisconnectAgent revokes a connected agent or a personal token: the
+// viewer's own, or of a user they manage.
 func (controller *Controllers) DisconnectAgent(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(r.PathValue("grantID"), 10, 64)
+	id, ok := controller.pathID(w, r, "grantID")
 
-	if err != nil || id <= 0 {
-		http.NotFound(w, r)
-
+	if !ok {
 		return
 	}
 
-	err = controller.agents.Disconnect(r.Context(), id)
-
-	switch {
-	case errors.Is(err, store.ErrNotFound):
-		http.NotFound(w, r)
-	case err != nil:
-		controller.serverError(w, r, err)
-	default:
-		redirectAfterPost(w, r, "/agents?client="+presenters.AgentClient(r.PostFormValue("client")))
+	if controller.failed(w, r, controller.agents.Disconnect(r.Context(), requests.Viewer(r), id)) {
+		return
 	}
+
+	target := url.Values{"client": {presenters.AgentClient(r.PostFormValue("client"))}}
+
+	if owner := r.PostFormValue("user"); owner != "" {
+		target.Set("user", owner)
+	}
+
+	redirectAfterPost(w, r, "/agents?"+target.Encode())
 }

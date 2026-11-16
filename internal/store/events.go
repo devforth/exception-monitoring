@@ -128,7 +128,14 @@ func (store *Store) SaveEvent(ctx context.Context, event NewEvent) (SaveResult, 
 
 		if result.Regression {
 			newStatus = StatusUnresolved
+			// Recorded before the update, while the issue is still resolved.
+			err := recordStatusChanges(ctx, transaction, "?", []any{result.IssueID}, StatusUnresolved, Actor{Source: SourceEvent}, event.EventID, event.ReceivedAt)
+
+			if err != nil {
+				return result, fmt.Errorf("record reopening: %w", err)
+			}
 		}
+
 		// Title, culprit and level follow the latest event; ignored issues stay ignored.
 		_, err := transaction.ExecContext(ctx, `
 			UPDATE issues SET
@@ -171,8 +178,8 @@ func (store *Store) SaveEvent(ctx context.Context, event NewEvent) (SaveResult, 
 }
 
 // SetIssueStatus changes an issue's status (resolve, ignore, reopen).
-func (store *Store) SetIssueStatus(ctx context.Context, issueID int64, status string) error {
-	_, err := store.SetIssuesStatus(ctx, []int64{issueID}, status)
+func (store *Store) SetIssueStatus(ctx context.Context, issueID int64, status string, actor Actor) error {
+	_, err := store.SetIssuesStatus(ctx, []int64{issueID}, status, actor)
 
 	return err
 }

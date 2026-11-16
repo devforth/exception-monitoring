@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strconv"
 
 	"github.com/devforth/exception-monitoring/internal/config"
 	"github.com/devforth/exception-monitoring/internal/projects"
@@ -61,28 +60,15 @@ func (controller *Controllers) NewProjectPage(w http.ResponseWriter, r *http.Req
 // loadProject reads the project of the {projectID} path value; on failure it
 // has written the response.
 func (controller *Controllers) loadProject(w http.ResponseWriter, r *http.Request) (store.Project, bool) {
-	id, err := strconv.Atoi(r.PathValue("projectID"))
+	id, ok := controller.pathID(w, r, "projectID")
 
-	if err != nil {
-		http.NotFound(w, r)
-
+	if !ok {
 		return store.Project{}, false
 	}
 
-	project, err := controller.registry.Get(r.Context(), id)
+	project, err := controller.registry.Get(r.Context(), int(id))
 
-	switch {
-	case errors.Is(err, store.ErrNotFound):
-		http.NotFound(w, r)
-
-		return project, false
-	case err != nil:
-		controller.serverError(w, r, err)
-
-		return project, false
-	}
-
-	return project, true
+	return project, !controller.failed(w, r, err)
 }
 
 func (controller *Controllers) ProjectPage(w http.ResponseWriter, r *http.Request) {

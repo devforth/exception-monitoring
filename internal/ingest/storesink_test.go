@@ -150,7 +150,7 @@ func TestStoreSinkNotifies(t *testing.T) {
 		t.Fatalf("notification: %+v", first)
 	}
 
-	if err := database.SetIssueStatus(context.Background(), first.IssueID, store.StatusResolved); err != nil {
+	if err := database.SetIssueStatus(context.Background(), first.IssueID, store.StatusResolved, store.Actor{}); err != nil {
 		t.Fatal(err)
 	}
 

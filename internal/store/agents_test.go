@@ -31,8 +31,15 @@ func TestOAuthClientCapacityAndCleanup(t *testing.T) {
 	if err := database.RegisterOAuthClient(ctx, client); !errors.Is(err, ErrOAuthCapacity) {
 		t.Fatalf("capacity not enforced: %v", err)
 	}
+
+	user, err := database.CreateUser(ctx, User{Username: "admin", Role: RoleSuperadmin, CreatedAt: now}, "x")
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// Old clients with live authorization codes must survive cleanup.
-	if err := database.CreateOAuthCode(ctx, "pending-code", OAuthCode{ClientID: "1", RedirectURI: "https://client.example/callback", CodeChallenge: "challenge", ExpiresAt: now.Add(26 * time.Hour)}, now); err != nil {
+	if err := database.CreateOAuthCode(ctx, "pending-code", OAuthCode{UserID: user, ClientID: "1", RedirectURI: "https://client.example/callback", CodeChallenge: "challenge", ExpiresAt: now.Add(26 * time.Hour)}, now); err != nil {
 		t.Fatal(err)
 	}
 
@@ -68,7 +75,11 @@ func TestOAuthSecurityMigrationPreservesGrants(t *testing.T) {
 
 	now := time.Date(2026, 11, 13, 12, 0, 0, 0, time.UTC)
 
-	if err := database.ReplacePersonalToken(ctx, "personal-hash", now); err != nil {
+	// A personal token from before users existed.
+	_, err = database.DB.ExecContext(ctx, `INSERT INTO agent_grants (kind, name, access_hash, created_at) VALUES (?, 'Personal token', 'personal-hash', ?)`,
+		GrantToken, formatTime(now))
+
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -84,8 +95,23 @@ func TestOAuthSecurityMigrationPreservesGrants(t *testing.T) {
 
 	defer closeDatabase(t, database)
 
-	if _, err := database.UseGrant(ctx, "personal-hash", now); err != nil {
-		t.Fatal("upgrade invalidated existing token", err)
+	// Until it has a user, the token does not work; the superadmin adopts it.
+	if _, err := database.UseGrant(ctx, "personal-hash", now); !errors.Is(err, ErrNotFound) {
+		t.Fatal("a token without a user works", err)
+	}
+
+	superadmin, err := database.CreateUser(ctx, User{Username: "admin", Role: RoleSuperadmin, CreatedAt: now}, "x")
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := database.AdoptAgents(ctx, superadmin); err != nil {
+		t.Fatal(err)
+	}
+
+	if grant, err := database.UseGrant(ctx, "personal-hash", now); err != nil || grant.UserID != superadmin || grant.UserName != "admin" {
+		t.Fatal("upgrade invalidated existing token", grant, err)
 	}
 
 	if _, err := database.DB.ExecContext(ctx, `SELECT * FROM oauth_spent_refresh_tokens`); err != nil {

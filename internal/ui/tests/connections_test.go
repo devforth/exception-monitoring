@@ -1,4 +1,4 @@
-package ui_test
+package tests
 
 import (
 	"context"
@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/devforth/exception-monitoring/internal/fixtures"
-	"github.com/devforth/exception-monitoring/internal/ui"
 )
 
 // webhook is a fake Slack incoming webhook that keeps the posted bodies.
@@ -428,7 +427,7 @@ func TestResendCooldown(t *testing.T) {
 
 	expectNoMail(t, server, "a resend within the cooldown must not send mail")
 
-	restore := ui.SetResendCooldown(0)
+	restore := setResendCooldown(0)
 
 	defer restore()
 

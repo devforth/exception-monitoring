@@ -83,8 +83,9 @@ func (server *Server) CheckRequest(ctx context.Context, r *http.Request, params 
 	return request, server.checkResource(r, params.Get("resource"))
 }
 
-// Approve issues a code and returns where to send the browser.
-func (server *Server) Approve(ctx context.Context, r *http.Request, request Request) (string, error) {
+// Approve issues a code for the agent to act as userID (the user who
+// allowed it) and returns where to send the browser.
+func (server *Server) Approve(ctx context.Context, r *http.Request, request Request, userID int64) (string, error) {
 	code, err := newSecret("")
 
 	if err != nil {
@@ -92,7 +93,7 @@ func (server *Server) Approve(ctx context.Context, r *http.Request, request Requ
 	}
 
 	err = server.Store.CreateOAuthCode(ctx, hash(code), store.OAuthCode{
-		ClientID: request.ClientID, RedirectURI: request.RedirectURI, CodeChallenge: request.CodeChallenge,
+		UserID: userID, ClientID: request.ClientID, RedirectURI: request.RedirectURI, CodeChallenge: request.CodeChallenge,
 		ExpiresAt: server.now().Add(codeTTL),
 	}, server.now())
 

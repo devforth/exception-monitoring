@@ -66,6 +66,11 @@ func originPort(origin *url.URL) string {
 
 // requestLimit bounds per-address and total traffic. Its address map is
 // capped and reset each minute, so arbitrary addresses cannot grow it.
+const (
+	limitAddresses = 256 // addresses counted per minute
+	limitTotal     = 10  // all addresses together: this many times perMinute
+)
+
 type requestLimit struct {
 	mutex     sync.Mutex
 	start     time.Time
@@ -79,7 +84,7 @@ func (server *Server) limit(perMinute int, next http.HandlerFunc) http.Handler {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !limit.allow(access.ClientIP(r, server.TrustedProxies), server.now()) {
-			w.Header().Set("Retry-After", "60")
+			w.Header().Set("Retry-After", strconv.Itoa(int(time.Minute.Seconds()))) // the window ends within a minute
 			writeJSON(w, http.StatusTooManyRequests, oauthError("temporarily_unavailable", "too many requests: try again later"))
 
 			return
@@ -102,7 +107,7 @@ func (limit *requestLimit) allow(address netip.Addr, now time.Time) bool {
 
 	count := limit.counts[address]
 
-	if limit.total >= 10*limit.perMinute || count >= limit.perMinute || (count == 0 && len(limit.counts) >= 256) {
+	if limit.total >= limitTotal*limit.perMinute || count >= limit.perMinute || (count == 0 && len(limit.counts) >= limitAddresses) {
 		return false
 	}
 
@@ -123,8 +128,10 @@ func uniqueParams(params url.Values) *Error {
 }
 
 // PKCE verifiers are 43 to 128 unreserved ASCII characters (RFC 7636).
+const minVerifier, maxVerifier = 43, 128
+
 func validVerifier(verifier string) bool {
-	if len(verifier) < 43 || len(verifier) > 128 {
+	if len(verifier) < minVerifier || len(verifier) > maxVerifier {
 		return false
 	}
 

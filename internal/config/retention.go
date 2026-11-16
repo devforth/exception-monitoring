@@ -168,6 +168,29 @@ func FormatDuration(duration time.Duration) string {
 	return text
 }
 
+// HumanDuration writes a duration for people, in its largest whole unit:
+// "15 minutes", "1 hour", "30 days" (or as Go writes it when none fits).
+func HumanDuration(duration time.Duration) string {
+	for _, unit := range []struct {
+		size time.Duration
+		name string
+	}{{24 * time.Hour, "day"}, {time.Hour, "hour"}, {time.Minute, "minute"}, {time.Second, "second"}} {
+		if duration <= 0 || duration%unit.size != 0 {
+			continue
+		}
+
+		count := int(duration / unit.size)
+
+		if count == 1 {
+			return "1 " + unit.name
+		}
+
+		return strconv.Itoa(count) + " " + unit.name + "s"
+	}
+
+	return duration.String()
+}
+
 // ParseOptionalDuration is parseDuration that also accepts "0" (no limit).
 func ParseOptionalDuration(value string) (time.Duration, error) {
 	if value == "0" {

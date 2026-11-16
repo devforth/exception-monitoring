@@ -7,15 +7,18 @@ import (
 	"github.com/devforth/exception-monitoring/internal/oauth"
 	"github.com/devforth/exception-monitoring/internal/ui/contracts"
 	"github.com/devforth/exception-monitoring/internal/ui/middleware"
+	"github.com/devforth/exception-monitoring/internal/ui/requests"
 )
 
 // The consent page of the OAuth flow (package oauth): an agent asks for
 // access, the admin allows or denies it. The form token binds the decision
 // to this session and to the exact request shown.
-
+//
+// The page keeps the policy of every page, Referrer-Policy: same-origin: the
+// agent never gets its address (with the request) as a referrer, while the
+// form still carries its Origin. no-referrer would make browsers send
+// "Origin: null" with the form, which the CSRF check rejects.
 func (controller *Controllers) AuthorizePage(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Referrer-Policy", "no-referrer")
-
 	params := r.URL.Query()
 	request, err := controller.agents.CheckRequest(r.Context(), r, params)
 
@@ -33,7 +36,6 @@ func (controller *Controllers) AuthorizePage(w http.ResponseWriter, r *http.Requ
 }
 
 func (controller *Controllers) Authorize(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Referrer-Policy", "no-referrer")
 	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
 
 	if err := r.ParseForm(); err != nil {
@@ -59,7 +61,7 @@ func (controller *Controllers) Authorize(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	target, err := controller.agents.Decide(r.Context(), r, params, decision == "allow")
+	target, err := controller.agents.Decide(r.Context(), r, requests.Viewer(r), params, decision == "allow")
 
 	if err != nil {
 		controller.authorizationError(w, r, err)

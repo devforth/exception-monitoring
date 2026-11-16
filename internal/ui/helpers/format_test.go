@@ -10,8 +10,9 @@ func TestKeptFor(t *testing.T) {
 		0:                   "forever",
 		24 * time.Hour:      "1 day",
 		30 * 24 * time.Hour: "30 days",
-		36 * time.Hour:      "36h0m0s",
-		12 * time.Hour:      "12h0m0s",
+		36 * time.Hour:      "36 hours",
+		12 * time.Hour:      "12 hours",
+		15 * time.Minute:    "15 minutes",
 	} {
 		if got := KeptFor(duration); got != want {
 			t.Errorf("KeptFor(%v) = %q, want %q", duration, got, want)

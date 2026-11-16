@@ -41,7 +41,7 @@ func (slack Slack) Send(ctx context.Context, notification Notification) error {
 
 	lines := []string{
 		fmt.Sprintf("%s *%s* in `%s` · %s", icon, notification.Kind.label(), slackEscape(notification.Project), slackEscape(notification.Level)),
-		"*" + slackLink(notification.IssueURL, truncate(notification.Title, 300)) + "*",
+		"*" + slackLink(notification.IssueURL, truncate(notification.Title, titleLength)) + "*",
 	}
 
 	if details := notification.details(); details != "" {
@@ -83,7 +83,7 @@ func (slack Slack) SendSummary(ctx context.Context, summary Summary) error {
 	lines := []string{":warning: *" + summary.heading() + "*"}
 
 	for _, item := range summary.Items {
-		lines = append(lines, fmt.Sprintf("• `%s` %s", slackEscape(item.Project), slackLink(item.IssueURL, truncate(item.Title, 150))))
+		lines = append(lines, fmt.Sprintf("• `%s` %s", slackEscape(item.Project), slackLink(item.IssueURL, truncate(item.Title, shortTitleLength))))
 
 		if reference := mcpReference(slack.AppName, item); reference != "" {
 			lines = append(lines, "  `"+reference+"`")

@@ -58,11 +58,15 @@ func (controller *Controllers) BulkIssueAction(w http.ResponseWriter, r *http.Re
 
 // runAction applies the action and writes an error response if it fails.
 func (controller *Controllers) runAction(w http.ResponseWriter, r *http.Request, action string, issueIDs []int64) bool {
-	err := controller.issues.ApplyAction(r.Context(), action, issueIDs)
+	err := controller.issues.ApplyAction(r.Context(), requests.Viewer(r), action, issueIDs)
 
 	switch {
 	case errors.Is(err, services.ErrUnknownAction):
 		http.Error(w, "unknown action", http.StatusBadRequest)
+
+		return false
+	case errors.Is(err, services.ErrForbidden):
+		controller.NotFoundPage(w, r)
 
 		return false
 	case err != nil:

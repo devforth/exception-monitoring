@@ -257,7 +257,7 @@ func (store *Store) SeedProject(ctx context.Context, project Project, now time.T
 }
 
 func conflictError(err error) error {
-	if err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed") {
+	if isUniqueViolation(err) {
 		return fmt.Errorf("%w: %v", ErrProjectConflict, err)
 	}
 

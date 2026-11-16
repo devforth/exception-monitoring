@@ -23,7 +23,7 @@ build:
 # Values from the files override the shell, so one-off variables like
 # `LOG_LEVEL=debug make run` work only for keys the files don't set.
 run:
-	set -a; [ -f .env ] && . ./.env; [ -f .env.local ] && . ./.env.local; set +a; \
+	@set -a; [ -f .env ] && . ./.env; [ -f .env.local ] && . ./.env.local; set +a; \
 	go run ./cmd/exception-monitoring
 
 docker:

@@ -10,13 +10,13 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
 	"github.com/devforth/exception-monitoring/internal/api"
 	"github.com/devforth/exception-monitoring/internal/config"
 	"github.com/devforth/exception-monitoring/internal/ingest"
+	"github.com/devforth/exception-monitoring/internal/logging"
 	"github.com/devforth/exception-monitoring/internal/mcp"
 	"github.com/devforth/exception-monitoring/internal/notify"
 	"github.com/devforth/exception-monitoring/internal/oauth"
@@ -26,6 +26,7 @@ import (
 	"github.com/devforth/exception-monitoring/internal/server"
 	"github.com/devforth/exception-monitoring/internal/store"
 	"github.com/devforth/exception-monitoring/internal/ui"
+	"github.com/devforth/exception-monitoring/internal/ui/services"
 )
 
 // version is set at build time: -ldflags "-X main.version=..."
@@ -36,6 +37,17 @@ func main() {
 	// the image is FROM scratch, so there is no curl/wget inside.
 	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
 		os.Exit(healthcheck())
+	}
+
+	// `exception-monitoring reset-password [username]`: run on the server
+	// (docker exec), it is how a forgotten password is recovered.
+	if len(os.Args) > 1 && os.Args[1] == "reset-password" {
+		if err := resetPassword(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+
+		return
 	}
 
 	if err := run(); err != nil {
@@ -51,7 +63,7 @@ func run() error {
 		return err
 	}
 
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: settings.LogLevel}))
+	logger := logging.New(os.Stderr, settings.LogFormat, settings.LogLevel)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 
@@ -72,10 +84,6 @@ func run() error {
 
 	if settings.APIToken == "" {
 		logger.Warn("API_TOKEN is not set, the REST API is closed")
-	}
-
-	if settings.AdminPassword == "" {
-		logger.Warn("ADMIN_PASSWORD is not set, the web UI is closed")
 	}
 
 	if len(settings.AllowedIPs) == 0 {
@@ -179,7 +187,7 @@ func run() error {
 		IdleTimeout:       120 * time.Second,
 	}
 
-	logger.Info("server started", "version", version, "addr", listener.Addr().String(), "data_dir", settings.DataDir, "projects", len(registry.List()))
+	logger.Info("server started", logging.Block, "url", serverURL(settings, listener.Addr()), "version", version, "data_dir", settings.DataDir, "projects", len(registry.List()))
 
 	serveResult := make(chan error, 1)
 
@@ -207,11 +215,25 @@ func run() error {
 	return nil
 }
 
+// serverURL is where to open the server: PUBLIC_URL, or this machine at
+// the port it listens on.
+func serverURL(settings *config.Config, address net.Addr) string {
+	if settings.Notifications.PublicURL != "" {
+		return settings.Notifications.PublicURL
+	}
+
+	if tcp, ok := address.(*net.TCPAddr); ok {
+		return "http://localhost:" + strconv.Itoa(tcp.Port)
+	}
+
+	return address.String()
+}
+
 // logRetention says at startup what is kept, so a surprising deletion can be
 // traced to the settings.
 func logRetention(logger *slog.Logger, settings config.Retention) {
 	// Written as the settings take them; 0 means no limit.
-	logger.Info("retention",
+	logger.Info("retention", logging.Block,
 		"events", config.FormatDuration(settings.Events), "logs", config.FormatDuration(settings.Logs),
 		"issues", config.FormatDuration(settings.Issues), "events_per_issue", settings.EventsPerIssue,
 		"logs_per_message", settings.LogsPerMessage, "max_database_size", config.FormatSize(settings.MaxDatabaseBytes))
@@ -232,19 +254,25 @@ func notificationFactory(logger *slog.Logger, appName string, settings config.No
 		factory.Box = box
 	}
 
-	var available, unavailable []string
+	// One field per type: "on", or what is missing.
+	channels := []any{logging.Block}
+	available := false
 
 	for _, channelType := range config.AllChannelTypes {
+		state := "on"
+
 		if ok, reason := settings.ChannelAvailable(channelType); ok {
-			available = append(available, channelType)
+			available = true
 		} else {
-			unavailable = append(unavailable, channelType+" ("+reason+")")
+			state = "off: " + reason
 		}
+
+		channels = append(channels, channelType, state)
 	}
 
-	logger.Info("notification connection types", "available", strings.Join(available, ", "), "unavailable", strings.Join(unavailable, "; "))
+	logger.Info("notification channels", channels...)
 
-	if settings.PublicURL == "" && len(available) > 0 {
+	if settings.PublicURL == "" && available {
 		logger.Warn("PUBLIC_URL is not set, notifications will not link to the issue")
 	}
 
@@ -274,4 +302,57 @@ func healthcheck() int {
 	}
 
 	return 0
+}
+
+// resetPassword gives a user (the superadmin when no username is given) a
+// temporary password and prints it: they choose their own at the next
+// login. Their sessions end; connected agents keep working.
+func resetPassword(args []string) error {
+	if len(args) > 1 {
+		return errors.New("usage: exception-monitoring reset-password [username]")
+	}
+
+	settings, err := config.Load()
+
+	if err != nil {
+		return err
+	}
+
+	ctx := context.Background()
+	database, err := store.Open(ctx, settings.DataDir)
+
+	if err != nil {
+		return err
+	}
+
+	defer func() { _ = database.Close() }()
+
+	username := ""
+
+	if len(args) == 1 {
+		username = args[0]
+	} else {
+		superadmin, err := database.Superadmin(ctx)
+
+		if err != nil {
+			return fmt.Errorf("no superadmin yet: set ADMIN_PASSWORD and start the server: %w", err)
+		}
+
+		username = superadmin.Username
+	}
+
+	users := services.NewUsers(logging.New(os.Stderr, settings.LogFormat, settings.LogLevel), database)
+	password, err := users.SetPasswordByOperator(ctx, username)
+
+	if errors.Is(err, store.ErrNotFound) {
+		return fmt.Errorf("no user %q", username)
+	}
+
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Temporary password of %s: %s\nLog in with it and choose a new password.\n", username, password)
+
+	return nil
 }

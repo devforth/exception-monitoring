@@ -12,30 +12,84 @@ import (
 	"github.com/devforth/exception-monitoring/internal/ui/services"
 )
 
-// RequireLogin sends anonymous visitors to the login page. For htmx requests
-// a redirect would be swapped into the page, so HX-Redirect asks htmx to do a
-// full navigation instead.
+// RequireLogin sends anonymous visitors to the login page; the user goes
+// with the request (WithSession). For htmx requests a redirect would be
+// swapped into the page, so HX-Redirect asks htmx to do a full navigation
+// instead.
 func RequireLogin(auth *services.Auth) func(next http.HandlerFunc) http.HandlerFunc {
+	withSession := WithSession(auth)
+
+	return func(next http.HandlerFunc) http.HandlerFunc {
+		return withSession(func(w http.ResponseWriter, r *http.Request) {
+			if requests.Viewer(r).ID == 0 {
+				redirect(w, r, "/login?next="+url.QueryEscape(r.URL.RequestURI()))
+
+				return
+			}
+
+			next(w, r)
+		})
+	}
+}
+
+// RequirePasswordChanged sends users who logged in with a temporary
+// password to accountPage until they choose their own. Inside RequireLogin;
+// the account routes go without it.
+func RequirePasswordChanged(accountPage string) func(next http.HandlerFunc) http.HandlerFunc {
 	return func(next http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
-			if auth.LoggedIn(r) {
-				next(w, r)
+			if requests.Viewer(r).MustChangePassword {
+				redirect(w, r, accountPage)
 
 				return
 			}
 
-			target := "/login?next=" + url.QueryEscape(r.URL.RequestURI())
-
-			if requests.IsHTMX(r) {
-				w.Header().Set("HX-Redirect", target)
-				w.WriteHeader(http.StatusUnauthorized)
-
-				return
-			}
-
-			http.Redirect(w, r, target, http.StatusSeeOther)
+			next(w, r)
 		}
 	}
+}
+
+// RequireAdmin answers notFound to users whose role cannot administer
+// (projects, notifications, users): they do not learn the pages exist.
+// Inside RequireLogin.
+func RequireAdmin(notFound http.HandlerFunc) func(next http.HandlerFunc) http.HandlerFunc {
+	return func(next http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			if !requests.Viewer(r).CanAdminister() {
+				notFound(w, r)
+
+				return
+			}
+
+			next(w, r)
+		}
+	}
+}
+
+// WithSession passes the user of a valid session with the request
+// (requests.Viewer), if any, without requiring one (the 404 page shows the
+// menu to logged-in users).
+func WithSession(auth *services.Auth) func(next http.HandlerFunc) http.HandlerFunc {
+	return func(next http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			if user, ok := auth.SessionUser(r); ok {
+				r = requests.WithViewer(r, user)
+			}
+
+			next(w, r)
+		}
+	}
+}
+
+func redirect(w http.ResponseWriter, r *http.Request, target string) {
+	if requests.IsHTMX(r) {
+		w.Header().Set("HX-Redirect", target)
+		w.WriteHeader(http.StatusUnauthorized)
+
+		return
+	}
+
+	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
 // SameOrigin rejects state-changing requests sent from other sites (CSRF).

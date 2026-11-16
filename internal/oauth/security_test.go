@@ -17,6 +17,9 @@ import (
 	"github.com/devforth/exception-monitoring/internal/store"
 )
 
+// testUserID is the user testAuthorization creates.
+const testUserID = 1
+
 func testAuthorization(t *testing.T) (*Server, http.Handler) {
 	t.Helper()
 	database, err := store.Open(context.Background(), t.TempDir())
@@ -30,6 +33,11 @@ func testAuthorization(t *testing.T) (*Server, http.Handler) {
 			t.Error(err)
 		}
 	})
+
+	// The user agents act for (users are created by the UI).
+	if _, err := database.CreateUser(context.Background(), store.User{Username: "admin", Role: store.RoleSuperadmin, CreatedAt: time.Now()}, "x"); err != nil {
+		t.Fatal(err)
+	}
 
 	server := &Server{Store: database, PublicURL: "https://errors.example.com", ResourcePath: "/mcp", Now: func() time.Time { return time.Date(2026, 11, 13, 12, 0, 0, 0, time.UTC) }}
 	router := http.NewServeMux()
@@ -78,7 +86,7 @@ func testCode(t *testing.T, server *Server, client store.OAuthClient) url.Values
 		t.Fatal(err)
 	}
 
-	callback, err := server.Approve(context.Background(), request, checked)
+	callback, err := server.Approve(context.Background(), request, checked, testUserID)
 
 	if err != nil {
 		t.Fatal(err)
@@ -113,7 +121,7 @@ func exchange(t *testing.T, handler http.Handler, form url.Values, status int) m
 
 func TestOriginProtection(t *testing.T) {
 	server, handler := testAuthorization(t)
-	token, err := server.NewPersonalToken(context.Background())
+	token, err := server.NewPersonalToken(context.Background(), testUserID)
 
 	if err != nil {
 		t.Fatal(err)
@@ -399,7 +407,7 @@ func TestConcurrentTokenExchanges(t *testing.T) {
 			}
 
 			if refresh {
-				grants, err := server.Store.ListGrants(context.Background(), server.now())
+				grants, err := server.Store.ListGrants(context.Background(), testUserID, server.now())
 
 				if err != nil || len(grants) != 0 {
 					t.Fatalf("concurrent replay did not revoke grant: %v %+v", err, grants)

@@ -7,6 +7,13 @@ import (
 
 const maxBody = 16 << 10
 
+// Requests per client address and minute to the open endpoints: agents
+// register once and refresh about hourly, so these leave plenty of room.
+const (
+	registrationsPerMinute = 30
+	tokenRequestsPerMinute = 120
+)
+
 func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
@@ -31,8 +38,8 @@ func (server *Server) Register(router *http.ServeMux, protect func(http.Handler)
 		"GET /.well-known/openid-configuration":        http.HandlerFunc(server.authorizationServerMetadata),
 		"GET /.well-known/openid-configuration/":       http.HandlerFunc(server.authorizationServerMetadata),
 		"GET " + jwksPath:                              http.HandlerFunc(server.jwks),
-		"POST " + RegisterPath:                         server.limit(30, server.register),
-		"POST " + TokenPath:                            server.limit(120, server.token),
+		"POST " + RegisterPath:                         server.limit(registrationsPerMinute, server.register),
+		"POST " + TokenPath:                            server.limit(tokenRequestsPerMinute, server.token),
 	}
 
 	for pattern, route := range routes {

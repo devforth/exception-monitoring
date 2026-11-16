@@ -295,6 +295,60 @@ CREATE INDEX oauth_spent_refresh_grant ON oauth_spent_refresh_tokens(grant_id);
 CREATE INDEX oauth_codes_client ON oauth_codes(client_id);
 CREATE INDEX agent_grants_client ON agent_grants(client_id);
 `},
+	{17, `
+-- Users of the panel instead of the one admin from env. One superadmin (the
+-- partial unique index), admins and users. Passwords are stored as salted
+-- PBKDF2 hashes; must_change_password is set for a password someone else gave.
+CREATE TABLE users (
+	id                   INTEGER PRIMARY KEY,
+	username             TEXT NOT NULL UNIQUE COLLATE NOCASE,
+	name                 TEXT NOT NULL DEFAULT '',
+	role                 TEXT NOT NULL,
+	password_hash        TEXT NOT NULL,
+	must_change_password INTEGER NOT NULL DEFAULT 0,
+	created_at           TEXT NOT NULL,
+	last_login_at        TEXT
+);
+CREATE UNIQUE INDEX users_one_superadmin ON users (role) WHERE role = 'superadmin';
+-- A session belongs to a user; the sessions of the env admin end.
+DROP TABLE sessions;
+CREATE TABLE sessions (
+	token_hash TEXT PRIMARY KEY,
+	user_id    INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+	created_at TEXT NOT NULL,
+	expires_at TEXT NOT NULL
+);
+CREATE INDEX sessions_by_expiry ON sessions (expires_at);
+CREATE INDEX sessions_by_user ON sessions (user_id);
+-- Connected agents act for the user who connected them. Existing ones get
+-- the superadmin when it is created (NULL until then).
+ALTER TABLE agent_grants ADD COLUMN user_id INTEGER REFERENCES users (id) ON DELETE CASCADE;
+ALTER TABLE oauth_codes ADD COLUMN user_id INTEGER REFERENCES users (id) ON DELETE CASCADE;
+CREATE INDEX agent_grants_by_user ON agent_grants (user_id);
+-- Who changed an issue's status and when: a user (by name, kept after the
+-- user is deleted), the API token, or a new event that reopened it.
+CREATE TABLE issue_status_changes (
+	id          INTEGER PRIMARY KEY,
+	issue_id    INTEGER NOT NULL REFERENCES issues (id) ON DELETE CASCADE,
+	from_status TEXT NOT NULL,
+	to_status   TEXT NOT NULL,
+	user_id     INTEGER REFERENCES users (id) ON DELETE SET NULL,
+	user_name   TEXT NOT NULL DEFAULT '',
+	source      TEXT NOT NULL,
+	event_id    TEXT NOT NULL DEFAULT '',
+	created_at  TEXT NOT NULL
+);
+CREATE INDEX issue_status_changes_by_issue ON issue_status_changes (issue_id, id);
+`},
+	{18, `
+-- Deleting a user or revoking their agents finds their rows by user.
+CREATE INDEX issue_status_changes_by_user ON issue_status_changes (user_id) WHERE user_id IS NOT NULL;
+CREATE INDEX oauth_codes_by_user ON oauth_codes (user_id);
+`},
+	{19, `
+-- A user without a name is named after the username (as saved from now on).
+UPDATE users SET name = username WHERE name = '';
+`},
 }
 
 func migrate(ctx context.Context, db *sql.DB, migrationList []migration) error {

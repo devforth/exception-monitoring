@@ -157,7 +157,7 @@ func TestVerificationCodeEmail(t *testing.T) {
 	subject, text, html := fixtures.ParseEmail(t, session.Data)
 
 	if !strings.Contains(strings.Join(session.Commands, "\n"), "RCPT TO:<new@example.com>") || !strings.Contains(subject, "482913") ||
-		!strings.Contains(text, "482913") || !strings.Contains(html, "482913") || !strings.Contains(html, "Backend &lt;team&gt;") || !strings.Contains(text, "15m") {
+		!strings.Contains(text, "482913") || !strings.Contains(html, "482913") || !strings.Contains(html, "Backend &lt;team&gt;") || !strings.Contains(text, "15 minutes") {
 		t.Fatalf("subject %q\ntext:\n%s\nhtml:\n%s", subject, text, html)
 	}
 }

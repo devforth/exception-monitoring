@@ -38,11 +38,14 @@ type Notifications struct {
 	KeepFailed time.Duration
 }
 
+// ImplicitTLSPort is the SMTP port that speaks TLS from the start (SMTPS).
+const ImplicitTLSPort = 465
+
 // SMTP is the mail server for email notifications and verification codes.
 // Any provider works: Mailtrap, Mailgun, Amazon SES, Gmail, a local Postfix.
 type SMTP struct {
 	Host     string
-	Port     int // 465 means implicit TLS; other ports use STARTTLS when offered
+	Port     int // ImplicitTLSPort means implicit TLS; other ports use STARTTLS when offered
 	Username string
 	Password string
 	From     string

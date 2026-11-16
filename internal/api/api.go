@@ -56,6 +56,9 @@ func (handler *Handler) Register(router *http.ServeMux, protect func(http.Handle
 		"GET /api/v1/projects/{projectID}/events/{eventID}": handler.getEvent,
 		"GET /api/v1/logs":                                  handler.listLogs,
 		"GET /api/v1/traces/{traceID}":                      handler.getTrace,
+		// Any other /api/ address: a JSON 404, not the UI's page. Less
+		// specific than the ingest route, so it does not overlap it.
+		"/api/": func(w http.ResponseWriter, _ *http.Request) { httpjson.Error(w, http.StatusNotFound, "not found") },
 	}
 
 	for pattern, route := range routes {

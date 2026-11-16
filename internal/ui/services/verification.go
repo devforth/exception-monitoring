@@ -103,7 +103,8 @@ func (verification *Verification) SendCode(ctx context.Context, destination stor
 
 		step.Error = "The email could not be sent: " + err.Error()
 	} else {
-		step.Notice = "We sent a 6-digit code to " + destination.Address + ". It is valid for 15 minutes."
+		step.Notice = fmt.Sprintf("We sent a %d-digit code to %s. It is valid for %s.",
+			contracts.VerificationCodeDigits, destination.Address, config.HumanDuration(verificationCodeLifetime))
 	}
 
 	return step, nil
@@ -143,7 +144,8 @@ func codeHash(destinationID int64, code string) string {
 }
 
 func newVerificationCode() string {
-	number, _ := rand.Int(rand.Reader, big.NewInt(1_000_000))
+	limit := new(big.Int).Exp(big.NewInt(10), big.NewInt(contracts.VerificationCodeDigits), nil)
+	number, _ := rand.Int(rand.Reader, limit)
 
-	return fmt.Sprintf("%06d", number.Int64())
+	return fmt.Sprintf("%0*d", contracts.VerificationCodeDigits, number.Int64())
 }

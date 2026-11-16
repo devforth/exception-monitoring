@@ -3,7 +3,6 @@ package controllers
 import (
 	"cmp"
 	"context"
-	"errors"
 	"fmt"
 	"maps"
 	"net/http"
@@ -63,28 +62,15 @@ func (controller *Controllers) NewConnectionPage(w http.ResponseWriter, r *http.
 // loadConnection reads the connection of the {connectionID} path value; on
 // failure it has written the response (404 or 500).
 func (controller *Controllers) loadConnection(w http.ResponseWriter, r *http.Request) (store.Connection, bool) {
-	id, err := strconv.ParseInt(r.PathValue("connectionID"), 10, 64)
+	id, ok := controller.pathID(w, r, "connectionID")
 
-	if err != nil {
-		http.NotFound(w, r)
-
+	if !ok {
 		return store.Connection{}, false
 	}
 
 	connection, err := controller.connections.Get(r.Context(), id)
 
-	switch {
-	case errors.Is(err, store.ErrNotFound):
-		http.NotFound(w, r)
-
-		return connection, false
-	case err != nil:
-		controller.serverError(w, r, err)
-
-		return connection, false
-	}
-
-	return connection, true
+	return connection, !controller.failed(w, r, err)
 }
 
 func (controller *Controllers) ConnectionPage(w http.ResponseWriter, r *http.Request) {

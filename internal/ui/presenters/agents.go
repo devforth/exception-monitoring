@@ -2,6 +2,7 @@ package presenters
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"github.com/devforth/exception-monitoring/internal/mcp"
 	"github.com/devforth/exception-monitoring/internal/store"
@@ -10,11 +11,14 @@ import (
 
 // AgentsInput is what the MCP page shows.
 type AgentsInput struct {
-	Endpoint      string // the MCP endpoint
-	ServerName    string // what agents list it under (config.MCPServerName)
-	Client        string // the selected tab (?client=)
-	Token         string // a personal token just created, or empty
+	Endpoint      string       // the MCP endpoint
+	ServerName    string       // what agents list it under (config.MCPServerName)
+	Client        string       // the selected tab (?client=)
+	Token         string       // a personal token just created, or empty
+	Owner         store.User   // whose grants are listed
+	Owners        []store.User // whom the viewer may choose
 	Grants        []store.Grant
+	TokenSet      bool // the viewer has a personal token
 	Tools         []mcp.ToolInfo
 	IPsRestricted bool
 	Unencrypted   bool
@@ -33,23 +37,34 @@ func Agents(input AgentsInput) contracts.AgentsView {
 		PersonalToken: input.Token, PersonalTokenPreview: maskToken(input.Token),
 	}
 
+	if input.Token != "" {
+		view.SetupPrompt = setupPrompt(input.ServerName, input.Endpoint, input.Token)
+	}
+
+	view.OwnerID = input.Owner.ID
+
+	// A choice only for those who may see someone else's agents.
+	if len(input.Owners) > 1 {
+		for _, user := range input.Owners {
+			view.Owners = append(view.Owners, contracts.AgentOwner{ID: user.ID, Name: user.DisplayName()})
+		}
+	}
+
 	for _, tab := range agentTabs {
 		tab.Active = tab.ID == view.Client
 		view.Tabs = append(view.Tabs, tab)
 	}
 
-	for _, grant := range input.Grants {
-		if grant.Kind == store.GrantToken {
-			view.PersonalTokenSet = true
+	view.PersonalTokenSet = input.TokenSet
 
-			// An unused personal token is not a connected app yet.
-			if grant.LastUsedAt == nil {
-				continue
-			}
+	for _, grant := range input.Grants {
+		// An unused personal token is not a connected app yet.
+		if grant.Kind == store.GrantToken && grant.LastUsedAt == nil {
+			continue
 		}
 
 		view.Connections = append(view.Connections, contracts.AgentConnection{
-			ID: grant.ID, Name: grant.Name, Kind: grant.Kind, Connected: grant.CreatedAt, LastActive: grant.LastUsedAt,
+			ID: grant.ID, Name: grant.Name, Personal: grant.Kind == store.GrantToken, Connected: grant.CreatedAt, LastActive: grant.LastUsedAt,
 		})
 	}
 
@@ -58,6 +73,31 @@ func Agents(input AgentsInput) contracts.AgentsView {
 	}
 
 	return view
+}
+
+// setupPrompt asks a coding agent to add the MCP server with a personal
+// token itself and to check that it works. The token is shown once, so is
+// the prompt.
+func setupPrompt(serverName, endpoint, token string) string {
+	header := "Authorization: Bearer " + token
+
+	return fmt.Sprintf(`Add the MCP server %[1]q to your own MCP configuration: it gives you the errors and logs of my applications.
+
+- Transport: Streamable HTTP
+- URL: %[2]s
+- Header: %[3]s
+
+Add it at user level, not in a file of a repository: the token is a secret.
+- Claude Code: claude mcp add --transport http --scope user %[1]s %[2]s --header %[4]q
+- Codex, in ~/.codex/config.toml:
+  [mcp_servers.%[1]s]
+  url = %[2]q
+  http_headers = { Authorization = %[5]q }
+- Another client: the same URL and header in its MCP settings.
+
+Then check the connection: call the list_projects tool and tell me which projects you see. If you must be restarted to load the server, tell me. If it is not reachable, show me the error and do not try other URLs.
+Never repeat the token in your answers, files or commits.
+`, serverName, endpoint, header, header, "Bearer "+token)
 }
 
 // maskToken shows the start and end of a token, enough to recognize it.

@@ -2,13 +2,17 @@
 package config
 
 import (
+	"cmp"
 	"fmt"
 	"log/slog"
 	"net/netip"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/devforth/exception-monitoring/internal/logging"
 )
 
 // Project is a source of events (e.g. "backend", "frontend") with its own DSN.
@@ -62,9 +66,10 @@ func (projects Projects) List() Projects {
 	return projects
 }
 
-// ValidProjectName: lowercase letters, digits, '-' and '_' (used in URLs and filters).
+// ValidProjectName: lowercase letters, digits, '-' and '_' (used in URLs and
+// filters), up to MaxProjectName.
 func ValidProjectName(name string) bool {
-	return projectNameRe.MatchString(name)
+	return len(name) <= MaxProjectName && projectNameRe.MatchString(name)
 }
 
 // ValidPublicKey: 16-64 letters or digits (the DSN key).
@@ -105,7 +110,10 @@ type Config struct {
 	Port     int
 	DataDir  string
 	LogLevel slog.Level
-	Projects Projects
+	// LogFormat (LOG_FORMAT): auto (pretty in a terminal, text otherwise),
+	// pretty, text or json; see package logging.
+	LogFormat string
+	Projects  Projects
 	// AllowedOrigins lists the browser origins allowed to send events (CORS).
 	// ["*"] allows any origin. Requests without an Origin header (backend SDKs) are always allowed.
 	AllowedOrigins []string
@@ -120,7 +128,8 @@ type Config struct {
 	// TrustedProxies are reverse proxies whose X-Forwarded-For header is used
 	// to find the client address. Empty means the header is ignored.
 	TrustedProxies []netip.Prefix
-	// AdminUsername and AdminPassword log in to the web UI.
+	// AdminUsername and AdminPassword create the superadmin at the first
+	// start (while there is none); later they are not used.
 	// An empty password means the UI is closed.
 	AdminUsername string
 	AdminPassword string
@@ -144,12 +153,27 @@ const (
 
 	// MinAPITokenLength keeps tokens out of brute-force range.
 	MinAPITokenLength = 32
-	// MinAdminPasswordLength: logins are rate limited, but the UI is often public.
-	MinAdminPasswordLength = 12
+	// MinPasswordLength applies to every user's password: logins are rate
+	// limited, but the UI is often public.
+	MinPasswordLength = 12
+	// Users: the username (letters, digits and . _ @ -, UsernamePattern) and
+	// the display name; passwords up to MaxPasswordLength.
+	MaxUsername       = 64
+	MaxUserName       = 100
+	MaxPasswordLength = 256
+	// UsernamePattern is also the pattern attribute of the form, hence the
+	// escaped '-'; Go's regexp accepts it too.
+	UsernamePattern = `[A-Za-z0-9._@\-]+`
+	// MaxProjectName is the longest project name.
+	MaxProjectName = 64
+	// ProjectNamePattern: lowercase letters, digits, '-' and '_', starting
+	// with a letter or digit. Also the pattern attribute of the project form,
+	// hence the escaped '-'.
+	ProjectNamePattern = `[a-z0-9][a-z0-9_\-]*`
 )
 
 var (
-	projectNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
+	projectNameRe = regexp.MustCompile(`^` + ProjectNamePattern + `$`)
 	publicKeyRe   = regexp.MustCompile(`^[A-Za-z0-9]{16,64}$`)
 	originRe      = regexp.MustCompile(`^https?://([a-z0-9.-]+|\[[0-9a-f:]+\])(:[0-9]{1,5})?$`)
 )
@@ -200,6 +224,12 @@ func loadFrom(getenv func(string) string) (*Config, error) {
 		}
 	}
 
+	config.LogFormat = cmp.Or(strings.ToLower(getenv("LOG_FORMAT")), logging.FormatAuto)
+
+	if !slices.Contains(logging.Formats, config.LogFormat) {
+		return nil, fmt.Errorf("LOG_FORMAT: %q is not one of %s", config.LogFormat, strings.Join(logging.Formats, ", "))
+	}
+
 	if value := getenv("ALLOWED_ORIGINS"); value != "" {
 		origins, err := parseOrigins(value)
 
@@ -233,8 +263,8 @@ func loadFrom(getenv func(string) string) (*Config, error) {
 	}
 
 	if value := getenv("ADMIN_PASSWORD"); value != "" {
-		if len([]rune(value)) < MinAdminPasswordLength {
-			return nil, fmt.Errorf("ADMIN_PASSWORD: must be at least %d characters", MinAdminPasswordLength)
+		if len([]rune(value)) < MinPasswordLength {
+			return nil, fmt.Errorf("ADMIN_PASSWORD: must be at least %d characters", MinPasswordLength)
 		}
 
 		config.AdminPassword = value

@@ -429,12 +429,14 @@ document.addEventListener("change", (event) => {
   updateConnectionForm(form);
 });
 
-// A field outside its form (form= attribute, like the page size under a
-// list): its events do not reach the form, so submit the form for it.
+// Submit the form of a field whose events do not reach it: one outside its
+// form (form= attribute, like the page size under a list), or a select that
+// shows something else when changed (data-submit-on-change, whose MCP apps).
 document.addEventListener("change", (event) => {
   const field = event.target;
+  const outside = field.form && field.hasAttribute("form") && !field.form.contains(field);
 
-  if (field.form && field.hasAttribute("form") && !field.form.contains(field)) {
+  if (outside || field.matches("select[data-submit-on-change]")) {
     field.form.requestSubmit();
   }
 });

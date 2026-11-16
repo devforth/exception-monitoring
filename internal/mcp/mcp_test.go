@@ -53,8 +53,15 @@ func newTestServer(t *testing.T, configure ...func(*config.Config)) *testServer 
 		change(settings)
 	}
 
+	// The agent acts for this user (users are created by the UI).
+	userID, err := database.CreateUser(context.Background(), store.User{Username: "admin", Role: store.RoleSuperadmin, CreatedAt: time.Now()}, "x")
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	authorization := &oauth.Server{Store: database, ResourcePath: mcp.Path}
-	token, err := authorization.NewPersonalToken(context.Background())
+	token, err := authorization.NewPersonalToken(context.Background(), userID)
 
 	if err != nil {
 		t.Fatal(err)
@@ -314,6 +321,13 @@ func TestUpdateIssueStatus(t *testing.T) {
 
 	if len(updated.Issues) != 1 || updated.Issues[0].Status != "resolved" {
 		t.Fatalf("updated: %+v", updated)
+	}
+
+	// The history names the user the agent acts for.
+	history, err := server.database.IssueStatusHistory(context.Background(), target.ID)
+
+	if err != nil || len(history) != 1 || history[0].Name != "admin" || history[0].UserID == 0 || history[0].Source != store.SourceMCP {
+		t.Fatalf("history: %+v %v", history, err)
 	}
 
 	// The default list shows unresolved issues only.

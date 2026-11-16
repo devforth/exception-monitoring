@@ -1,6 +1,6 @@
 // Package services is the logic behind the UI pages that is not HTTP, and
-// the only way the pages reach the database: admin sessions and the login
-// limit, issues, their events and actions, logs, project DSNs, colors and
+// the only way the pages reach the database: users, their sessions and the
+// login limit, issues, their events and actions, logs, project DSNs, colors and
 // storage, notification connections (duplicates, default names, saving),
 // the delivery log and email verification codes. Controllers call it; it
 // returns data or the view types of contracts and never writes a response
@@ -9,21 +9,24 @@
 package services
 
 import (
+	"cmp"
 	"context"
 	"crypto/hmac"
-	"crypto/pbkdf2"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
-	"fmt"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/netip"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/devforth/exception-monitoring/internal/access"
+	"github.com/devforth/exception-monitoring/internal/config"
 	"github.com/devforth/exception-monitoring/internal/store"
 )
 
@@ -48,38 +51,6 @@ func newToken() string {
 	_, _ = rand.Read(token[:])
 
 	return hex.EncodeToString(token[:])
-}
-
-// CredentialsIterations follows the OWASP recommendation for PBKDF2-SHA256.
-// A variable only so tests can lower it (internal/ui/export_test.go): the race detector
-// makes 600k iterations take seconds per test server.
-var CredentialsIterations = 600_000
-
-// CredentialsFingerprint identifies the current admin credentials. It is stored
-// with each session, so changing the username or password invalidates all
-// sessions. A slow key derivation keeps the password out of reach if the
-// database file leaks. Computed once at startup.
-func CredentialsFingerprint(username, password string) (string, error) {
-	if password == "" {
-		return "", nil // UI disabled: nobody can log in, there is nothing to tie sessions to
-	}
-
-	key, err := pbkdf2.Key(sha256.New, password, []byte("exception-monitoring-session:"+username), CredentialsIterations, 32)
-
-	if err != nil {
-		return "", fmt.Errorf("derive credentials fingerprint: %w", err)
-	}
-
-	return hex.EncodeToString(key), nil
-}
-
-// credentialsMatch compares both values in constant time and always checks
-// both, so the response time does not tell which one was wrong.
-func credentialsMatch(username, password, wantUsername, wantPassword string) bool {
-	usernameOK := subtle.ConstantTimeCompare([]byte(username), []byte(wantUsername))
-	passwordOK := subtle.ConstantTimeCompare([]byte(password), []byte(wantPassword))
-
-	return usernameOK&passwordOK == 1
 }
 
 // loginLimiter counts failed logins per client address in a fixed window.
@@ -143,31 +114,38 @@ func IsHTTPS(r *http.Request, trustedProxies []netip.Prefix) bool {
 	return access.IsHTTPS(r, trustedProxies)
 }
 
-// Auth is the admin login: credentials, sessions and the limit on failed logins.
+// Auth is the login of the panel's users: sessions and the limit on failed logins.
 type Auth struct {
-	logger        *slog.Logger
-	store         *store.Store
-	adminUsername string
-	adminPassword string
-	// credentials fingerprints the admin username and password; sessions are
-	// valid only with the fingerprint they were created with.
-	credentials    string
+	logger         *slog.Logger
+	store          *store.Store
 	trustedProxies []netip.Prefix
 	limiter        *loginLimiter
 	now            func() time.Time
+	// opened: a superadmin exists, so the UI is open; it never stops
+	// existing, so the database is asked only until then.
+	opened atomic.Bool
 }
 
-func NewAuth(logger *slog.Logger, database *store.Store, adminUsername, adminPassword, credentials string, trustedProxies []netip.Prefix) *Auth {
-	return &Auth{
-		logger: logger, store: database, adminUsername: adminUsername, adminPassword: adminPassword,
-		credentials: credentials, trustedProxies: trustedProxies, limiter: newLoginLimiter(), now: time.Now,
+func NewAuth(logger *slog.Logger, database *store.Store, trustedProxies []netip.Prefix) *Auth {
+	return &Auth{logger: logger, store: database, trustedProxies: trustedProxies, limiter: newLoginLimiter(), now: time.Now}
+}
+
+// Disabled: there is no superadmin yet (ADMIN_PASSWORD was never set), so
+// nobody can log in.
+func (auth *Auth) Disabled(ctx context.Context) bool {
+	if auth.opened.Load() {
+		return false
 	}
+
+	_, err := auth.store.Superadmin(ctx)
+	auth.opened.Store(err == nil)
+
+	return errors.Is(err, store.ErrNotFound)
 }
 
-// Disabled: no admin password is set, so nobody can log in.
-func (auth *Auth) Disabled() bool {
-	return auth.adminPassword == ""
-}
+// TooManyAttempts is what a blocked address is told, at login and when
+// changing the password.
+var TooManyAttempts = "Too many wrong passwords. Try again in " + config.HumanDuration(LoginWindow) + "."
 
 // LoginResult is the outcome of a login attempt.
 type LoginResult int
@@ -190,13 +168,16 @@ func (auth *Auth) Login(w http.ResponseWriter, r *http.Request, username, passwo
 		return LoginBlocked, nil
 	}
 
-	if !credentialsMatch(username, password, auth.adminUsername, auth.adminPassword) {
-		// A single wrong password is a typo, not an event: only a blocked
-		// address (likely password guessing) is logged. What was typed is
-		// never logged, it may be a password entered in the wrong field.
-		if auth.limiter.fail(client, now) {
-			auth.logger.Warn("too many failed UI logins, address blocked", "client", client.String(), "attempts", MaxLoginFailures, "for", LoginWindow)
-		}
+	user, hash, err := auth.store.FindLogin(r.Context(), strings.TrimSpace(username))
+
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return LoginWrongCredentials, err
+	}
+
+	// An unknown username is checked against a dummy hash, so the response
+	// time does not tell which usernames exist.
+	if !checkPassword(cmp.Or(hash, dummyPasswordHash()), password) || user.ID == 0 {
+		auth.failed(client, now)
 
 		return LoginWrongCredentials, nil
 	}
@@ -204,16 +185,61 @@ func (auth *Auth) Login(w http.ResponseWriter, r *http.Request, username, passwo
 	auth.limiter.reset(client)
 
 	// A new session every login.
-	if err := auth.startSession(r.Context(), w, r, now); err != nil {
+	if err := auth.startSession(r.Context(), w, r, user.ID, now); err != nil {
 		return LoginWrongCredentials, err
 	}
 
-	return LoginOK, nil
+	return LoginOK, auth.store.RecordLogin(r.Context(), user.ID, now)
+}
+
+// failed counts a wrong password from client. A single one is a typo, not an
+// event: only a blocked address (likely password guessing) is logged. What
+// was typed is never logged, it may be a password entered in the wrong field.
+func (auth *Auth) failed(client netip.Addr, now time.Time) {
+	if auth.limiter.fail(client, now) {
+		auth.logger.Warn("too many wrong passwords, address blocked", "client", client.String(), "attempts", MaxLoginFailures, "for", LoginWindow)
+	}
+}
+
+// ChangePassword replaces the viewer's own password after checking the
+// current one, which counts against the same limit as logins (a stolen
+// session must not become a way to guess the password). The viewer's other
+// sessions end; their agents stay connected, since it is the owner who
+// changes it.
+func (auth *Auth) ChangePassword(r *http.Request, viewer store.User, current, password, confirm string) (Problems, error) {
+	client := access.ClientIP(r, auth.trustedProxies)
+	now := auth.now()
+
+	if auth.limiter.blocked(client, now) {
+		return Problems{"current_password": TooManyAttempts}, nil
+	}
+
+	hash, err := auth.store.UserPassword(r.Context(), viewer.ID)
+
+	if err != nil {
+		return nil, err
+	}
+
+	problems := Problems{}
+
+	if !checkPassword(hash, current) {
+		auth.failed(client, now)
+
+		problems["current_password"] = "The current password is wrong."
+	}
+
+	checkNewPassword(problems, current, password, confirm)
+
+	if len(problems) > 0 {
+		return problems, nil
+	}
+
+	return nil, setPassword(r.Context(), auth.store, viewer.ID, password, store.PasswordChange{KeepSession: SessionHash(r)})
 }
 
 // startSession creates a new session and sets its cookie. A session cookie
 // the browser already had (possibly planted) is ended, never reused.
-func (auth *Auth) startSession(ctx context.Context, w http.ResponseWriter, r *http.Request, now time.Time) error {
+func (auth *Auth) startSession(ctx context.Context, w http.ResponseWriter, r *http.Request, userID int64, now time.Time) error {
 	if cookie, err := r.Cookie(sessionCookie); err == nil && cookie.Value != "" {
 		if err := auth.store.DeleteSession(ctx, hashToken(cookie.Value)); err != nil {
 			auth.logger.Error("delete previous session", "err", err)
@@ -223,7 +249,7 @@ func (auth *Auth) startSession(ctx context.Context, w http.ResponseWriter, r *ht
 	token := newToken()
 	expires := now.Add(sessionLifetime)
 
-	if err := auth.store.CreateSession(ctx, hashToken(token), auth.credentials, now, expires); err != nil {
+	if err := auth.store.CreateSession(ctx, hashToken(token), userID, now, expires); err != nil {
 		return err
 	}
 
@@ -257,26 +283,36 @@ func (auth *Auth) setSessionCookie(w http.ResponseWriter, r *http.Request, token
 	})
 }
 
-// LoggedIn reports whether the request carries a valid session.
-func (auth *Auth) LoggedIn(r *http.Request) bool {
+// SessionUser returns the user of the request's session; false without a
+// valid session.
+func (auth *Auth) SessionUser(r *http.Request) (store.User, bool) {
+	hash := SessionHash(r)
+
+	if hash == "" {
+		return store.User{}, false
+	}
+
+	user, err := auth.store.SessionUser(r.Context(), hash, auth.now())
+
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		auth.logger.Error("check session", "err", err)
+	}
+
+	return user, err == nil
+}
+
+// SessionHash identifies the request's session as stored ("" without one).
+func SessionHash(r *http.Request) string {
 	cookie, err := r.Cookie(sessionCookie)
 
 	if err != nil || cookie.Value == "" {
-		return false
+		return ""
 	}
 
-	valid, err := auth.store.SessionValid(r.Context(), hashToken(cookie.Value), auth.credentials, auth.now())
-
-	if err != nil {
-		auth.logger.Error("check session", "err", err)
-
-		return false
-	}
-
-	return valid
+	return hashToken(cookie.Value)
 }
 
-// FormToken binds an authorization form to this admin session and request.
+// FormToken binds an authorization form to this session and request.
 // The session cookie is random and HttpOnly, so another site cannot forge it.
 func (auth *Auth) FormToken(r *http.Request, value string) string {
 	cookie, err := r.Cookie(sessionCookie)

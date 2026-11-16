@@ -519,10 +519,7 @@ func scanIssue(row scanner) (Issue, error) {
 	issue.FirstSeen = parseTime(firstSeen)
 	issue.LastSeen = parseTime(lastSeen)
 
-	if resolvedAt.Valid {
-		resolved := parseTime(resolvedAt.String)
-		issue.ResolvedAt = &resolved
-	}
+	issue.ResolvedAt = parseOptionalTime(resolvedAt)
 
 	return issue, nil
 }
@@ -548,6 +545,35 @@ func scanEventSummary(row scanner, event *EventSummary, extra ...any) error {
 func parseTime(value string) time.Time {
 	parsed, _ := time.Parse(timeFormat, value)
 	return parsed
+}
+
+// parseOptionalTime reads a nullable time column: nil for NULL.
+func parseOptionalTime(value sql.NullString) *time.Time {
+	if !value.Valid {
+		return nil
+	}
+
+	parsed := parseTime(value.String)
+
+	return &parsed
+}
+
+// isUniqueViolation: the statement broke a UNIQUE constraint.
+func isUniqueViolation(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")
+}
+
+// affectedOne turns "no row changed" of a statement into ErrNotFound.
+func affectedOne(result sql.Result, err error) error {
+	if err != nil {
+		return err
+	}
+
+	if rows, err := result.RowsAffected(); err != nil || rows == 0 {
+		return errors.Join(err, ErrNotFound)
+	}
+
+	return nil
 }
 
 // likePattern turns user text into a LIKE "contains" pattern, escaping % and _.

@@ -1,4 +1,4 @@
-package ui_test
+package tests
 
 import (
 	"net/http"
@@ -50,28 +50,30 @@ func TestLogin(t *testing.T) {
 	}
 }
 
-func TestSessionsFollowCredentials(t *testing.T) {
+// ADMIN_USERNAME/ADMIN_PASSWORD create the superadmin at the first start
+// only: later starts with other values change nothing, and sessions survive
+// restarts.
+func TestSuperadminFromEnvOnce(t *testing.T) {
 	database := openDatabase(t)
 
 	first := startServer(t, database, "admin", password)
 	first.login()
 
-	// A restart with the same credentials keeps the session.
-	restarted := startServer(t, database, "admin", password)
-	restarted.cookie = first.cookie
+	for _, credentials := range [][2]string{{"admin", password}, {"admin", "another password"}, {"root", "another password"}} {
+		restarted := startServer(t, database, credentials[0], credentials[1])
+		restarted.cookie = first.cookie
 
-	if response := restarted.get("/issues"); response.Code != http.StatusOK {
-		t.Fatalf("same credentials after restart: %d", response.Code)
+		if response := restarted.get("/issues"); response.Code != http.StatusOK {
+			t.Fatalf("restart with %q: %d", credentials[0], response.Code)
+		}
+
+		if response := restarted.post("/login", url.Values{"username": {credentials[0]}, "password": {"another password"}}); response.Code != http.StatusUnauthorized {
+			t.Fatalf("the env password of a restart logs in: %d", response.Code)
+		}
 	}
 
-	// Changing the password or the username logs everyone out.
-	for _, credentials := range [][2]string{{"admin", "another password"}, {"root", password}} {
-		changed := startServer(t, database, credentials[0], credentials[1])
-		changed.cookie = first.cookie
-
-		if response := changed.get("/issues"); response.Code != http.StatusSeeOther {
-			t.Fatalf("after changing to %q: %d, want a redirect to login", credentials[0], response.Code)
-		}
+	if users := first.page("/users"); strings.Count(users, `href="/users/`) != 1 || strings.Contains(users, ">root<") {
+		t.Errorf("a restart created a user:\n%s", users)
 	}
 }
 

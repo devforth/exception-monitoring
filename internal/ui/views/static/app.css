@@ -383,7 +383,7 @@ a.button:hover { text-decoration: none; border-color: var(--muted); }
 .error { padding: 8px 12px; border-radius: 6px; background: var(--error-bg); color: var(--error); }
 .field-error { margin: -6px 0 10px; color: var(--error); font-size: 12px; }
 .connection-form { display: flex; flex-direction: column; gap: 12px; max-width: 620px; margin-top: 16px; }
-.connection-form > label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 13px; }
+.connection-form > label, .connection-form > .field { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 13px; }
 .connection-form input[type="text"], .connection-form input:not([type]), .connection-form input[type="email"] { width: 100%; }
 fieldset { border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; margin: 0; background: var(--surface); }
 legend { padding: 0 4px; color: var(--muted); font-size: 13px; }
@@ -452,7 +452,8 @@ pre.snippet { background: var(--code-bg); padding: 10px; border-radius: 6px; ove
 .mcp-token-row { display: flex; gap: 8px; align-items: center; }
 .mcp-token-row > code { padding: 9px 12px; background: var(--code-bg); border-radius: 6px; }
 .mcp-token-row > input { flex: 1; min-width: 0; }
-.mcp-token-form { margin-top: 12px; }
+.mcp-token-form { margin-top: 12px; align-items: center; }
+.mcp-token-form .copy-button { margin-left: 0; }
 .secret-copy-fallback { position: fixed; left: -9999px; top: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .mcp-connections { margin-top: 28px; }
 .mcp-connections-scroll { overflow-x: auto; }
@@ -480,3 +481,23 @@ th.number.sortable a { flex-direction: row-reverse; }
 .sort-arrows path { opacity: .3; }
 .sort-arrows.asc .up, .sort-arrows.desc .down { opacity: 1; }
 th[aria-sort] { color: var(--text); }
+
+/* Users and the account page. */
+.temporary-password { margin: 12px 0; padding: 12px; border: 1px solid var(--warning); border-radius: 8px; background: var(--warning-bg); }
+.temporary-password .copy-row { max-width: 520px; }
+.badge.role-superadmin { color: var(--info); background: var(--info-bg); }
+.badge.role-admin, .badge.role-user { color: var(--text); background: var(--code-bg); }
+/* The account link sits in a nav of its own above Log out. */
+.sidebar nav.sidebar-account { flex: none; }
+.status-history { list-style: none; margin: 0; padding: 0; }
+.status-history li { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.status-history li:last-child { border-bottom: none; }
+/* A DSN with its copy button (projects). */
+.dsn-row { margin-top: 4px; align-items: center; }
+.dsn-row .copy-button { height: 34px; }
+/* The 404 page: in the middle of the screen. */
+.not-found { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; min-height: 70vh; margin: 0; text-align: center; }
+.not-found h1 { margin: 0; }
+.not-found p { margin: 0; }
+.not-found .not-found-code { color: var(--muted); font-size: 64px; font-weight: 700; line-height: 1; }
+.not-found .button { margin-top: 12px; }

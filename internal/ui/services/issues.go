@@ -82,30 +82,76 @@ var issueActions = map[string]string{
 
 var ErrUnknownAction = errors.New("unknown action")
 
-// ApplyAction runs action on each issue. An issue that no longer exists
-// (deleted from another tab) is skipped, the others are still processed.
-func (issues *Issues) ApplyAction(ctx context.Context, action string, issueIDs []int64) error {
+// ApplyAction runs action on the issues for the viewer, who is recorded in
+// the status history; deleting needs CanAdminister. Statuses change in
+// batches, one transaction each. An issue that no longer exists (deleted
+// from another tab) is skipped, the others are still processed.
+func (issues *Issues) ApplyAction(ctx context.Context, viewer store.User, action string, issueIDs []int64) error {
 	status, ok := issueActions[action]
 
 	if !ok {
 		return ErrUnknownAction
 	}
 
-	for _, issueID := range issueIDs {
+	if action == "delete" && !viewer.CanAdminister() {
+		return ErrForbidden
+	}
+
+	for batch := range slices.Chunk(issueIDs, store.MaxIssueBatch) {
 		var err error
 
 		if action == "delete" {
-			err = issues.store.DeleteIssue(ctx, issueID)
+			err = issues.deleteBatch(ctx, batch)
 		} else {
-			err = issues.store.SetIssueStatus(ctx, issueID, status)
+			err = issues.setStatus(ctx, batch, status, viewer.Actor(store.SourceUI))
 		}
 
-		if err != nil && !errors.Is(err, store.ErrNotFound) {
-			return fmt.Errorf("%s issue %d: %w", action, issueID, err)
+		if err != nil {
+			return fmt.Errorf("%s issues: %w", action, err)
 		}
 	}
 
 	return nil
+}
+
+func (issues *Issues) deleteBatch(ctx context.Context, issueIDs []int64) error {
+	for _, issueID := range issueIDs {
+		if err := issues.store.DeleteIssue(ctx, issueID); err != nil && !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// setStatus changes the issues of a batch that still exist. The batch
+// update is all or nothing, so one deleted meanwhile means another try
+// without it.
+func (issues *Issues) setStatus(ctx context.Context, issueIDs []int64, status string, actor store.Actor) error {
+	for {
+		existing, err := issues.store.GetIssues(ctx, issueIDs)
+
+		if err != nil || len(existing) == 0 {
+			return err
+		}
+
+		ids := make([]int64, len(existing))
+
+		for index, issue := range existing {
+			ids[index] = issue.ID
+		}
+
+		_, err = issues.store.SetIssuesStatus(ctx, ids, status, actor)
+
+		if !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
+	}
+}
+
+// History lists the status changes of an issue, newest first.
+func (issues *Issues) History(ctx context.Context, issueID int64) ([]store.StatusChange, error) {
+	return issues.store.IssueStatusHistory(ctx, issueID)
 }
 
 // TraceLogs counts the logs of the event's trace: its trace ID links to

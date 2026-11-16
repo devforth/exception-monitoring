@@ -1,0 +1,47 @@
+{{define "title"}}Your account{{end}}
+
+{{define "content"}}
+{{$user := $.Viewer}}
+{{with .Data}}
+<h1>Your account</h1>
+<p class="muted">{{$user.Username}} · {{template "badge" (label "role" $user.Role)}}</p>
+
+{{with .Notice}}<p class="notice-success" role="status">{{.}}</p>{{end}}
+
+{{if $user.MustChangePassword}}
+<p class="notice-warning" role="alert">You logged in with a temporary password: choose your own to continue.</p>
+{{else}}
+<section>
+  <h2>Name</h2>
+  <form class="connection-form" method="post" action="/account/name">
+    <label>Name <span class="muted small">(shown in the menu and in issue histories; empty: your username)</span>
+      <input name="name" value="{{$user.DisplayName}}" maxlength="{{limits.UserName}}" autocomplete="name">
+    </label>
+    {{with index .Errors "name"}}<p class="field-error">{{.}}</p>{{end}}
+    <div class="actions"><button type="submit" class="primary">Save name</button></div>
+  </form>
+</section>
+{{end}}
+
+<section>
+  <h2>Password</h2>
+  <form class="connection-form" method="post" action="/account/password">
+    <input type="hidden" name="username" value="{{$user.Username}}" autocomplete="username">
+    <label>Current password
+      <input type="password" name="current_password" autocomplete="current-password" required>
+    </label>
+    {{with index .Errors "current_password"}}<p class="field-error">{{.}}</p>{{end}}
+    <label>New password <span class="muted small">(at least {{limits.MinPassword}} characters)</span>
+      <input type="password" name="password" autocomplete="new-password" minlength="{{limits.MinPassword}}" required>
+    </label>
+    {{with index .Errors "password"}}<p class="field-error">{{.}}</p>{{end}}
+    <label>Repeat the new password
+      <input type="password" name="confirm_password" autocomplete="new-password" minlength="{{limits.MinPassword}}" required>
+    </label>
+    {{with index .Errors "confirm_password"}}<p class="field-error">{{.}}</p>{{end}}
+    <p class="muted small">Your other sessions are logged out; your connected coding agents keep working.</p>
+    <div class="actions"><button type="submit" class="primary">Change password</button></div>
+  </form>
+</section>
+{{end}}
+{{end}}

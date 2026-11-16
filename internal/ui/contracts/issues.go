@@ -58,6 +58,17 @@ type IssueData struct {
 	TraceLogs   int
 	AgentPrompt string
 	SelectedID  string
+	// History is who changed the status and when, newest first.
+	History []store.StatusChange
+}
+
+// LastChange is the latest status change, for the header; nil without one.
+func (data IssueData) LastChange() *store.StatusChange {
+	if len(data.History) == 0 {
+		return nil
+	}
+
+	return &data.History[0]
 }
 
 type LogsData struct {

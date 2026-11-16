@@ -1,0 +1,20 @@
+{{/* Badges and values shown the same way everywhere. */}}
+
+{{/* A project or level badge (lists.Badge): a link when it has a URL, a
+     label otherwise, with a × when it has a RemoveURL. Build it with
+     projectBadge / levelBadge / statusBadge (links; inside a list pass its
+     filter to filter that list) or label (in checkboxes). */}}
+{{define "badge"}}{{if .URL}}<a {{template "badge-class" .}} href="{{.URL}}" title="Show only {{.Name}}">{{template "badge-text" .}}</a>{{else}}<span {{template "badge-class" .}}>{{template "badge-text" .}}{{with .RemoveURL}}<a class="badge-remove" href="{{.}}" title="Remove" aria-label="Remove">×</a>{{end}}</span>{{end}}{{end}}
+{{define "badge-class"}}{{if eq .Kind "project"}}class="project" data-project="{{.Name}}"{{else if eq .Kind "status"}}class="status status-{{.Name}}"{{else if eq .Kind "role"}}class="badge role-{{.Name}}"{{else}}class="badge {{levelClass .Name}}"{{end}}{{end}}
+{{define "badge-text"}}{{if eq .Kind "status"}}{{template "status-icon" .Name}} {{end}}{{.Name}}{{end}}
+
+{{/* What an issue status means: the tooltip of its icon and of an issue row. */}}
+{{define "status-title"}}{{if eq . "resolved"}}Resolved: fixed, reopens if the error happens again{{else if eq . "ignored"}}Ignored: no notifications, stays ignored{{else}}Unresolved: still happening or not looked at yet{{end}}{{end}}
+{{/* Status icon: ● unresolved, ✓ resolved, ⊘ ignored; hovering it says what the status means, the name is for screen readers. */}}
+{{define "status-icon"}}<span class="status-icon status-{{.}}" title="{{template "status-title" .}}" role="img" aria-label="{{.}}">{{if eq . "resolved"}}✓{{else if eq . "ignored"}}⊘{{else}}●{{end}}</span>{{end}}
+
+{{/* A time as "5 minutes ago", the exact UTC time on hover. */}}
+{{define "time"}}<time datetime="{{isoTime .}}" title="{{fullTime .}}">{{timeAgo .}}</time>{{end}}
+
+{{/* A log line; app.js shows "Expand" when it is taller than the box. */}}
+{{define "log-body"}}<div class="log-text"><pre class="log-body">{{cleanLog .}}</pre><div class="log-actions"><button type="button" class="link small expand" hidden>Expand</button><button type="button" class="link small full-screen">Full screen</button></div></div>{{end}}

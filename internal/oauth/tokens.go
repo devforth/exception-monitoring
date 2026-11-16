@@ -89,7 +89,7 @@ func (server *Server) redeemCode(r *http.Request) (map[string]any, error) {
 		return nil, err
 	}
 
-	grant := store.Grant{Kind: store.GrantOAuth, ClientID: client.ID, Name: client.Name, CreatedAt: server.now()}
+	grant := store.Grant{UserID: code.UserID, Kind: store.GrantOAuth, ClientID: client.ID, Name: client.Name, CreatedAt: server.now()}
 
 	if _, err := server.Store.CreateGrant(r.Context(), grant, tokens); err != nil {
 		return nil, err

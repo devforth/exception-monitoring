@@ -43,7 +43,7 @@
 
     <div class="bulk-bar">
       <span class="bulk-count muted">Select issues to change them together</span>
-      {{template "issue-action-buttons" "bulk"}}
+      {{template "issue-action-buttons" (issueActions "bulk" $.Viewer.CanAdminister)}}
     </div>
 
     <table class="list issues-table">

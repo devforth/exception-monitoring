@@ -175,13 +175,16 @@ func (handler *Handler) updateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := handler.store.SetIssueStatus(r.Context(), issueID, body.Status); err != nil {
+	if err := handler.store.SetIssueStatus(r.Context(), issueID, body.Status, apiActor); err != nil {
 		handler.fail(w, r, err)
 		return
 	}
 
 	handler.getIssue(w, r)
 }
+
+// apiActor is who changes a status through the REST API: its one token.
+var apiActor = store.Actor{Name: "API token", Source: store.SourceAPI}
 
 func (handler *Handler) deleteIssue(w http.ResponseWriter, r *http.Request) {
 	issueID, err := pathID(r, "issueID")

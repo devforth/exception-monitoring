@@ -161,6 +161,15 @@ func TestAccessControl(t *testing.T) {
 	if code := request("203.0.113.7:1", "/api/1/envelope/", false); code == http.StatusForbidden {
 		t.Fatal("ingest must not be behind the IP allowlist")
 	}
+
+	// An unknown API address: a JSON 404, behind the same protection.
+	if code := request("10.1.1.1:1", "/api/v1/no-such-route", true); code != http.StatusNotFound {
+		t.Fatalf("unknown route: %d", code)
+	}
+
+	if code := request("10.1.1.1:1", "/api/v1/no-such-route", false); code != http.StatusUnauthorized {
+		t.Fatalf("unknown route without token: %d", code)
+	}
 }
 
 func TestProjects(t *testing.T) {

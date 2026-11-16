@@ -49,9 +49,7 @@
       </td>
       <td>
         <div class="actions connection-actions">
-          <a class="button" href="/notifications/{{.ID}}" title="Edit" aria-label="Edit {{.Name}}">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m16 3 5 5-12 12-6 1 1-6Z M14 5l5 5"/></svg>
-          </a>
+          {{template "edit-link" (editLink (printf "/notifications/%d" .ID) (printf "Edit %s" .Name))}}
           <form method="post" action="/notifications/{{.ID}}/delete">
             <button type="submit" class="danger" title="Delete" aria-label="Delete {{.Name}}" data-confirm="Delete the connection {{.Name}}? Its queued messages are dropped; a confirmed address stays confirmed.">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18 M9 6V3h6v3 M5 6l1 15h12l1-15 M10 10v7 M14 10v7"/></svg>

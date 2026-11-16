@@ -92,6 +92,7 @@ func TestLoadErrors(t *testing.T) {
 		{"bad port", "PORT", "abc", "PORT"},
 		{"port out of range", "PORT", "70000", "PORT"},
 		{"bad log level", "LOG_LEVEL", "loud", "LOG_LEVEL"},
+		{"bad log format", "LOG_FORMAT", "fancy", "LOG_FORMAT"},
 		{"data dir with query char", "DATA_DIR", "/srv/data?x", "DATA_DIR"},
 		{"data dir with percent", "DATA_DIR", "/mnt/disk 100%", "DATA_DIR"},
 		{"old format without id", "PROJECTS", "backend:a1b2c3d4e5f6a7b8", "expected id:name:public_key"},

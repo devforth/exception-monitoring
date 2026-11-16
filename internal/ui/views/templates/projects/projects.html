@@ -4,7 +4,7 @@
 {{with .Data}}
 <div class="page-heading">
   <h1>Projects</h1>
-  <a class="button primary" href="/projects/new">Add project</a>
+  {{if $.Viewer.CanAdminister}}<a class="button primary" href="/projects/new">Add project</a>{{end}}
 </div>
 
 {{with .Notice}}<p class="notice-success" role="status">{{.}}</p>{{end}}
@@ -34,7 +34,12 @@
         {{template "badge" (projectBadge .Name)}}
         <div class="muted small">#{{.ID}}{{if .FromEnv}} · from PROJECTS{{end}}</div>
       </td>
-      <td><input class="dsn" value="{{.DSN}}" readonly aria-label="DSN of {{.Name}}"></td>
+      <td>
+        <div class="copy-row dsn-row">
+          <input class="dsn" id="dsn-{{.ID}}" value="{{.DSN}}" readonly aria-label="DSN of {{.Name}}">
+          {{template "copy-button" (copyButton (printf "dsn-%d" .ID) "" (printf "Copy the DSN of %s" .Name) "DSN copied to clipboard.")}}
+        </div>
+      </td>
       <td class="number"><a href="/issues?project={{.Name}}">{{.UnresolvedIssues}}</a></td>
       <td class="small">
         <div>{{if .EventLevels}}{{range .EventLevels}}{{template "badge" (levelBadge .)}} {{end}}{{else if eq .EventLevels nil}}all errors{{else}}<span class="muted">no errors</span>{{end}}</div>
@@ -43,13 +48,13 @@
       <td class="muted small">{{or .Retention "default"}}</td>
       <td>
         <div class="actions connection-actions">
-          <a class="button" href="/projects/{{.ID}}" title="Settings" aria-label="Settings of {{.Name}}">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m16 3 5 5-12 12-6 1 1-6Z M14 5l5 5"/></svg>
-          </a>
+          {{if $.Viewer.CanAdminister}}
+          {{template "edit-link" (editLink (printf "/projects/%d" .ID) (printf "Settings of %s" .Name))}}
+          {{end}}
           <a class="button" href="/logs?project={{.Name}}" title="Logs" aria-label="Logs of {{.Name}}">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16 M4 12h16 M4 18h10"/></svg>
           </a>
-          {{if not .FromEnv}}
+          {{if and $.Viewer.CanAdminister (not .FromEnv)}}
           <form method="post" action="/projects/{{.ID}}/delete">
             <button type="submit" class="danger" title="Delete" aria-label="Delete {{.Name}}" data-confirm="Delete the project {{.Name}} with all its issues, events and logs? Its DSN stops working. This cannot be undone.">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18 M9 6V3h6v3 M5 6l1 15h12l1-15 M10 10v7 M14 10v7"/></svg>

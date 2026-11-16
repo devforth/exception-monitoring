@@ -105,9 +105,14 @@ func oauthError(code, description string) *Error {
 	return &Error{Code: code, Description: description}
 }
 
+// Codes and tokens are secretBytes random bytes, written in base64url.
+const secretBytes = 32
+
+var secretLength = base64.RawURLEncoding.EncodedLen(secretBytes)
+
 // newSecret returns a random token with prefix.
 func newSecret(prefix string) (string, error) {
-	random := make([]byte, 32)
+	random := make([]byte, secretBytes)
 
 	if _, err := rand.Read(random); err != nil {
 		return "", err
@@ -123,13 +128,13 @@ func hash(secret string) string {
 }
 
 func validSecret(secret, prefix string) bool {
-	if !strings.HasPrefix(secret, prefix) || len(secret) != len(prefix)+43 {
+	if !strings.HasPrefix(secret, prefix) || len(secret) != len(prefix)+secretLength {
 		return false
 	}
 
 	random, err := base64.RawURLEncoding.Strict().DecodeString(strings.TrimPrefix(secret, prefix))
 
-	return err == nil && len(random) == 32
+	return err == nil && len(random) == secretBytes
 }
 
 // Authenticate returns the grant of a bearer token (an OAuth access token or
@@ -147,6 +152,8 @@ func (server *Server) Authenticate(ctx context.Context, token string) (store.Gra
 // with the address of the protected resource metadata, where agents find how
 // to sign in.
 func (server *Server) Protect(next http.Handler) http.Handler {
+	next = withGrant(next)
+
 	return server.guard(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		header := r.Header.Get("Authorization")
 		scheme, token, found := strings.Cut(header, " ")
@@ -158,7 +165,7 @@ func (server *Server) Protect(next http.Handler) http.Handler {
 			return
 		}
 
-		_, err := server.Authenticate(r.Context(), strings.TrimSpace(token))
+		grant, err := server.Authenticate(r.Context(), strings.TrimSpace(token))
 
 		switch {
 		case errors.Is(err, store.ErrNotFound):
@@ -166,7 +173,7 @@ func (server *Server) Protect(next http.Handler) http.Handler {
 		case err != nil:
 			http.Error(w, "internal error", http.StatusInternalServerError)
 		default:
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), grantKey{}, grant)))
 		}
 	}))
 }
@@ -176,21 +183,27 @@ func unauthorized(w http.ResponseWriter, challenge, message string) {
 	writeJSON(w, http.StatusUnauthorized, oauthError("invalid_token", message))
 }
 
-// NewPersonalToken replaces the personal token and returns the new one; it
-// is shown once, only its hash is stored.
-func (server *Server) NewPersonalToken(ctx context.Context) (string, error) {
+// NewPersonalToken replaces the user's personal token and returns the new
+// one; it is shown once, only its hash is stored.
+func (server *Server) NewPersonalToken(ctx context.Context, userID int64) (string, error) {
 	token, err := newSecret(personalPrefix)
 
 	if err != nil {
 		return "", err
 	}
 
-	return token, server.Store.ReplacePersonalToken(ctx, hash(token), server.now())
+	return token, server.Store.ReplacePersonalToken(ctx, userID, hash(token), server.now())
 }
 
-// Grants lists the connected agents and the personal token, newest first.
-func (server *Server) Grants(ctx context.Context) ([]store.Grant, error) {
-	return server.Store.ListGrants(ctx, server.now())
+// Grants lists the connected agents and the personal token of a user,
+// newest first.
+func (server *Server) Grants(ctx context.Context, userID int64) ([]store.Grant, error) {
+	return server.Store.ListGrants(ctx, userID, server.now())
+}
+
+// Grant reads a grant, to check whose it is.
+func (server *Server) Grant(ctx context.Context, grantID int64) (store.Grant, error) {
+	return server.Store.GetGrant(ctx, grantID)
 }
 
 // Disconnect revokes a grant: its tokens stop working at once.

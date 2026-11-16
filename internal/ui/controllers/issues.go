@@ -3,7 +3,6 @@ package controllers
 import (
 	"errors"
 	"net/http"
-	"strconv"
 
 	"github.com/devforth/exception-monitoring/internal/sentry"
 	"github.com/devforth/exception-monitoring/internal/store"
@@ -79,26 +78,16 @@ func (controller *Controllers) IssuesPage(w http.ResponseWriter, r *http.Request
 
 // loadIssue reads the issue from the {issueID} path value. When it fails it
 // has already written the response (404 or 500) and returns ok == false.
-func (controller *Controllers) loadIssue(w http.ResponseWriter, r *http.Request) (issue contracts.IssueRow, ok bool) {
-	issueID, err := strconv.ParseInt(r.PathValue("issueID"), 10, 64)
+func (controller *Controllers) loadIssue(w http.ResponseWriter, r *http.Request) (contracts.IssueRow, bool) {
+	issueID, ok := controller.pathID(w, r, "issueID")
 
-	if err != nil {
-		http.NotFound(w, r)
-
+	if !ok {
 		return contracts.IssueRow{}, false
 	}
 
 	stored, err := controller.issues.Get(r.Context(), issueID)
 
-	if errors.Is(err, store.ErrNotFound) {
-		http.NotFound(w, r)
-
-		return contracts.IssueRow{}, false
-	}
-
-	if err != nil {
-		controller.serverError(w, r, err)
-
+	if controller.failed(w, r, err) {
 		return contracts.IssueRow{}, false
 	}
 
@@ -120,6 +109,14 @@ func (controller *Controllers) IssuePage(w http.ResponseWriter, r *http.Request)
 	var err error
 
 	data.Events, err = controller.issues.RecentEvents(r.Context(), issue.ID)
+
+	if err != nil {
+		controller.serverError(w, r, err)
+
+		return
+	}
+
+	data.History, err = controller.issues.History(r.Context(), issue.ID)
 
 	if err != nil {
 		controller.serverError(w, r, err)

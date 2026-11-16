@@ -1,4 +1,4 @@
-package ui_test
+package tests
 
 import (
 	"fmt"
@@ -146,5 +146,32 @@ func TestMenuGroupsAndCounter(t *testing.T) {
 
 	if page := server.page("/logs"); !strings.Contains(page, fmt.Sprintf(`aria-label="%d unresolved"`, len(ids)-1)) {
 		t.Error("the counter does not follow a resolved issue")
+	}
+}
+
+// Unknown addresses, missing records and pages a role may not open all get
+// the same 404 page, with the way back home.
+func TestNotFoundPage(t *testing.T) {
+	server := newTestServer(t, password)
+
+	anonymous := server.get("/no-such-page")
+
+	if body := anonymous.Body.String(); anonymous.Code != http.StatusNotFound || !strings.Contains(body, `class="not-found"`) || strings.Contains(body, `class="sidebar"`) {
+		t.Fatalf("anonymous: %d %s", anonymous.Code, body)
+	}
+
+	server.login()
+	_, user := server.createUser("dev", "user")
+
+	for name, response := range map[string]*httptest.ResponseRecorder{
+		"unknown address":   server.get("/no-such-page"),
+		"missing issue":     server.get("/issues/999999"),
+		"not for this role": user.get("/notifications"),
+	} {
+		body := response.Body.String()
+
+		if response.Code != http.StatusNotFound || !strings.Contains(body, `<a class="button primary" href="/issues">Back to issues</a>`) || !strings.Contains(body, `class="sidebar"`) {
+			t.Errorf("%s: %d %s", name, response.Code, body)
+		}
 	}
 }

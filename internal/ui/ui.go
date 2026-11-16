@@ -5,7 +5,8 @@
 // access.
 //
 // Access: the IP allowlist is applied by the server; this package adds the
-// admin login (session cookie stored as a hash in SQLite) and CSRF checks.
+// users' login (session cookie stored as a hash in SQLite), their roles and
+// CSRF checks.
 //
 // This package is only the composition root; the code lives in sub-packages
 // by role: contracts (view types), lists, helpers, views, middleware,
@@ -14,7 +15,6 @@ package ui
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"net/http"
 
@@ -24,6 +24,7 @@ import (
 	"github.com/devforth/exception-monitoring/internal/projects"
 	"github.com/devforth/exception-monitoring/internal/store"
 	"github.com/devforth/exception-monitoring/internal/ui/controllers"
+	"github.com/devforth/exception-monitoring/internal/ui/requests"
 	"github.com/devforth/exception-monitoring/internal/ui/routes"
 	"github.com/devforth/exception-monitoring/internal/ui/services"
 	"github.com/devforth/exception-monitoring/internal/ui/views"
@@ -37,25 +38,19 @@ type Handler struct {
 func New(ctx context.Context, logger *slog.Logger, database *store.Store, settings *config.Config, registry *projects.Registry, factory notify.Factory,
 	authorization *oauth.Server,
 ) (*Handler, error) {
-	renderer, err := views.New(logger, registry, services.NewIssues(database), settings.AppName)
+	renderer, err := views.New(logger, registry, services.NewIssues(database), requests.Viewer, settings.AppName)
 
 	if err != nil {
 		return nil, err
 	}
 
-	credentials, err := services.CredentialsFingerprint(settings.AdminUsername, settings.AdminPassword)
-
-	if err != nil {
+	// The first start creates the superadmin from env; later starts do not
+	// use ADMIN_USERNAME/ADMIN_PASSWORD.
+	if err := services.NewUsers(logger, database).EnsureSuperadmin(ctx, settings.AdminUsername, settings.AdminPassword); err != nil {
 		return nil, err
 	}
 
-	// Sessions from before a username or password change would be rejected
-	// anyway; deleting them keeps the table clean.
-	if err := database.DeleteSessionsExcept(ctx, credentials); err != nil {
-		return nil, fmt.Errorf("drop old sessions: %w", err)
-	}
-
-	auth := services.NewAuth(logger, database, settings.AdminUsername, settings.AdminPassword, credentials, settings.TrustedProxies)
+	auth := services.NewAuth(logger, database, settings.TrustedProxies)
 
 	return &Handler{
 		controllers: controllers.New(controllers.Dependencies{

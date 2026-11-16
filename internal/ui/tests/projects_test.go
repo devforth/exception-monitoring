@@ -1,4 +1,4 @@
-package ui_test
+package tests
 
 import (
 	"net/http"
@@ -46,6 +46,11 @@ func TestProjectLifecycle(t *testing.T) {
 	}
 
 	key, id := match[1], match[2]
+
+	// The DSN can be copied on the project page and in the list.
+	if !strings.Contains(page, `data-copy="project-dsn"`) || !strings.Contains(server.page("/projects"), `data-copy="dsn-`+id+`"`) {
+		t.Error("no DSN copy button")
+	}
 
 	// The DSN works right away.
 	envelope := []byte(`{}` + "\n" + `{"type":"event"}` + "\n" + `{"message":"from mobile"}`)

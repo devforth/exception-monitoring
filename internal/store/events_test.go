@@ -135,7 +135,7 @@ func TestResolvedIssueRegresses(t *testing.T) {
 	database := openTestStore(t)
 	first := save(t, database, testEvent("e1", "fp", baseTime))
 
-	if err := database.SetIssueStatus(context.Background(), first.IssueID, StatusResolved); err != nil {
+	if err := database.SetIssueStatus(context.Background(), first.IssueID, StatusResolved, Actor{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -163,7 +163,7 @@ func TestIgnoredIssueStaysIgnored(t *testing.T) {
 	database := openTestStore(t)
 	first := save(t, database, testEvent("e1", "fp", baseTime))
 
-	if err := database.SetIssueStatus(context.Background(), first.IssueID, StatusIgnored); err != nil {
+	if err := database.SetIssueStatus(context.Background(), first.IssueID, StatusIgnored, Actor{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -189,13 +189,13 @@ func TestLateEventDoesNotMoveLastSeenBack(t *testing.T) {
 func TestSetIssueStatusErrors(t *testing.T) {
 	database := openTestStore(t)
 
-	if err := database.SetIssueStatus(context.Background(), 999, StatusResolved); err == nil {
+	if err := database.SetIssueStatus(context.Background(), 999, StatusResolved, Actor{}); err == nil {
 		t.Fatal("expected an error for a missing issue")
 	}
 
 	issue := save(t, database, testEvent("e1", "fp", baseTime))
 
-	if err := database.SetIssueStatus(context.Background(), issue.IssueID, "deleted"); err == nil {
+	if err := database.SetIssueStatus(context.Background(), issue.IssueID, "deleted", Actor{}); err == nil {
 		t.Fatal("expected an error for an invalid status")
 	}
 }

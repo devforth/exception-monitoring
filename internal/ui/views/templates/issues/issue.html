@@ -11,7 +11,7 @@
   <dl class="facts">
     <div><dt>ID</dt><dd>{{.Issue.ID}}</dd></div>
     <div><dt>Project</dt><dd>{{template "badge" (projectBadge .Issue.ProjectName)}}</dd></div>
-    <div><dt>Status</dt><dd>{{template "badge" (statusBadge .Issue.Status)}}</dd></div>
+    <div><dt>Status</dt><dd>{{template "badge" (statusBadge .Issue.Status)}}{{with .LastChange}} <span class="muted small">{{template "status-change-author" .}} · {{template "time" .CreatedAt}}</span>{{end}}</dd></div>
     <div><dt>Events</dt><dd>{{.Issue.EventCount}}</dd></div>
     <div><dt>First seen</dt><dd>{{template "time" .Issue.FirstSeen}}</dd></div>
     <div><dt>Last seen</dt><dd>{{template "time" .Issue.LastSeen}}</dd></div>
@@ -20,7 +20,7 @@
 
   {{$issue := .Issue}}
   <form class="actions" method="post" action="/issues/{{$issue.ID}}/action" hx-post="/issues/{{$issue.ID}}/action">
-    {{template "issue-action-buttons" $issue.Status}}
+    {{template "issue-action-buttons" (issueActions $issue.Status $.Viewer.CanAdminister)}}
     {{template "copy-button" (copyButton "agent-fix-prompt" "Prompt" "Copy prompt for a coding agent" "Agent prompt copied to clipboard.")}}
     {{template "copy-button" (copyText (mcpReference .Issue.ID) "MCP" "Copy the MCP request for a coding agent" "MCP request copied to clipboard.")}}
   </form>
@@ -75,6 +75,23 @@
 <section>
   <h2>Message</h2>
   <pre class="message">{{.Message}}</pre>
+</section>
+{{end}}
+
+{{/* Who changed the status and when; a resolved issue that happened again
+     is reopened by its event. */}}
+{{with $.Data.History}}
+<section>
+  <h2>Status history</h2>
+  <ol class="status-history">
+    {{range .}}
+    <li>
+      {{template "badge" (label "status" .From)}} → {{template "badge" (label "status" .To)}}
+      <span>{{template "status-change-author" .}}</span>
+      <span class="muted small">{{template "time" .CreatedAt}}</span>
+    </li>
+    {{end}}
+  </ol>
 </section>
 {{end}}
 
@@ -195,3 +212,6 @@
 
 {{end}}
 {{end}}
+
+{{/* Who made a status change (store.StatusChange). */}}
+{{define "status-change-author"}}{{if .ByEvent}}reopened: happened again{{with .EventID}} (<a href="?event={{.}}">event</a>){{end}}{{else}}by {{or .Name "a deleted user"}}{{if .ViaMCP}} via MCP{{end}}{{end}}{{end}}

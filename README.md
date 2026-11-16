@@ -19,7 +19,7 @@ It collects exceptions and logs from your backend and frontend apps. Repeated er
 - Grouping of repeated errors into issues, with resolve/ignore and regression detection.
 - Log search with links between logs and related errors.
 - Notifications via Email, Telegram and Slack.
-- A web UI for browsing issues and logs, with restricted access.
+- A web UI for browsing issues and logs, with users and roles (superadmin, admin, user) and a history of who changed each issue's status.
 - Multiple projects per instance.
 - Data retention limits.
 - An MCP server with OAuth sign-in and revocable tokens, so coding agents can read errors and logs and help explain them.

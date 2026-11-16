@@ -79,11 +79,12 @@ func (store *Store) GetIssues(ctx context.Context, issueIDs []int64) ([]Issue, e
 	return issues, rows.Err()
 }
 
-// SetIssuesStatus applies one status to a batch atomically. Missing IDs or
-// invalid input leave every issue unchanged (ErrNotFound when one is
+// SetIssuesStatus applies one status to a batch atomically, recording actor
+// in the history of every issue whose status changes. Missing IDs
+// or invalid input leave every issue unchanged (ErrNotFound when one is
 // missing). Returned rows need no re-fetch. resolved_at keeps the first
 // resolve time while an issue stays resolved; any other status clears it.
-func (store *Store) SetIssuesStatus(ctx context.Context, issueIDs []int64, status string) ([]Issue, error) {
+func (store *Store) SetIssuesStatus(ctx context.Context, issueIDs []int64, status string, actor Actor) ([]Issue, error) {
 	ids, err := NormalizeIssueIDs(issueIDs)
 
 	if err != nil {
@@ -105,7 +106,13 @@ func (store *Store) SetIssuesStatus(ctx context.Context, issueIDs []int64, statu
 	defer transaction.Rollback()
 
 	placeholders, args := issueBatchArgs(ids)
-	args = append([]any{status, status, StatusResolved, formatTime(time.Now())}, args...)
+	now := time.Now()
+
+	if err := recordStatusChanges(ctx, transaction, placeholders, args, status, actor, "", now); err != nil {
+		return nil, err
+	}
+
+	args = append([]any{status, status, StatusResolved, formatTime(now)}, args...)
 	rows, err := transaction.QueryContext(ctx, `UPDATE issues SET status = ?,
 		resolved_at = CASE WHEN ? = ? THEN COALESCE(resolved_at, ?) ELSE NULL END
 		WHERE id IN (`+placeholders+`) RETURNING `+issueFields, args...)

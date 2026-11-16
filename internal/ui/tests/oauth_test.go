@@ -1,4 +1,4 @@
-package ui_test
+package tests
 
 import (
 	"crypto/sha256"
@@ -123,8 +123,15 @@ func TestOAuthAuthorizationFlow(t *testing.T) {
 		}
 	}
 
+	// With no-referrer, browsers post the consent form with "Origin: null",
+	// which the CSRF check rejects; the page keeps same-origin, so the form
+	// carries the server's own origin, as here.
+	if policy := server.get("/oauth/authorize?" + params.Encode()).Header().Get("Referrer-Policy"); policy != "same-origin" {
+		t.Fatalf("consent page Referrer-Policy: %q", policy)
+	}
+
 	form := consentForm(t, server, params)
-	response = server.post("/oauth/authorize", form)
+	response = server.post("/oauth/authorize", form, "Origin", "http://example.com")
 
 	if response.Code != http.StatusSeeOther {
 		t.Fatalf("approve: %d %s", response.Code, response.Body)
