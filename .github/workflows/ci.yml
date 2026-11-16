@@ -7,6 +7,12 @@ on:
   # The release workflow runs the same checks before it publishes.
   workflow_call:
 
+# A new push to a pull request stops its older run: only the latest commits
+# matter there. Runs on main and releases are never cancelled.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     runs-on: ubuntu-latest
