@@ -1,0 +1,70 @@
+{{define "title"}}{{if .Data.New}}Add user{{else}}{{.Data.User.DisplayName}}{{end}} · Users{{end}}
+
+{{define "content"}}
+{{with .Data}}
+{{template "back" (back "/users" "Users")}}
+<div class="page-heading">
+  <h1>{{if .New}}Add user{{else}}{{.User.DisplayName}}{{end}}</h1>
+  {{if and (not .New) ($.Viewer.CanManage .User)}}
+  <form method="post" action="/users/{{.User.ID}}/delete">
+    <button type="submit" class="danger" data-confirm="Delete the user {{.User.Username}}? They are logged out and their coding agents are disconnected; their name stays in issue histories.">Delete</button>
+  </form>
+  {{end}}
+</div>
+
+{{with .Notice}}<p class="notice-success" role="status">{{.}}</p>{{end}}
+
+{{with .TemporaryPassword}}
+<div class="temporary-password" role="status">
+  <p><b>Temporary password</b>: give it to the user. It is shown only now; they must choose their own password when they log in.</p>
+  <div class="copy-row">
+    <input id="temporary-password" value="{{.}}" readonly aria-label="Temporary password">
+    {{template "copy-button" (copyButton "temporary-password" "" "Copy the temporary password" "Temporary password copied to clipboard.")}}
+  </div>
+</div>
+{{end}}
+
+{{if or .New ($.Viewer.CanManage .User)}}
+<form class="connection-form" method="post" action="{{if .New}}/users{{else}}/users/{{.User.ID}}{{end}}">
+  <label>Username
+    {{if .New}}<input name="username" value="{{.User.Username}}" maxlength="{{limits.Username}}" required pattern="{{limits.UsernamePattern}}" autocomplete="off">
+    {{else}}<input value="{{.User.Username}}" readonly>{{end}}
+  </label>
+  {{with index .Errors "username"}}<p class="field-error">{{.}}</p>{{end}}
+
+  <label>Name <span class="muted small">(optional: the username when empty)</span>
+    <input name="name" value="{{if .New}}{{.User.Name}}{{else}}{{.User.DisplayName}}{{end}}" maxlength="{{limits.UserName}}">
+  </label>
+  {{with index .Errors "name"}}<p class="field-error">{{.}}</p>{{end}}
+
+  <fieldset>
+    <legend>Role</legend>
+    {{$role := .User.Role}}
+    {{range $.Viewer.AssignableRoles}}
+    <label class="option"><input type="radio" name="role" value="{{.}}" {{if eq . $role}}checked{{end}} required> {{.}}
+      <span class="muted small">{{roleSummary .}}</span>
+    </label>
+    {{end}}
+  </fieldset>
+  {{with index .Errors "role"}}<p class="field-error">{{.}}</p>{{end}}
+
+  {{if .New}}<p class="muted small">A temporary password is generated; the user replaces it at the first login.</p>{{end}}
+  <div class="actions"><button type="submit" class="primary">{{if .New}}Add user{{else}}Save{{end}}</button></div>
+</form>
+
+{{if not .New}}
+<div class="actions secondary-actions">
+  <form method="post" action="/users/{{.User.ID}}/password">
+    <button type="submit" data-confirm="Give {{.User.Username}} a temporary password? They are logged out and their coding agents are disconnected.">Reset password</button>
+  </form>
+</div>
+{{end}}
+{{else}}
+<dl class="facts">
+  <div><dt>Username</dt><dd>{{.User.Username}}</dd></div>
+  <div><dt>Role</dt><dd>{{template "badge" (label "role" .User.Role)}}</dd></div>
+</dl>
+<p class="muted">Your role cannot change this user.</p>
+{{end}}
+{{end}}
+{{end}}

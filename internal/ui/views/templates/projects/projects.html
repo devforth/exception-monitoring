@@ -1,0 +1,74 @@
+{{define "title"}}Projects{{end}}
+
+{{define "content"}}
+{{with .Data}}
+<div class="page-heading">
+  <h1>Projects</h1>
+  {{if $.Viewer.CanAdminister}}<a class="button primary" href="/projects/new">Add project</a>{{end}}
+</div>
+
+{{with .Notice}}<p class="notice-success" role="status">{{.}}</p>{{end}}
+
+{{with .Storage}}
+<section class="card storage">
+  <h2>Storage</h2>
+  <p>Database: <b>{{.Used}}</b>{{if .Limit}} of {{.Limit}}{{end}}</p>
+  {{if .Limit}}<meter min="0" max="100" value="{{.Percent}}" high="85" optimum="0">{{.Percent}}%</meter>{{end}}
+  <p class="muted small">By default events are kept {{.Events}}, logs {{.Logs}}; {{.EventsPerIssue}} events per issue.
+    A message logged over and over keeps its newest {{.LogsPerMessage}} copies.
+    Issues keep their latest event; an issue that has not happened for {{.Issues}} is deleted.
+    {{if .Limit}}Above the size limit the oldest events and logs of all projects are deleted first.{{end}}
+    Defaults are set with <code>RETENTION_EVENTS</code>, <code>RETENTION_LOGS</code>, <code>RETENTION_EVENTS_PER_ISSUE</code>, <code>RETENTION_LOGS_PER_MESSAGE</code>, <code>RETENTION_ISSUES</code> and <code>MAX_DATABASE_SIZE</code>; a project can override them in its settings.</p>
+</section>
+{{end}}
+
+<p class="muted">Each service (backend, frontend, …) gets its own project. Put a project's DSN into the Sentry SDK config of that service.</p>
+
+{{if .Projects}}
+<table class="list projects-table">
+  <thead><tr><th>Project</th><th>DSN</th><th class="number">Unresolved</th><th>Records</th><th>Retention</th><th>Actions</th></tr></thead>
+  <tbody>
+    {{range .Projects}}
+    <tr>
+      <td>
+        {{template "badge" (projectBadge .Name)}}
+        <div class="muted small">#{{.ID}}{{if .FromEnv}} · from PROJECTS{{end}}</div>
+      </td>
+      <td>
+        <div class="copy-row dsn-row">
+          <input class="dsn" id="dsn-{{.ID}}" value="{{.DSN}}" readonly aria-label="DSN of {{.Name}}">
+          {{template "copy-button" (copyButton (printf "dsn-%d" .ID) "" (printf "Copy the DSN of %s" .Name) "DSN copied to clipboard.")}}
+        </div>
+      </td>
+      <td class="number"><a href="/issues?project={{.Name}}">{{.UnresolvedIssues}}</a></td>
+      <td class="small">
+        <div>{{if .EventLevels}}{{range .EventLevels}}{{template "badge" (levelBadge .)}} {{end}}{{else if eq .EventLevels nil}}all errors{{else}}<span class="muted">no errors</span>{{end}}</div>
+        <div class="muted">logs: {{if .LogLevels}}{{range .LogLevels}}{{.}} {{end}}{{else if eq .LogLevels nil}}all{{else}}none{{end}}</div>
+      </td>
+      <td class="muted small">{{or .Retention "default"}}</td>
+      <td>
+        <div class="actions connection-actions">
+          {{if $.Viewer.CanAdminister}}
+          {{template "edit-link" (editLink (printf "/projects/%d" .ID) (printf "Settings of %s" .Name))}}
+          {{end}}
+          <a class="button" href="/logs?project={{.Name}}" title="Logs" aria-label="Logs of {{.Name}}">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16 M4 12h16 M4 18h10"/></svg>
+          </a>
+          {{if and $.Viewer.CanAdminister (not .FromEnv)}}
+          <form method="post" action="/projects/{{.ID}}/delete">
+            <button type="submit" class="danger" title="Delete" aria-label="Delete {{.Name}}" data-confirm="Delete the project {{.Name}} with all its issues, events and logs? Its DSN stops working. This cannot be undone.">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18 M9 6V3h6v3 M5 6l1 15h12l1-15 M10 10v7 M14 10v7"/></svg>
+            </button>
+          </form>
+          {{end}}
+        </div>
+      </td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>
+{{else}}
+<p class="empty">No projects yet. Add one, or set <code>PROJECTS=1:backend:&lt;public key&gt;</code>.</p>
+{{end}}
+{{end}}
+{{end}}

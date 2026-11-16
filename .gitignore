@@ -1,0 +1,39 @@
+# Raw SDK payload dumps from tools/envelope-dumper (contain local paths, hostnames, IPs).
+# Sanitized copies go to testdata/envelopes/.
+/envelopes/
+
+# Logs
+*.log
+/logs/
+
+# Local data (SQLite database, volumes)
+/data/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Go build output
+/bin/
+/dist/
+/exception-monitoring
+*.exe
+*.test
+*.out
+coverage.*
+
+# Node (tools)
+node_modules/
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store

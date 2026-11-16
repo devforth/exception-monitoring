@@ -1,0 +1,61 @@
+{{define "title"}}Delivery log · Notifications{{end}}
+
+{{define "content"}}
+{{with .Data}}
+{{template "back" (back "/notifications" "Notifications")}}
+<h1>Delivery log</h1>
+<p class="muted">Every notification message and what happened to it. Failed attempts are retried for a while (<code>NOTIFY_RETRY_FOR</code>); sent messages are kept for <code>NOTIFY_KEEP_SENT</code>, failed ones for <code>NOTIFY_KEEP_FAILED</code>.</p>
+
+<form class="filters" method="get" action="/notifications/log"
+      hx-get="/notifications/log" hx-target="#delivery-list" hx-swap="outerHTML"
+      hx-trigger="input delay:300ms, submit" hx-push-url="true" hx-sync="this:replace">
+  <select name="connection" aria-label="Connection">
+    <option value="">All connections</option>
+    {{range .Connections}}<option value="{{.Name}}" {{if .Selected}}selected{{end}}>{{index $.Data.Labels .Name}}</option>{{end}}
+  </select>
+  <select name="status" aria-label="Status">
+    <option value="">Any status</option>
+    {{range .Statuses}}<option value="{{.}}" {{if eq . $.Data.Status}}selected{{end}}>{{.}}</option>{{end}}
+  </select>
+  {{template "per-page" .Pager}}
+</form>
+
+{{template "delivery-list" $}}
+{{end}}
+{{end}}
+
+{{define "delivery-list"}}
+{{with .Data}}
+<div id="delivery-list">
+  {{if .Rows}}
+  <div class="table-scroll">
+  <table class="list compact">
+    <thead><tr><th>Queued</th><th>Connection</th><th>Message</th><th>Status</th><th class="number">Attempts</th><th>Error</th></tr></thead>
+    <tbody>
+      {{range .Rows}}
+      <tr>
+        <td class="nowrap">{{template "time" .CreatedAt}}</td>
+        <td><a href="/notifications/{{.ConnectionID}}">{{or .ConnectionName .ConnectionID}}</a></td>
+        <td>
+          <span class="muted small">{{.Description.Label}}</span>
+          {{with .Description.Project}}{{template "badge" (projectBadge .)}}{{end}}
+          {{if .Description.IssueID}}<a href="/issues/{{.Description.IssueID}}">{{.Description.Title}}</a>{{else}}{{.Description.Title}}{{end}}
+        </td>
+        <td class="nowrap">
+          {{if .Retrying}}<span class="delivery delivery-retrying">retrying</span><div class="muted small">next {{template "time" .NextAttemptAt}}</div>
+          {{else}}<span class="delivery delivery-{{.Status}}">{{.Status}}</span>{{if eq .Status "sent"}}<div class="muted small">{{template "time" .UpdatedAt}}</div>{{end}}{{end}}
+        </td>
+        <td class="number">{{.Attempts}}</td>
+        <td class="small">{{with .LastError}}<span class="field-error">{{.}}</span>{{end}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  </div>
+  {{template "pager" .Pager}}
+  {{else}}
+  <p class="empty">No messages{{if or .Connection .Status}} match these filters{{end}}.</p>
+  {{end}}
+</div>
+{{end}}
+{{end}}

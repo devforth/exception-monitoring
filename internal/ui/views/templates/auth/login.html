@@ -1,0 +1,27 @@
+{{define "title"}}Log in{{end}}
+
+{{define "content"}}
+{{with .Data}}
+<form class="login" method="post" action="/login">
+  <h1>{{appName}}</h1>
+
+  {{if .Disabled}}
+  <p class="notice">The web UI is disabled. Set <code>ADMIN_PASSWORD</code> to enable it.</p>
+  {{else}}
+  {{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}
+
+  <input type="hidden" name="next" value="{{.Next}}">
+
+  <label>Username
+    <input name="username" value="{{.Username}}" autocomplete="username" required autofocus>
+  </label>
+
+  <label>Password
+    <input name="password" type="password" autocomplete="current-password" required>
+  </label>
+
+  <button type="submit" class="primary">Log in</button>
+  {{end}}
+</form>
+{{end}}
+{{end}}

@@ -1,0 +1,15 @@
+# Example deployment: `docker compose up -d`, then open http://localhost:8000.
+# Put the settings in .env next to this file (see .env.example and docs/configuration.md).
+services:
+  exception-monitoring:
+    image: devforth/exception-monitoring:latest
+    restart: unless-stopped
+    ports:
+      # Behind a reverse proxy on the same host: "127.0.0.1:8000:8000"
+      - "8000:8000"
+    env_file: .env
+    volumes:
+      - data:/data
+
+volumes:
+  data:

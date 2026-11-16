@@ -1,0 +1,116 @@
+{{define "title"}}MCP{{end}}
+{{define "content"}}
+<div class="page-heading"><h1>MCP</h1></div>
+{{template "mcp-settings" .}}
+<details class="mcp-tools">
+  <summary>Available tools</summary>
+  <table class="list compact">
+    <thead><tr><th>Tool</th><th>What it does</th><th>Access</th></tr></thead>
+    <tbody>{{range .Data.Tools}}<tr><td><code>{{.Name}}</code></td><td>{{.Description}}</td><td>{{if .ReadOnly}}Read{{else}}Changes data{{end}}</td></tr>{{end}}</tbody>
+  </table>
+</details>
+{{end}}
+
+{{define "mcp-settings"}}
+{{with .Data}}
+<div class="mcp-settings card" id="mcp-settings">
+  <p class="mcp-intro">Connect an MCP client to {{appName}}.</p>
+  {{if .Unencrypted}}<p class="error" role="alert">This server is reached over plain HTTP, so sign-in codes and tokens cross the network unencrypted. Serve it over HTTPS and set <code>PUBLIC_URL</code> to the https address.</p>{{end}}
+  <nav class="mcp-tabs" role="tablist" aria-label="MCP client">
+    {{range .Tabs}}
+    <a id="mcp-tab-{{.ID}}" href="/agents?client={{.ID}}" role="tab" aria-controls="mcp-panel-{{.ID}}" aria-selected="{{.Active}}" tabindex="{{if .Active}}0{{else}}-1{{end}}" data-mcp-tab="{{.ID}}">{{.Label}}</a>
+    {{end}}
+  </nav>
+
+  <div id="mcp-panel-claude" class="mcp-panel" role="tabpanel" aria-labelledby="mcp-tab-claude" tabindex="0" {{if ne .Client "claude"}}hidden{{end}}>
+    <p class="muted">Run this command in your project's folder. Then use <code>/mcp</code> in Claude Code to sign in and allow access.</p>
+    <div class="copy-row mcp-command">
+      <pre id="mcp-command">{{.ClaudeCommand}}</pre>
+      {{template "copy-button" (copyButton "mcp-command" "Copy" "Copy the command" "Command copied to clipboard.")}}
+    </div>
+    <p class="muted small">Add <code>--scope user</code> to make this server available in every project.</p>
+    <details><summary>Share the setup with your team</summary>
+      <p class="muted small">Save this as <code>.mcp.json</code> in your repository. Each developer authorizes access separately.</p>
+      <div class="copy-row"><pre class="snippet" id="mcp-config">{{.ProjectConfig}}</pre>{{template "copy-button" (copyButton "mcp-config" "Copy" "Copy .mcp.json" "Configuration copied to clipboard.")}}</div>
+    </details>
+  </div>
+
+  <div id="mcp-panel-codex" class="mcp-panel" role="tabpanel" aria-labelledby="mcp-tab-codex" tabindex="0" {{if ne .Client "codex"}}hidden{{end}}>
+    <p class="muted">Run this command. Open the authorization URL in your browser, sign in and allow access.</p>
+    <div class="copy-row mcp-command"><pre id="codex-command">{{.CodexCommand}}</pre>{{template "copy-button" (copyButton "codex-command" "Copy" "Copy the command" "Command copied to clipboard.")}}</div>
+  </div>
+
+  <div id="mcp-panel-other" class="mcp-panel" role="tabpanel" aria-labelledby="mcp-tab-other" tabindex="0" {{if ne .Client "other"}}hidden{{end}}>
+    <p class="muted">Add this URL to your MCP client. With OAuth, sign in and allow access in your browser. Otherwise, use a personal token in the header below.</p>
+    <div class="copy-row mcp-command"><pre id="mcp-url">{{.URL}}</pre>{{template "copy-button" (copyButton "mcp-url" "Copy" "Copy the endpoint" "Endpoint copied to clipboard.")}}</div>
+    <p class="muted mcp-token-intro">A personal token grants access on your behalf. Keep it secret.</p>
+    {{if .PersonalToken}}
+    <div class="mcp-token-header"><span>Key</span><span>Value</span></div>
+    <div class="mcp-token-row">
+      <code>Authorization</code>
+      <input class="dsn" value="Bearer {{.PersonalTokenPreview}}" readonly aria-label="Authorization header value (masked)" autocomplete="off" spellcheck="false">
+      <input type="hidden" id="mcp-personal-token" value="Bearer {{.PersonalToken}}">
+      {{template "copy-button" (copyButton "mcp-personal-token" "Copy" "Copy the authorization header value" "Header value copied to clipboard.")}}
+    </div>
+    <p class="notice-warning" role="alert">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 20h20L12 3Z M12 9v5 M12 17h.01"/></svg>
+      <span>Copy and save this token now. After you reload or leave this page, it will no longer be available to copy. You will need to regenerate it if you lose it. Any previous personal token has stopped working.</span>
+    </p>
+    {{else if .PersonalTokenSet}}
+    <p class="muted small">A personal token is active. Its value cannot be shown again. Regenerate it if you need a new copy.</p>
+    {{end}}
+    <div class="actions mcp-token-form">
+      <form method="post" action="/agents/token" hx-post="/agents/token" hx-target="#mcp-settings" hx-swap="outerHTML">
+        <button type="submit" {{if .PersonalTokenSet}}data-confirm="Regenerate the personal token? Clients using the current token will lose access."{{end}}>{{if .PersonalTokenSet}}Regenerate token{{else}}Generate token{{end}}</button>
+      </form>
+      {{/* With the token just created: a prompt for an agent to connect itself. */}}
+      {{with .SetupPrompt}}
+      <textarea id="mcp-setup-prompt" hidden>{{.}}</textarea>
+      {{template "copy-button" (copyButton "mcp-setup-prompt" "Copy setup prompt" "Copy a prompt that has a coding agent add this server with the token" "Setup prompt copied: paste it to your agent.")}}
+      {{end}}
+    </div>
+  </div>
+
+  {{if .IPsRestricted}}<p class="muted small mcp-access-note">Connections are restricted to addresses in <code>ALLOWED_IPS</code>.</p>{{end}}
+
+  <section class="mcp-connections">
+    <div class="page-heading">
+      <h2>Connected apps</h2>
+      {{/* Admins may list and disconnect the apps of another user. */}}
+      {{with .Owners}}
+      <form method="get" action="/agents" class="inline-form">
+        <input type="hidden" name="client" value="{{$.Data.Client}}" data-mcp-client>
+        <select name="user" aria-label="Whose apps" data-submit-on-change>
+          {{range .}}<option value="{{.ID}}" {{if eq .ID $.Data.OwnerID}}selected{{end}}>{{.Name}}{{if eq .ID $.Viewer.ID}} (you){{end}}</option>{{end}}
+        </select>
+        <noscript><button type="submit">Show</button></noscript>
+      </form>
+      {{end}}
+    </div>
+    {{if .Connections}}
+    <div class="mcp-connections-scroll">
+      <table class="list mcp-connections-table">
+        <thead><tr><th>App</th><th>Connected</th><th>Last active</th><th class="actions-column"><span class="visually-hidden">Actions</span></th></tr></thead>
+        <tbody>
+          {{range .Connections}}
+          <tr>
+            <td><strong>{{.Name}}</strong><div class="muted small">{{if .Personal}}Personal token{{else}}OAuth{{end}}</div></td>
+            <td><time datetime="{{isoTime .Connected}}" title="{{fullTime .Connected}}">{{.Connected.Format "Jan 02, 2006"}}</time></td>
+            <td>{{with .LastActive}}<time datetime="{{isoTime .}}" title="{{fullTime .}}">{{timeAgo .}}</time>{{else}}<span class="muted">Not used yet</span>{{end}}</td>
+            <td class="actions-column"><form method="post" action="/agents/{{.ID}}/disconnect">
+              <input type="hidden" name="client" value="{{$.Data.Client}}" data-mcp-client>
+              {{if ne $.Data.OwnerID $.Viewer.ID}}<input type="hidden" name="user" value="{{$.Data.OwnerID}}">{{end}}
+              <button class="secondary" type="submit" data-confirm="Disconnect this app? Its tokens will stop working immediately.">Disconnect</button>
+            </form></td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <div class="mcp-empty"><p>No apps connected yet.</p><p class="muted small">Connect a client using the instructions above. It will appear here after you authorize access.</p></div>
+    {{end}}
+  </section>
+</div>
+{{end}}
+{{end}}

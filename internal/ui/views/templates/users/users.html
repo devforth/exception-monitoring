@@ -1,0 +1,38 @@
+{{define "title"}}Users{{end}}
+
+{{define "content"}}
+{{with .Data}}
+<div class="page-heading">
+  <h1>Users</h1>
+  <a class="button primary" href="/users/new">Add user</a>
+</div>
+<p class="muted">Users change issue statuses, read logs and connect their own coding agents. Admins also manage projects, notifications and users. There is one superadmin.</p>
+
+{{with .Notice}}<p class="notice-success" role="status">{{.}}</p>{{end}}
+
+<table class="list">
+  <thead><tr><th>User</th><th>Role</th><th>Last login</th><th>Added</th><th class="actions-column"><span class="visually-hidden">Actions</span></th></tr></thead>
+  <tbody>
+    {{range .Users}}
+    <tr>
+      <td>
+        {{if eq .ID $.Viewer.ID}}<a class="issue-title" href="/account">{{.DisplayName}}</a> <span class="muted small">(you)</span>
+        {{else}}<a class="issue-title" href="/users/{{.ID}}">{{.DisplayName}}</a>{{end}}
+        {{if .Name}}<div class="muted small">{{.Username}}</div>{{end}}
+      </td>
+      <td>{{template "badge" (label "role" .Role)}}{{if .MustChangePassword}} <span class="muted small">temporary password</span>{{end}}</td>
+      <td>{{with .LastLoginAt}}{{template "time" .}}{{else}}<span class="muted">never</span>{{end}}</td>
+      <td>{{template "time" .CreatedAt}}</td>
+      <td class="actions-column">
+        {{if $.Viewer.CanManage .}}
+        <div class="actions connection-actions">
+          {{template "edit-link" (editLink (printf "/users/%d" .ID) (printf "Edit %s" .DisplayName))}}
+        </div>
+        {{end}}
+      </td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>
+{{end}}
+{{end}}

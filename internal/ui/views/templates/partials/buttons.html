@@ -1,0 +1,46 @@
+{{/* Buttons and links shared by pages. */}}
+
+{{/* "copy-button": copies Text, or the text of the element with id Target
+     (a textarea's value or an element's text); app.js shows Copied in the
+     toast of the layout. Without a Label it is an icon. Built by copyButton
+     (target) or copyText (text). */}}
+{{define "copy-button"}}<button type="button" class="copy-button" {{with .Text}}data-copy-text="{{.}}"{{else}}data-copy="{{.Target}}"{{end}} data-copied="{{.Copied}}" title="{{.Title}}" aria-label="{{.Title}}">
+  <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg>
+  {{with .Label}}<span>{{.}}</span>{{end}}
+</button>{{end}}
+
+{{/* The pencil button that opens a row's page (editLink url label). */}}
+{{define "edit-link"}}<a class="button" href="{{.URL}}" title="{{.Label}}" aria-label="{{.Label}}">
+  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m16 3 5 5-12 12-6 1 1-6Z M14 5l5 5"/></svg>
+</a>{{end}}
+
+{{/* The link back to the page above (back "/projects" "Projects"); Esc
+     follows it too (app.js, data-back). */}}
+{{define "back"}}<p class="back"><a href="{{.URL}}" data-back title="Back (Esc)">← {{.Label}}</a></p>{{end}}
+
+{{/* "Retry now": sends the messages of a connection that wait for a retry
+     again at once, for when the cause was fixed outside this server.
+     Return is the page to go back to ("" = the connection page). */}}
+{{define "retry-now"}}<form class="inline-action" method="post" action="/notifications/{{.ID}}/retry">{{with .Return}}<input type="hidden" name="return" value="{{.}}">{{end}}<button type="submit" title="{{.Count}} message(s) wait for a retry: send them again now">Retry now ({{.Count}})</button></form>{{end}}
+
+{{/* Issue action buttons, posted as "action" (see controllers/actions.go). The argument is
+     the issue status on the issue page, or "bulk" on the list, where all apply.
+     Every action asks first (data-confirm in app.js); {count} becomes the
+     number of checked issues. */}}
+{{define "issue-action-buttons"}}
+{{$status := .Status}}{{$target := "this issue"}}{{if eq $status "bulk"}}{{$target = "{count} selected issue(s)"}}{{end}}
+{{if or (eq $status "unresolved") (eq $status "bulk")}}
+<button name="action" value="resolve" class="primary"
+        data-confirm="Resolve {{$target}}? If the error happens again, it is reopened.">Resolve</button>
+<button name="action" value="ignore"
+        data-confirm="Ignore {{$target}}? New events are still recorded, but it stays out of the unresolved list.">Ignore</button>
+{{end}}
+{{if ne $status "unresolved"}}
+<button name="action" value="reopen"
+        data-confirm="Reopen {{$target}}?">Reopen</button>
+{{end}}
+{{if .CanDelete}}
+<button name="action" value="delete" class="danger"
+        data-confirm="Delete {{$target}} and all its events? This cannot be undone. If the error happens again, it starts a new issue.">Delete</button>
+{{end}}
+{{end}}

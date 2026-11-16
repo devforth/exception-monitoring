@@ -1,0 +1,217 @@
+{{define "title"}}{{.Data.Issue.Title}}{{end}}
+
+{{define "content"}}
+{{with .Data}}
+{{template "back" (back "/issues" "Issues")}}
+
+<section class="issue-header">
+  <h1>{{template "badge" (levelBadge .Issue.Level)}} {{.Issue.Title}}</h1>
+  <p class="muted">{{.Issue.Culprit}}</p>
+
+  <dl class="facts">
+    <div><dt>ID</dt><dd>{{.Issue.ID}}</dd></div>
+    <div><dt>Project</dt><dd>{{template "badge" (projectBadge .Issue.ProjectName)}}</dd></div>
+    <div><dt>Status</dt><dd>{{template "badge" (statusBadge .Issue.Status)}}{{with .LastChange}} <span class="muted small">{{template "status-change-author" .}} · {{template "time" .CreatedAt}}</span>{{end}}</dd></div>
+    <div><dt>Events</dt><dd>{{.Issue.EventCount}}</dd></div>
+    <div><dt>First seen</dt><dd>{{template "time" .Issue.FirstSeen}}</dd></div>
+    <div><dt>Last seen</dt><dd>{{template "time" .Issue.LastSeen}}</dd></div>
+    {{if .Issue.ResolvedAt}}<div><dt>Resolved</dt><dd>{{template "time" .Issue.Resolved}}</dd></div>{{end}}
+  </dl>
+
+  {{$issue := .Issue}}
+  <form class="actions" method="post" action="/issues/{{$issue.ID}}/action" hx-post="/issues/{{$issue.ID}}/action">
+    {{template "issue-action-buttons" (issueActions $issue.Status $.Viewer.CanAdminister)}}
+    {{template "copy-button" (copyButton "agent-fix-prompt" "Prompt" "Copy prompt for a coding agent" "Agent prompt copied to clipboard.")}}
+    {{template "copy-button" (copyText (mcpReference .Issue.ID) "MCP" "Copy the MCP request for a coding agent" "MCP request copied to clipboard.")}}
+  </form>
+  <textarea id="agent-fix-prompt" hidden>{{.AgentPrompt}}</textarea>
+</section>
+
+{{with .Parsed}}
+{{$event := .}}
+<section>
+  <h2>Event <code>{{.EventID}}</code></h2>
+  <dl class="facts">
+    <div><dt>Time</dt><dd>{{template "time" .Timestamp.Time}}</dd></div>
+    {{with .Environment}}<div><dt>Environment</dt><dd>{{.}}</dd></div>{{end}}
+    {{with .Release}}<div><dt>Release</dt><dd>{{.}}</dd></div>{{end}}
+    {{with .ServerName}}<div><dt>Server</dt><dd>{{.}}</dd></div>{{end}}
+    {{with .Platform}}<div><dt>Platform</dt><dd>{{.}}</dd></div>{{end}}
+    {{with .SDK}}<div><dt>SDK</dt><dd>{{.Name}} {{.Version}}</dd></div>{{end}}
+    {{with .Trace.TraceID}}<div><dt>Trace</dt><dd>{{if $.Data.TraceLogs}}<a href="/logs?trace_id={{.}}"><code>{{.}}</code></a>{{else}}<code>{{.}}</code>{{end}}</dd></div>{{end}}
+  </dl>
+</section>
+
+{{if .Exception}}
+<section>
+  <h2>Exception</h2>
+  {{range $index, $exception := .Exception.OutermostFirst}}
+  <div class="exception">
+    <h3>
+      {{if gt $index 0}}<span class="muted">Caused by</span> {{end}}
+      {{with .Type}}<span class="exception-type">{{.}}</span>{{end}}
+      {{with handledLabel .Mechanism}}<span class="badge {{if eq . "unhandled"}}level-error{{else}}level-debug{{end}}">{{.}}</span>{{end}}
+    </h3>
+    {{with .Value}}<p class="exception-value">{{.}}</p>{{end}}
+
+    {{range .Stacktrace.NewestFirst}}
+    {{$inApp := .IsInApp}}
+    <details class="frame {{if $inApp}}in-app{{end}}" {{if and $inApp .ContextLine}}open{{end}}>
+      <summary>
+        <span class="function">{{or .Function "<anonymous>"}}</span>
+        <span class="muted">{{or .Filename .Module}}{{if .Lineno}}:{{.Lineno}}{{end}}{{if .Colno}}:{{.Colno}}{{end}}</span>
+      </summary>
+      {{with .SourceLines}}
+      <pre class="code">{{range .}}<span class="line {{if .Current}}current{{end}}"><span class="number">{{.Number}}</span>{{.Text}}</span>
+{{end}}</pre>
+      {{end}}
+      {{with .Vars}}<details class="vars"><summary>Local variables</summary><pre>{{prettyJSON .}}</pre></details>{{end}}
+    </details>
+    {{end}}
+  </div>
+  {{end}}
+</section>
+{{else if .Message}}
+<section>
+  <h2>Message</h2>
+  <pre class="message">{{.Message}}</pre>
+</section>
+{{end}}
+
+{{/* Who changed the status and when; a resolved issue that happened again
+     is reopened by its event. */}}
+{{with $.Data.History}}
+<section>
+  <h2>Status history</h2>
+  <ol class="status-history">
+    {{range .}}
+    <li>
+      {{template "badge" (label "status" .From)}} → {{template "badge" (label "status" .To)}}
+      <span>{{template "status-change-author" .}}</span>
+      <span class="muted small">{{template "time" .CreatedAt}}</span>
+    </li>
+    {{end}}
+  </ol>
+</section>
+{{end}}
+
+{{/* The other events of the issue, right after what went wrong. */}}
+{{if $.Data.Events}}
+<section>
+  <h2>Events</h2>
+  <div class="table-scroll"><table class="list compact">
+    <thead><tr><th>Event</th><th>Received</th><th>Environment</th><th>Release</th></tr></thead>
+    <tbody>
+      {{range $.Data.Events}}
+      <tr {{if eq .EventID $.Data.SelectedID}}class="selected"{{end}}>
+        <td><a href="/issues/{{$issue.ID}}?event={{.EventID}}"><code>{{short .EventID 8}}</code></a></td>
+        <td>{{template "time" .ReceivedAt}}</td>
+        <td>{{.Environment}}</td>
+        <td>{{.Release}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table></div>
+  {{if gt $.Data.Issue.EventCount (len $.Data.Events)}}<p class="muted small">Showing the latest {{len $.Data.Events}} of {{$.Data.Issue.EventCount}} events.</p>{{end}}
+</section>
+{{end}}
+
+{{with $.Data.RelatedLogs}}
+<section>
+  {{if $.Data.LogsFromRequest}}
+  <h2>Logs from the same request</h2>
+  {{else}}
+  <h2>Logs from the same trace</h2>
+  <p class="muted small">Not linked to this request exactly: logs of the same trace within a minute of the error.</p>
+  {{end}}
+  <div class="table-scroll"><table class="list compact logs">
+    <tbody>
+      {{range .}}
+      <tr>
+        <td class="nowrap">{{template "time" .Timestamp}}</td>
+        <td class="nowrap">{{template "badge" (levelBadge .Level)}}</td>
+        <td>{{template "log-body" .Body}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table></div>
+</section>
+{{end}}
+
+{{if .Breadcrumbs}}
+<section>
+  <h2>Breadcrumbs</h2>
+  <div class="table-scroll"><table class="list compact">
+    <thead><tr><th>Time</th><th>Category</th><th>Level</th><th>Message</th></tr></thead>
+    <tbody>
+      {{range .Breadcrumbs}}
+      <tr>
+        <td class="nowrap">{{if not .Timestamp.IsZero}}{{.Timestamp.UTC.Format "15:04:05.000"}}{{end}}</td>
+        <td>{{.Category}}</td>
+        <td>{{with .Level}}{{template "badge" (levelBadge .)}}{{end}}</td>
+        <td>
+          {{with .Message}}{{template "log-body" .}}{{end}}
+          {{with .Data}}<details><summary class="muted small">data</summary><pre>{{prettyJSON .}}</pre></details>{{end}}
+        </td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table></div>
+</section>
+{{end}}
+
+{{with parseRequest .Request}}
+<section>
+  <h2>Request</h2>
+  <p><code>{{.Method}} {{.URL}}</code></p>
+  {{with .Headers}}
+  <div class="table-scroll"><table class="list compact kv"><tbody>
+    {{range $name, $value := .}}<tr><th>{{$name}}</th><td>{{$value}}</td></tr>{{end}}
+  </tbody></table></div>
+  {{end}}
+</section>
+{{end}}
+
+{{if or .Tags .User}}
+<section class="columns">
+  {{with .Tags}}
+  <div>
+    <h2>Tags</h2>
+    <div class="table-scroll"><table class="list compact kv"><tbody>
+      {{range $name, $value := .}}<tr><th>{{$name}}</th><td>{{$value}}</td></tr>{{end}}
+    </tbody></table></div>
+  </div>
+  {{end}}
+  {{with .User}}
+  <div>
+    <h2>User</h2>
+    <div class="table-scroll"><table class="list compact kv"><tbody>
+      {{with .ID}}<tr><th>ID</th><td>{{.}}</td></tr>{{end}}
+      {{with .Email}}<tr><th>Email</th><td>{{.}}</td></tr>{{end}}
+      {{with .Username}}<tr><th>Username</th><td>{{.}}</td></tr>{{end}}
+      {{with .IPAddress}}<tr><th>IP address</th><td>{{.}}</td></tr>{{end}}
+    </tbody></table></div>
+  </div>
+  {{end}}
+</section>
+{{end}}
+
+{{with .Contexts}}
+<section>
+  <h2>Contexts</h2>
+  {{range $name, $value := .}}
+  <details><summary>{{$name}}</summary><pre>{{prettyJSON $value}}</pre></details>
+  {{end}}
+</section>
+{{end}}
+
+<section>
+  <details><summary>Raw event JSON</summary><pre>{{prettyJSON $.Data.Event.Payload}}</pre></details>
+</section>
+{{end}}
+
+{{end}}
+{{end}}
+
+{{/* Who made a status change (store.StatusChange). */}}
+{{define "status-change-author"}}{{if .ByEvent}}reopened: happened again{{with .EventID}} (<a href="?event={{.}}">event</a>){{end}}{{else}}by {{or .Name "a deleted user"}}{{if .ViaMCP}} via MCP{{end}}{{end}}{{end}}

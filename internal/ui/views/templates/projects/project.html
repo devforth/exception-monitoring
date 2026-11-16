@@ -1,0 +1,89 @@
+{{define "title"}}{{if .Data.New}}Add project{{else}}{{.Data.Name}}{{end}} · Projects{{end}}
+
+{{define "content"}}
+{{with .Data}}
+{{template "back" (back "/projects" "Projects")}}
+<h1>{{if .New}}Add project{{else}}{{.Name}}{{end}}</h1>
+
+{{with .Notice}}<p class="notice-success" role="status">{{.}}</p>{{end}}
+
+<form class="connection-form project-form" method="post" action="{{if .New}}/projects{{else}}/projects/{{.ID}}{{end}}">
+  {{if .FromEnv}}
+  <p class="muted">Name and key are set in <code>PROJECTS</code>; change them there. Retention can be set here.</p>
+  {{else}}
+  <label>Name
+    <input name="name" value="{{.Name}}" maxlength="{{limits.ProjectName}}" required pattern="{{limits.ProjectNamePattern}}" placeholder="backend">
+  </label>
+  {{with index .Errors "name"}}<p class="field-error">{{.}}</p>{{end}}
+  {{end}}
+
+  <label class="color-field">Color
+    <span class="inline-form"><input type="color" name="color" value="{{.Color}}"> <span class="muted small">marks the project in lists and emails</span></span>
+  </label>
+  {{with index .Errors "color"}}<p class="field-error">{{.}}</p>{{end}}
+
+  {{with .DSN}}
+  <div class="field">DSN
+    <div class="copy-row dsn-row">
+      <input class="dsn" id="project-dsn" value="{{.}}" readonly aria-label="DSN">
+      {{template "copy-button" (copyButton "project-dsn" "Copy" "Copy the DSN" "DSN copied to clipboard.")}}
+    </div>
+  </div>
+  {{else}}
+  <p class="muted small">A DSN key is generated when the project is added.</p>
+  {{end}}
+
+  <fieldset>
+    <legend>Levels to record</legend>
+    <p class="muted small">Errors and logs of levels left unchecked are dropped when they arrive: not stored, no notifications.</p>
+    <div class="level-choices">
+      <span class="muted small">Errors and messages</span>
+      {{range .EventLevels}}<label class="option"><input type="checkbox" name="event_level" value="{{.Name}}" {{if .Selected}}checked{{end}}> {{template "badge" (label "level" .Name)}}</label>{{end}}
+    </div>
+    <div class="level-choices">
+      <span class="muted small">Logs</span>
+      {{range .LogLevels}}<label class="option"><input type="checkbox" name="log_level" value="{{.Name}}" {{if .Selected}}checked{{end}}> {{template "badge" (label "level" .Name)}}</label>{{end}}
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Retention</legend>
+    <p class="muted small">Leave a field empty to use the default (shown in grey). Periods take days or hours: 30d, 12h; 0 keeps forever.</p>
+    <label>Keep events
+      <input name="retention_events" value="{{.Events}}" placeholder="{{.DefaultEvents}}">
+    </label>
+    {{with index .Errors "retention_events"}}<p class="field-error">{{.}}</p>{{end}}
+    <label>Keep logs
+      <input name="retention_logs" value="{{.Logs}}" placeholder="{{.DefaultLogs}}">
+    </label>
+    {{with index .Errors "retention_logs"}}<p class="field-error">{{.}}</p>{{end}}
+    <label>Logs kept per repeated message (the newest; the same text with other numbers or IDs; 0 keeps all)
+      <input name="retention_logs_per_message" value="{{.LogsPerMessage}}" inputmode="numeric" placeholder="{{.DefaultLogsPerMessage}}">
+    </label>
+    {{with index .Errors "retention_logs_per_message"}}<p class="field-error">{{.}}</p>{{end}}
+    <label>Events kept per issue (the newest; 0 keeps all)
+      <input name="retention_events_per_issue" value="{{.EventsPerIssue}}" inputmode="numeric" placeholder="{{.DefaultEventsPerIssue}}">
+    </label>
+    {{with index .Errors "retention_events_per_issue"}}<p class="field-error">{{.}}</p>{{end}}
+    <label>Delete issues not seen for
+      <input name="retention_issues" value="{{.Issues}}" placeholder="{{.DefaultIssues}}">
+    </label>
+    {{with index .Errors "retention_issues"}}<p class="field-error">{{.}}</p>{{end}}
+    <p class="muted small">Every issue keeps its latest event until it is deleted.</p>
+  </fieldset>
+
+  <div class="actions">
+    <button type="submit" class="primary">{{if .New}}Add{{else}}Save{{end}}</button>
+    <a class="button" href="/projects">Cancel</a>
+  </div>
+</form>
+
+{{if and (not .New) (not .FromEnv)}}
+<div class="actions secondary-actions">
+  <form method="post" action="/projects/{{.ID}}/delete">
+    <button type="submit" class="danger" data-confirm="Delete the project {{.Name}} with all its issues, events and logs? Its DSN stops working. This cannot be undone.">Delete project</button>
+  </form>
+</div>
+{{end}}
+{{end}}
+{{end}}

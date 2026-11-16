@@ -1,0 +1,3 @@
+{"sdk":{"name":"sentry.javascript.browser","version":"11.11.0"}}
+{"type":"log","item_count":1,"content_type":"application/vnd.sentry.items.log+json"}
+{"version":2,"ingest_settings":{"infer_ip":"auto","infer_user_agent":"auto"},"items":[{"timestamp":1794328027.7254002,"level":"info","body":"Browser log","trace_id":"67a498a32bbe40399275ec2df59cce85","severity_number":9,"attributes":{"page":{"value":"test","type":"string"},"sentry.environment":{"value":"development","type":"string"},"sentry.sdk.name":{"value":"sentry.javascript.browser","type":"string"},"sentry.sdk.version":{"value":"11.11.0","type":"string"},"sentry.timestamp.sequence":{"value":0,"type":"integer"}}}]}

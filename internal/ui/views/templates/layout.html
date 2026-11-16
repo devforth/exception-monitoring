@@ -1,0 +1,75 @@
+{{define "layout"}}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- htmx injects an inline <style> for indicators by default; the CSP forbids inline styles. -->
+  <meta name="htmx-config" content='{"includeIndicatorStyles": false}'>
+  <title>{{template "title" .}} · {{appName}}</title>
+  <link rel="icon" href="data:,"><!-- no favicon request (it would hit the 404 page) -->
+  <link rel="stylesheet" href="{{asset "flatpickr.min.css"}}">
+  <link rel="stylesheet" href="{{asset "app.css"}}">
+  {{with .ProjectColors}}<link rel="stylesheet" href="{{.}}">{{end}}
+  <script src="{{asset "htmx.min.js"}}" defer></script>
+  <script src="{{asset "flatpickr.min.js"}}" defer></script>
+  <script src="{{asset "app.js"}}" defer></script>
+</head>
+<body>
+  <div class="app {{if .SidebarCollapsed}}sidebar-collapsed{{end}}">
+  {{if .LoggedIn}}
+  <aside class="sidebar">
+    <div class="sidebar-head">
+      <a class="brand" href="/issues">{{appName}}</a>
+      <button type="button" class="sidebar-toggle" aria-label="Collapse or expand the menu" title="Collapse or expand the menu" aria-expanded="{{if .SidebarCollapsed}}false{{else}}true{{end}}">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+      </button>
+    </div>
+    {{/* Two groups: what the apps reported, and the settings (MCP last); users see only what their role allows. */}}
+    <nav aria-label="Main">
+      <div class="nav-group" role="group" aria-labelledby="nav-monitoring">
+        <span class="nav-heading" id="nav-monitoring">Monitoring</span>
+        <a href="/issues" title="Issues{{with .UnresolvedIssues}}: {{.}} unresolved{{end}}" {{if eq .Page "issues" "issue"}}class="active" aria-current="page"{{end}}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 20h20L12 3Z M12 10v4 M12 17h.01"/></svg><span>Issues</span>
+          {{with .UnresolvedIssues}}<b class="nav-count" aria-label="{{.}} unresolved">{{if gt . 999}}999+{{else}}{{.}}{{end}}</b>{{end}}
+        </a>
+        <a href="/logs" title="Logs" {{if eq .Page "logs"}}class="active" aria-current="page"{{end}}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16 M4 12h16 M4 18h10"/></svg><span>Logs</span>
+        </a>
+      </div>
+      <div class="nav-group" role="group" aria-labelledby="nav-settings">
+        <span class="nav-heading" id="nav-settings">Settings</span>
+        <a href="/projects" title="Projects" {{if eq .Page "projects" "project"}}class="active" aria-current="page"{{end}}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg><span>Projects</span>
+        </a>
+        {{if .Viewer.CanAdminister}}
+        <a href="/notifications" title="Notifications" {{if eq .Page "notifications" "connection"}}class="active" aria-current="page"{{end}}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4Z M10 21h4"/></svg><span>Notifications</span>
+        </a>
+        <a href="/users" title="Users" {{if eq .Page "users" "user"}}class="active" aria-current="page"{{end}}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z M22 21v-2a4 4 0 0 0-3-3.9 M16 3.1a4 4 0 0 1 0 7.8"/></svg><span>Users</span>
+        </a>
+        {{end}}
+        <a href="/agents" title="MCP: connect a coding agent" {{if eq .Page "agents"}}class="active" aria-current="page"{{end}}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3v4 M15 3v4 M6 7h12v4a6 6 0 0 1-12 0Z M12 17v4"/></svg><span>MCP</span>
+        </a>
+      </div>
+    </nav>
+    <nav class="sidebar-account" aria-label="Account">
+      <a href="/account" title="Your account: {{.Viewer.DisplayName}} ({{.Viewer.Role}})" {{if eq .Page "account"}}class="active" aria-current="page"{{end}}>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2 M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z"/></svg><span>{{.Viewer.DisplayName}}</span>
+      </a>
+    </nav>
+    <form class="logout" method="post" action="/logout">
+      <button type="submit" class="link" title="Log out">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 4h4v16h-4 M10 8l-4 4 4 4 M6 12h10"/></svg><span>Log out</span>
+      </button>
+    </form>
+  </aside>
+  {{end}}
+  <main>
+    {{template "content" .}}
+  </main>
+  </div>
+  <span class="copy-toast" id="copy-status" role="status" aria-live="polite"></span>
+</body>
+</html>{{end}}
