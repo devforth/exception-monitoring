@@ -1,11 +1,15 @@
 package tests
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/devforth/exception-monitoring/internal/config"
 )
 
 func TestLogin(t *testing.T) {
@@ -106,6 +110,31 @@ func TestLoginRateLimit(t *testing.T) {
 
 	if response.Code != http.StatusTooManyRequests {
 		t.Fatalf("got %d, want 429", response.Code)
+	}
+}
+
+// Guessing one account's password from many addresses is limited too: the
+// username is blocked whatever address the next attempt comes from.
+func TestLoginRateLimitPerUsername(t *testing.T) {
+	server := newTestServerWith(t, func(settings *config.Config) {
+		settings.TrustedProxies = []netip.Prefix{netip.MustParsePrefix("192.0.2.0/24")} // httptest's peer
+	})
+
+	from := func(index int) []string {
+		return []string{"X-Forwarded-For", fmt.Sprintf("203.0.113.%d", index)}
+	}
+
+	for index := range 10 {
+		server.post("/login", url.Values{"username": {"Admin"}, "password": {"guess guess guess"}}, from(index)...)
+	}
+
+	if response := server.post("/login", url.Values{"username": {"admin"}, "password": {password}}, from(50)...); response.Code != http.StatusTooManyRequests {
+		t.Fatalf("right password from a new address: %d, want 429", response.Code)
+	}
+
+	// Another username from that address is not blocked.
+	if response := server.post("/login", url.Values{"username": {"dev"}, "password": {"guess guess guess"}}, from(50)...); response.Code == http.StatusTooManyRequests {
+		t.Fatal("another username is blocked")
 	}
 }
 

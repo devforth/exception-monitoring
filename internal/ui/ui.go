@@ -50,7 +50,7 @@ func New(ctx context.Context, logger *slog.Logger, database *store.Store, settin
 		return nil, err
 	}
 
-	auth := services.NewAuth(logger, database, settings.TrustedProxies)
+	auth := services.NewAuth(logger, database, settings)
 
 	return &Handler{
 		controllers: controllers.New(controllers.Dependencies{

@@ -31,8 +31,7 @@ import (
 )
 
 const (
-	sessionCookie   = "em_session"
-	sessionLifetime = 14 * 24 * time.Hour
+	sessionCookie = "em_session"
 
 	// MaxLoginFailures failed logins are allowed per client address within LoginWindow.
 	MaxLoginFailures = 10
@@ -53,10 +52,11 @@ func newToken() string {
 	return hex.EncodeToString(token[:])
 }
 
-// loginLimiter counts failed logins per client address in a fixed window.
+// loginLimiter counts failed logins per key (a client address, or a
+// username) in a fixed window.
 type loginLimiter struct {
 	mutex    sync.Mutex
-	failures map[netip.Addr]*loginWindowState
+	failures map[string]*loginWindowState
 }
 
 type loginWindowState struct {
@@ -64,37 +64,45 @@ type loginWindowState struct {
 	count int
 }
 
+// maxLimiterKeys bounds the memory a flood of made-up usernames can take;
+// past it new keys are not counted until windows end.
+const maxLimiterKeys = 100_000
+
 func newLoginLimiter() *loginLimiter {
-	return &loginLimiter{failures: map[netip.Addr]*loginWindowState{}}
+	return &loginLimiter{failures: map[string]*loginWindowState{}}
 }
 
-func (limiter *loginLimiter) blocked(address netip.Addr, now time.Time) bool {
+func (limiter *loginLimiter) blocked(key string, now time.Time) bool {
 	limiter.mutex.Lock()
 	defer limiter.mutex.Unlock()
 
-	state := limiter.failures[address]
+	state := limiter.failures[key]
 
 	return state != nil && now.Sub(state.start) < LoginWindow && state.count >= MaxLoginFailures
 }
 
 // fail counts a failed login and reports whether it used up the last
-// allowed attempt, so the address is blocked from now on.
-func (limiter *loginLimiter) fail(address netip.Addr, now time.Time) bool {
+// allowed attempt, so the key is blocked from now on.
+func (limiter *loginLimiter) fail(key string, now time.Time) bool {
 	limiter.mutex.Lock()
 	defer limiter.mutex.Unlock()
 
-	// Drop finished windows so the map does not grow with every address ever seen.
-	for key, state := range limiter.failures {
+	// Drop finished windows so the map does not grow with every key ever seen.
+	for other, state := range limiter.failures {
 		if now.Sub(state.start) >= LoginWindow {
-			delete(limiter.failures, key)
+			delete(limiter.failures, other)
 		}
 	}
 
-	state := limiter.failures[address]
+	state := limiter.failures[key]
 
 	if state == nil {
+		if len(limiter.failures) >= maxLimiterKeys {
+			return false
+		}
+
 		state = &loginWindowState{start: now}
-		limiter.failures[address] = state
+		limiter.failures[key] = state
 	}
 
 	state.count++
@@ -102,11 +110,23 @@ func (limiter *loginLimiter) fail(address netip.Addr, now time.Time) bool {
 	return state.count == MaxLoginFailures
 }
 
-func (limiter *loginLimiter) reset(address netip.Addr) {
+func (limiter *loginLimiter) reset(key string) {
 	limiter.mutex.Lock()
 	defer limiter.mutex.Unlock()
 
-	delete(limiter.failures, address)
+	delete(limiter.failures, key)
+}
+
+// usernameKey is the username as the limit counts it: in any case (usernames
+// are unique in any case), capped so a long made-up one costs little memory.
+func usernameKey(username string) string {
+	key := strings.ToLower(strings.TrimSpace(username))
+
+	if len(key) > config.MaxUsername {
+		key = key[:config.MaxUsername]
+	}
+
+	return key
 }
 
 // IsHTTPS reports whether the browser talks to us over HTTPS.
@@ -119,15 +139,19 @@ type Auth struct {
 	logger         *slog.Logger
 	store          *store.Store
 	trustedProxies []netip.Prefix
-	limiter        *loginLimiter
-	now            func() time.Time
+	sessionLife    time.Duration // SESSION_LIFETIME
+	// Failed logins are limited per client address and per username, so
+	// guessing one account's password from many addresses is limited too.
+	byAddress  *loginLimiter
+	byUsername *loginLimiter
+	now        func() time.Time
 	// opened: a superadmin exists, so the UI is open; it never stops
 	// existing, so the database is asked only until then.
 	opened atomic.Bool
 }
 
-func NewAuth(logger *slog.Logger, database *store.Store, trustedProxies []netip.Prefix) *Auth {
-	return &Auth{logger: logger, store: database, trustedProxies: trustedProxies, limiter: newLoginLimiter(), now: time.Now}
+func NewAuth(logger *slog.Logger, database *store.Store, settings *config.Config) *Auth {
+	return &Auth{logger: logger, store: database, trustedProxies: settings.TrustedProxies, sessionLife: settings.SessionLifetime, byAddress: newLoginLimiter(), byUsername: newLoginLimiter(), now: time.Now}
 }
 
 // Disabled: there is no superadmin yet (ADMIN_PASSWORD was never set), so
@@ -157,14 +181,15 @@ const (
 )
 
 // Login checks the typed credentials of a login form and starts a new
-// session when they match. Failed attempts are counted per client address:
-// after MaxLoginFailures within LoginWindow the address is blocked. An error
-// is a failure of the database.
+// session when they match. Failed attempts are counted per client address
+// and per username: after MaxLoginFailures within LoginWindow the address,
+// or the username from any address, is blocked (unknown usernames too, so
+// a block does not tell which exist). An error is a failure of the database.
 func (auth *Auth) Login(w http.ResponseWriter, r *http.Request, username, password string) (LoginResult, error) {
 	client := access.ClientIP(r, auth.trustedProxies)
 	now := auth.now()
 
-	if auth.limiter.blocked(client, now) {
+	if auth.blocked(client, username, now) {
 		return LoginBlocked, nil
 	}
 
@@ -177,12 +202,13 @@ func (auth *Auth) Login(w http.ResponseWriter, r *http.Request, username, passwo
 	// An unknown username is checked against a dummy hash, so the response
 	// time does not tell which usernames exist.
 	if !checkPassword(cmp.Or(hash, dummyPasswordHash()), password) || user.ID == 0 {
-		auth.failed(client, now)
+		auth.failed(client, username, now)
 
 		return LoginWrongCredentials, nil
 	}
 
-	auth.limiter.reset(client)
+	auth.byAddress.reset(client.String())
+	auth.byUsername.reset(usernameKey(username))
 
 	// A new session every login.
 	if err := auth.startSession(r.Context(), w, r, user.ID, now); err != nil {
@@ -192,12 +218,21 @@ func (auth *Auth) Login(w http.ResponseWriter, r *http.Request, username, passwo
 	return LoginOK, auth.store.RecordLogin(r.Context(), user.ID, now)
 }
 
-// failed counts a wrong password from client. A single one is a typo, not an
-// event: only a blocked address (likely password guessing) is logged. What
-// was typed is never logged, it may be a password entered in the wrong field.
-func (auth *Auth) failed(client netip.Addr, now time.Time) {
-	if auth.limiter.fail(client, now) {
+// blocked: the address or the username used up its attempts.
+func (auth *Auth) blocked(client netip.Addr, username string, now time.Time) bool {
+	return auth.byAddress.blocked(client.String(), now) || auth.byUsername.blocked(usernameKey(username), now)
+}
+
+// failed counts a wrong password from client for username. A single one is
+// a typo, not an event: only a block (likely password guessing) is logged.
+// The password typed is never logged, it may be one entered in the wrong field.
+func (auth *Auth) failed(client netip.Addr, username string, now time.Time) {
+	if auth.byAddress.fail(client.String(), now) {
 		auth.logger.Warn("too many wrong passwords, address blocked", "client", client.String(), "attempts", MaxLoginFailures, "for", LoginWindow)
+	}
+
+	if auth.byUsername.fail(usernameKey(username), now) {
+		auth.logger.Warn("too many wrong passwords, username blocked", "username", usernameKey(username), "client", client.String(), "attempts", MaxLoginFailures, "for", LoginWindow)
 	}
 }
 
@@ -210,7 +245,7 @@ func (auth *Auth) ChangePassword(r *http.Request, viewer store.User, current, pa
 	client := access.ClientIP(r, auth.trustedProxies)
 	now := auth.now()
 
-	if auth.limiter.blocked(client, now) {
+	if auth.blocked(client, viewer.Username, now) {
 		return Problems{"current_password": TooManyAttempts}, nil
 	}
 
@@ -223,7 +258,7 @@ func (auth *Auth) ChangePassword(r *http.Request, viewer store.User, current, pa
 	problems := Problems{}
 
 	if !checkPassword(hash, current) {
-		auth.failed(client, now)
+		auth.failed(client, viewer.Username, now)
 
 		problems["current_password"] = "The current password is wrong."
 	}
@@ -247,7 +282,7 @@ func (auth *Auth) startSession(ctx context.Context, w http.ResponseWriter, r *ht
 	}
 
 	token := newToken()
-	expires := now.Add(sessionLifetime)
+	expires := now.Add(auth.sessionLife)
 
 	if err := auth.store.CreateSession(ctx, hashToken(token), userID, now, expires); err != nil {
 		return err

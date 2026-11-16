@@ -235,7 +235,8 @@ func telegramLink(link, text string) string {
 }
 
 // stripURL drops the request URL from a transport error: net/http wraps it
-// as *url.Error, whose message includes the URL and so the bot token.
+// as *url.Error, whose message includes the URL, and so the Telegram bot
+// token or the Slack webhook.
 func stripURL(err error) error {
 	var urlErr *url.Error
 

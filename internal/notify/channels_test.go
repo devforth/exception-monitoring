@@ -101,6 +101,20 @@ func TestSlackRateLimit(t *testing.T) {
 	}
 }
 
+// The webhook URL is the secret: a failed request must not put it into the
+// error, which is stored in the outbox, shown and logged.
+func TestSlackErrorHidesWebhook(t *testing.T) {
+	server := httptest.NewServer(http.NotFoundHandler())
+	webhook := server.URL + "/services/T000/B000/webhook-secret"
+	server.Close() // nothing listens: the request fails before an answer
+
+	err := Slack{WebhookURL: webhook}.Send(context.Background(), sample)
+
+	if err == nil || strings.Contains(err.Error(), "webhook-secret") {
+		t.Fatalf("error %v, want one without the webhook", err)
+	}
+}
+
 func TestTelegram(t *testing.T) {
 	server, request, payload := recordingServer(t, http.StatusOK, nil, `{"ok":true}`)
 	telegram := Telegram{BotToken: "123:SECRET", ChatID: "-100500", apiURL: server.URL}

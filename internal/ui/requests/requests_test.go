@@ -47,6 +47,12 @@ func TestSafeNext(t *testing.T) {
 		"https://example.com/": "/issues",
 		"//example.com/":       "/issues",
 		"/\\example.com":       "/issues",
+		// Browsers drop tabs and newlines and read a backslash as a slash.
+		"/\t/example.com":  "/issues",
+		"/\n/example.com":  "/issues",
+		"/\t\\example.com": "/issues",
+		"/issues?q=a b":    "/issues",
+		"/issues?q=a%20b":  "/issues?q=a%20b",
 	} {
 		if got := SafeNext(next); got != want {
 			t.Errorf("SafeNext(%q) = %q, want %q", next, got, want)

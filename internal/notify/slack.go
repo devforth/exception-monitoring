@@ -143,7 +143,7 @@ func (slack Slack) postMessage(ctx context.Context, text, threadTimestamp string
 	response, err := client.Do(request)
 
 	if err != nil {
-		return "", fmt.Errorf("slack: %w", err)
+		return "", fmt.Errorf("slack: %w", stripURL(err))
 	}
 
 	defer func() { _ = response.Body.Close() }()
@@ -228,8 +228,9 @@ func doRequest(client *http.Client, request *http.Request) error {
 
 	response, err := client.Do(request)
 
+	// The URL of a webhook is its secret: errors are stored, shown and logged.
 	if err != nil {
-		return err
+		return stripURL(err)
 	}
 
 	defer func() { _ = response.Body.Close() }()
