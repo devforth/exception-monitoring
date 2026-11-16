@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/devforth/exception-monitoring/internal/config"
 )
 
 // Destination is where messages go: an email address or a chat. An email
@@ -44,6 +46,14 @@ type Connection struct {
 	Address  string
 	Secret   string
 	Verified bool
+}
+
+// NewConnection is what a new connection of channelType starts with: every
+// project, the levels recorded by default (config.Recording.RecordedEventLevels),
+// active. Issue links go to email by default; a chat may be public, so it
+// gets them only when asked.
+func NewConnection(channelType string, recording config.Recording) Connection {
+	return Connection{Type: channelType, AllProjects: true, Levels: recording.RecordedEventLevels(), Active: true, HideIssueLink: channelType != config.ChannelEmail}
 }
 
 // ErrNotVerified is returned when a connection would send to an email

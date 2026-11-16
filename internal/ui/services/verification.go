@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"log/slog"
 	"math/big"
+	"net/mail"
+	"strings"
 	"time"
 
 	"github.com/devforth/exception-monitoring/internal/config"
@@ -31,14 +33,90 @@ var ResendCooldown = 30 * time.Second
 
 // Verification mails and checks the codes that confirm email addresses.
 type Verification struct {
-	logger  *slog.Logger
-	store   *store.Store
-	factory notify.Factory
-	now     func() time.Time
+	logger      *slog.Logger
+	store       *store.Store
+	factory     notify.Factory
+	connections *Connections
+	now         func() time.Time
 }
 
-func NewVerification(logger *slog.Logger, database *store.Store, factory notify.Factory) *Verification {
-	return &Verification{logger: logger, store: database, factory: factory, now: time.Now}
+// NewVerification: connections finds an address that is already connected.
+func NewVerification(logger *slog.Logger, database *store.Store, factory notify.Factory, connections *Connections) *Verification {
+	return &Verification{logger: logger, store: database, factory: factory, connections: connections, now: time.Now}
+}
+
+// StartEmail takes an entered address: one already connected is refused
+// (Duplicate), a confirmed one is accepted at once, otherwise a code is
+// mailed. An error is a failure of the database.
+func (verification *Verification) StartEmail(ctx context.Context, entered string) (contracts.EmailStep, error) {
+	parsed, err := mail.ParseAddress(strings.TrimSpace(entered))
+
+	if err != nil {
+		return contracts.EmailStep{State: "input", Address: entered, Error: "Enter a valid email address."}, nil
+	}
+
+	address := strings.ToLower(parsed.Address)
+
+	// One connection per address: edit the existing one instead.
+	existing, err := verification.connections.FindDuplicate(ctx, config.ChannelEmail, address, 0)
+
+	if err != nil || existing != nil {
+		return contracts.EmailStep{State: "input", Address: address, Duplicate: existing}, err
+	}
+
+	destination, err := verification.DestinationFor(ctx, address)
+
+	if err != nil {
+		return contracts.EmailStep{}, err
+	}
+
+	if destination.Verified {
+		return contracts.EmailStep{State: "verified", Address: address, DestinationID: destination.ID, VerifiedAt: destination.VerifiedAt,
+			Notice: "Confirmed earlier: no code needed."}, nil
+	}
+
+	return verification.SendCode(ctx, destination)
+}
+
+// FindDestination is the destination of an address entered before; ok is
+// false when it was never entered.
+func (verification *Verification) FindDestination(ctx context.Context, address string) (destination store.Destination, ok bool, err error) {
+	destination, err = verification.store.FindEmailDestination(ctx, strings.ToLower(strings.TrimSpace(address)))
+
+	if errors.Is(err, store.ErrNotFound) {
+		return destination, false, nil
+	}
+
+	return destination, err == nil, err
+}
+
+// againStep asks for the address again: the destination id is unknown.
+var againStep = contracts.EmailStep{State: "input", Error: "Enter the email address again."}
+
+// ResendCode mails a new code to the address of destination id.
+func (verification *Verification) ResendCode(ctx context.Context, id int64) (contracts.EmailStep, error) {
+	destination, err := verification.EmailDestination(ctx, id)
+
+	if err != nil {
+		return againStep, nil
+	}
+
+	if destination.Verified {
+		return contracts.EmailStep{State: "verified", Address: destination.Address, DestinationID: destination.ID, VerifiedAt: destination.VerifiedAt}, nil
+	}
+
+	return verification.SendCode(ctx, destination)
+}
+
+// ConfirmCode checks a code entered for the address of destination id.
+func (verification *Verification) ConfirmCode(ctx context.Context, id int64, code string) (contracts.EmailStep, error) {
+	destination, err := verification.EmailDestination(ctx, id)
+
+	if err != nil {
+		return againStep, nil
+	}
+
+	return verification.Confirm(ctx, destination, strings.TrimSpace(code))
 }
 
 // DestinationFor returns the email destination of address (lowercase),
@@ -65,7 +143,11 @@ var ErrNotEmail = errors.New("not an email destination")
 // EmailDestination reads the email destination with id; ErrNotEmail when it
 // is a chat, store.ErrNotFound when it does not exist.
 func (verification *Verification) EmailDestination(ctx context.Context, id int64) (store.Destination, error) {
-	destination, err := verification.store.GetDestination(ctx, id)
+	return emailDestination(ctx, verification.store, id)
+}
+
+func emailDestination(ctx context.Context, database *store.Store, id int64) (store.Destination, error) {
+	destination, err := database.GetDestination(ctx, id)
 
 	if err == nil && destination.Type != config.ChannelEmail {
 		return destination, ErrNotEmail

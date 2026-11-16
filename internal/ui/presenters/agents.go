@@ -12,7 +12,7 @@ import (
 // AgentsInput is what the MCP page shows.
 type AgentsInput struct {
 	Endpoint      string       // the MCP endpoint
-	ServerName    string       // what agents list it under (config.MCPServerName)
+	ServerName    string       // what agents list it under (config.AppSlug)
 	Client        string       // the selected tab (?client=)
 	Token         string       // a personal token just created, or empty
 	Owner         store.User   // whose grants are listed

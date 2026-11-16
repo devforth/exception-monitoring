@@ -1,15 +1,10 @@
 package controllers
 
 import (
-	"cmp"
-	"context"
+	"errors"
 	"fmt"
-	"maps"
 	"net/http"
-	"slices"
 	"strconv"
-	"strings"
-	"time"
 
 	"github.com/devforth/exception-monitoring/internal/config"
 	"github.com/devforth/exception-monitoring/internal/store"
@@ -105,34 +100,7 @@ func (controller *Controllers) ConnectionPage(w http.ResponseWriter, r *http.Req
 func (controller *Controllers) CreateConnection(w http.ResponseWriter, r *http.Request) {
 	_ = r.ParseForm()
 
-	connection := store.Connection{Type: r.PostFormValue("type")}
-	problems := requests.ReadConnectionForm(r, &connection, controller.registry)
-
-	if available, reason := controller.notifications.ChannelAvailable(connection.Type); !available {
-		problems["type"] = "This type is not available: " + reason + "."
-	}
-
-	var chatSecret, key string
-
-	switch connection.Type {
-	case config.ChannelEmail:
-		// The address must have been confirmed in the email step of this form.
-		destinationID, _ := strconv.ParseInt(r.PostFormValue("destination_id"), 10, 64)
-		destination, err := controller.verification.EmailDestination(r.Context(), destinationID)
-
-		if err != nil || !destination.Verified {
-			problems["address"] = "Confirm the email address first."
-		} else {
-			connection.DestinationID, connection.Address, connection.Verified = destination.ID, destination.Address, true
-			key = destination.Address
-		}
-	case config.ChannelTelegram, config.ChannelSlack:
-		chat := requests.ReadChatSecret(r, controller.factory, connection.Type, "", len(problems) == 0)
-		maps.Copy(problems, chat.Problems)
-		chatSecret, key = chat.Secret, chat.Key
-	}
-
-	existing, err := controller.connections.FindDuplicate(r.Context(), connection.Type, key, 0)
+	saved, err := controller.connections.Save(r.Context(), r.PostForm, store.Connection{})
 
 	if err != nil {
 		controller.serverError(w, r, err)
@@ -140,22 +108,8 @@ func (controller *Controllers) CreateConnection(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	if existing != nil {
-		problems["duplicate"] = "already added"
-	}
-
-	if len(problems) > 0 {
-		controller.renderConnectionForm(w, r, connection, problems, "", existing)
-
-		return
-	}
-
-	if connection.Name == "" {
-		connection.Name = controller.connections.DefaultName(r.Context(), connection, chatSecret)
-	}
-
-	if err := controller.connections.Create(r.Context(), connection, chatSecret); err != nil {
-		controller.serverError(w, r, err)
+	if len(saved.Problems) > 0 {
+		controller.renderConnectionForm(w, r, saved.Connection, saved.Problems, "", saved.Duplicate)
 
 		return
 	}
@@ -172,17 +126,7 @@ func (controller *Controllers) UpdateConnection(w http.ResponseWriter, r *http.R
 
 	_ = r.ParseForm()
 
-	problems := requests.ReadConnectionForm(r, &connection, controller.registry)
-	chat := requests.ReadChatSecret(r, controller.factory, connection.Type, connection.Secret, len(problems) == 0)
-	maps.Copy(problems, chat.Problems)
-	chatSecret, key := chat.Secret, chat.Key
-
-	if connection.Active && !connection.Verified {
-		problems["active"] = "Confirm the email address first."
-	}
-
-	// A replaced token must not point to a chat another connection uses.
-	existing, err := controller.connections.FindDuplicate(r.Context(), connection.Type, key, connection.ID)
+	saved, err := controller.connections.Save(r.Context(), r.PostForm, connection)
 
 	if err != nil {
 		controller.serverError(w, r, err)
@@ -190,22 +134,8 @@ func (controller *Controllers) UpdateConnection(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	if existing != nil {
-		problems["duplicate"] = "already added"
-	}
-
-	if len(problems) > 0 {
-		controller.renderConnectionForm(w, r, connection, problems, "", existing)
-
-		return
-	}
-
-	if connection.Name == "" {
-		connection.Name = controller.connections.DefaultName(r.Context(), connection, cmp.Or(chatSecret, connection.Secret))
-	}
-
-	if err := controller.connections.Update(r.Context(), connection, chatSecret); err != nil {
-		controller.serverError(w, r, err)
+	if len(saved.Problems) > 0 {
+		controller.renderConnectionForm(w, r, saved.Connection, saved.Problems, "", saved.Duplicate)
 
 		return
 	}
@@ -256,23 +186,16 @@ func (controller *Controllers) TestConnection(w http.ResponseWriter, r *http.Req
 	}
 
 	// An unconfirmed address must not receive mail beyond the code.
-	if !connection.Verified {
+	err := controller.connections.SendTest(r.Context(), connection)
+
+	switch {
+	case errors.Is(err, store.ErrNotVerified):
 		controller.renderConnectionForm(w, r, connection, nil, "This address is not confirmed: no test message is sent.", nil)
-
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-
-	defer cancel()
-
-	if err := controller.factory.SendTest(ctx, connection, controller.notifications.PublicURL); err != nil {
+	case err != nil:
 		controller.renderConnectionForm(w, r, connection, nil, "The test message was not delivered: "+err.Error(), nil)
-
-		return
+	default:
+		redirectAfterPost(w, r, fmt.Sprintf("/notifications/%d?notice=test-sent", connection.ID))
 	}
-
-	redirectAfterPost(w, r, fmt.Sprintf("/notifications/%d?notice=test-sent", connection.ID))
 }
 
 // TestChat sends a test message with the chat settings in the form, before
@@ -281,6 +204,7 @@ func (controller *Controllers) TestConnection(w http.ResponseWriter, r *http.Req
 func (controller *Controllers) TestChat(w http.ResponseWriter, r *http.Request) {
 	var existing store.Connection
 
+	_ = r.ParseForm()
 	channelType := r.PostFormValue("type")
 
 	if r.PathValue("connectionID") != "" {
@@ -293,36 +217,9 @@ func (controller *Controllers) TestChat(w http.ResponseWriter, r *http.Request) 
 		existing, channelType = connection, connection.Type
 	}
 
-	result := controller.testChat(r, channelType, existing)
+	result := controller.connections.TestChat(r.Context(), r.PostForm, channelType, existing)
 
 	controller.views.RenderPartial(w, r, "connection", "chat-test", result)
-}
-
-func (controller *Controllers) testChat(r *http.Request, channelType string, existing store.Connection) contracts.ChatTest {
-	if channelType != config.ChannelTelegram && channelType != config.ChannelSlack {
-		return contracts.ChatTest{Message: "Choose Telegram or Slack."}
-	}
-
-	secret := requests.ReadChatSecret(r, controller.factory, channelType, existing.Secret, true)
-
-	if len(secret.Problems) > 0 {
-		problems := slices.Sorted(maps.Values(secret.Problems))
-
-		return contracts.ChatTest{Message: strings.Join(problems, " ")}
-	}
-
-	name := cmp.Or(strings.TrimSpace(r.PostFormValue("name")), existing.Name, "new connection")
-	connection := store.Connection{Type: channelType, Name: name, Secret: secret.Secret, HideIssueLink: r.PostFormValue("include_issue_link") != "on"}
-
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-
-	defer cancel()
-
-	if err := controller.factory.SendTest(ctx, connection, controller.notifications.PublicURL); err != nil {
-		return contracts.ChatTest{Message: "Not delivered: " + err.Error()}
-	}
-
-	return contracts.ChatTest{Sent: true, Message: "Test message sent: check the chat."}
 }
 
 func (controller *Controllers) SetConnectionActive(w http.ResponseWriter, r *http.Request) {
@@ -342,14 +239,12 @@ func (controller *Controllers) SetConnectionActive(w http.ResponseWriter, r *htt
 
 	activate := active == "1"
 
-	if activate && !connection.Verified {
+	if err := controller.connections.SetActive(r.Context(), connection, activate); errors.Is(err, store.ErrNotVerified) {
 		connection.Active = true
 		controller.renderConnectionForm(w, r, connection, map[string]string{"active": "Confirm the email address first."}, "", nil)
 
 		return
-	}
-
-	if err := controller.connections.SetActive(r.Context(), connection, activate); err != nil {
+	} else if err != nil {
 		controller.serverError(w, r, err)
 
 		return

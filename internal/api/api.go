@@ -1,211 +1,217 @@
-// Package api is the read/manage REST API for issues, events and logs:
-// /api/v1/... It is used by the UI and is shaped so that an MCP server can map
-// its tools onto it one to one (list projects, search issues, get the latest
-// event, resolve, search logs, follow a trace).
+// Package api serves the catalog of package endpoints as a REST API under
+// /api/v1/, behind the API token and the IP allowlist. Each endpoint is
+// /api/v1/<name>: a GET with the input as query parameters when it only
+// reads (?project=backend&limit=50; a list field takes repeated or
+// comma-separated values), a POST with the input as a JSON object otherwise.
+// Agents get the same endpoints as MCP tools, so both always match.
 //
 // Lists return {"items": [...], "next_cursor": "..."}; pass next_cursor as
-// ?cursor= to get the next page. A null next_cursor means the last page.
+// cursor to get the next page. No next_cursor means the last page.
 package api
 
 import (
-	"encoding/base64"
-	"errors"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
+	"net/netip"
 	"strconv"
 	"strings"
-	"time"
 
-	"github.com/devforth/exception-monitoring/internal/config"
+	"github.com/devforth/exception-monitoring/internal/access"
+	"github.com/devforth/exception-monitoring/internal/endpoints"
 	"github.com/devforth/exception-monitoring/internal/httpjson"
 	"github.com/devforth/exception-monitoring/internal/store"
 )
 
-const (
-	defaultLimit = 50
-	maxLimit     = 200
-)
+// Prefix is where the endpoints are served.
+const Prefix = "/api/v1/"
+
+// maxBody caps a POST body: inputs are a few fields.
+const maxBody = 1 << 16
 
 type Handler struct {
-	logger   *slog.Logger
-	store    *store.Store
-	projects config.ProjectList
+	logger         *slog.Logger
+	catalog        []endpoints.Endpoint
+	publicURL      string
+	trustedProxies []netip.Prefix
 }
 
-func New(logger *slog.Logger, database *store.Store, projects config.ProjectList) *Handler {
-	return &Handler{logger: logger, store: database, projects: projects}
+// New serves the catalog; publicURL and trustedProxies give the server's
+// address for DSNs, as on the Projects page.
+func New(logger *slog.Logger, catalog []endpoints.Endpoint, publicURL string, trustedProxies []netip.Prefix) *Handler {
+	return &Handler{logger: logger, catalog: catalog, publicURL: publicURL, trustedProxies: trustedProxies}
 }
 
-// Register adds the API routes to router, each wrapped with protect
-// (IP allowlist and authentication).
-//
-// Routes are registered one by one instead of as a "/api/v1/" subtree: the
-// subtree would overlap the ingest route /api/{projectID}/envelope/, and
-// ServeMux rejects overlapping patterns.
+// Route is the method and path of an endpoint.
+func Route(endpoint endpoints.Endpoint) string {
+	method := http.MethodPost
+
+	if endpoint.ReadOnly {
+		method = http.MethodGet
+	}
+
+	return method + " " + Prefix + endpoint.Name
+}
+
+// Register adds the routes to router, each wrapped with protect (IP
+// allowlist and token).
 func (handler *Handler) Register(router *http.ServeMux, protect func(http.Handler) http.Handler) {
-	routes := map[string]http.HandlerFunc{
-		"GET /api/v1/projects":                              handler.listProjects,
-		"GET /api/v1/issues":                                handler.listIssues,
-		"GET /api/v1/issues/{issueID}":                      handler.getIssue,
-		"PATCH /api/v1/issues/{issueID}":                    handler.updateIssue,
-		"DELETE /api/v1/issues/{issueID}":                   handler.deleteIssue,
-		"GET /api/v1/issues/{issueID}/events":               handler.listIssueEvents,
-		"GET /api/v1/issues/{issueID}/events/latest":        handler.latestEvent,
-		"GET /api/v1/projects/{projectID}/events/{eventID}": handler.getEvent,
-		"GET /api/v1/logs":                                  handler.listLogs,
-		"GET /api/v1/traces/{traceID}":                      handler.getTrace,
-		// Any other /api/ address: a JSON 404, not the UI's page. Less
-		// specific than the ingest route, so it does not overlap it.
-		"/api/": func(w http.ResponseWriter, _ *http.Request) { httpjson.Error(w, http.StatusNotFound, "not found") },
+	for _, endpoint := range handler.catalog {
+		// Agent-only endpoints act as a user; the token is none.
+		if !endpoint.AgentsOnly {
+			router.Handle(Route(endpoint), protect(handler.serve(endpoint)))
+		}
 	}
 
-	for pattern, route := range routes {
-		router.Handle(pattern, protect(route))
-	}
+	// Any other /api/ address: a JSON 404, not the UI's page. Less specific
+	// than the ingest route /api/{projectID}/envelope/, so it does not overlap it.
+	router.Handle("/api/", protect(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		httpjson.Error(w, http.StatusNotFound, "unknown API endpoint: see /api/v1/<name> in docs/api.md")
+	})))
 }
 
-// badRequest is an error caused by the client's input, reported as 400.
-type badRequest struct{ message string }
+// apiActor is who changes a status through the REST API: its one token.
+var apiActor = store.Actor{Name: "API token", Source: store.SourceAPI}
 
-func (err badRequest) Error() string { return err.message }
+func (handler *Handler) serve(endpoint endpoints.Endpoint) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		input, err := readInput(endpoint, w, r)
 
-func invalid(format string, args ...any) error {
-	return badRequest{fmt.Sprintf(format, args...)}
+		if err != nil {
+			httpjson.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		call := endpoints.Call{ByToken: true, Actor: apiActor, Address: access.PublicURL(r, handler.publicURL, handler.trustedProxies)}
+		output, err := endpoint.Run(r.Context(), call, input)
+
+		if err != nil {
+			handler.fail(w, r, endpoint, err)
+			return
+		}
+
+		if text, ok := output.(endpoints.Text); ok {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			_, _ = io.WriteString(w, string(text)) // the client went away; nothing to do
+
+			return
+		}
+
+		httpjson.Write(w, http.StatusOK, output)
+	})
 }
 
-// fail writes the error with the matching status. Unexpected errors are logged
-// and reported without details.
-func (handler *Handler) fail(w http.ResponseWriter, r *http.Request, err error) {
-	var userError badRequest
+func (handler *Handler) fail(w http.ResponseWriter, r *http.Request, endpoint endpoints.Endpoint, err error) {
+	message, notFound, ok := endpoints.Outcome(err)
 
 	switch {
-	case errors.As(err, &userError):
-		httpjson.Error(w, http.StatusBadRequest, userError.message)
-	case errors.Is(err, store.ErrNotFound):
-		httpjson.Error(w, http.StatusNotFound, "not found")
-	default:
-		handler.logger.Error("api request failed", "method", r.Method, "path", r.URL.Path, "err", err)
+	case !ok:
+		handler.logger.Error("api request failed", "endpoint", endpoint.Name, "path", r.URL.Path, "err", err)
 		httpjson.Error(w, http.StatusInternalServerError, "internal error")
+	case notFound:
+		httpjson.Error(w, http.StatusNotFound, message)
+	default:
+		httpjson.Error(w, http.StatusBadRequest, message)
 	}
 }
 
-type page[T any] struct {
-	Items      []T     `json:"items"`
-	NextCursor *string `json:"next_cursor"`
-}
-
-// Cursors are opaque to clients: "o<offset>" for issues (sorted by changing
-// fields) or "i<id>" for events and logs (newest first by id).
-func encodeCursor(kind byte, value int64) *string {
-	cursor := base64.RawURLEncoding.EncodeToString([]byte(string(kind) + strconv.FormatInt(value, 10)))
-	return &cursor
-}
-
-func decodeCursor(raw string, kind byte) (int64, error) {
-	if raw == "" {
-		return 0, nil
+// readInput is the query (GET) or the JSON body (POST) as the endpoint's
+// input object; the endpoint validates it against its schema.
+func readInput(endpoint endpoints.Endpoint, w http.ResponseWriter, r *http.Request) (map[string]any, error) {
+	if r.Method == http.MethodGet {
+		return queryInput(endpoint, r)
 	}
 
-	decoded, err := base64.RawURLEncoding.DecodeString(raw)
-
-	if err != nil || len(decoded) < 2 || decoded[0] != kind {
-		return 0, invalid("invalid cursor")
+	if r.URL.RawQuery != "" {
+		return nil, fmt.Errorf("pass the input of %s as a JSON body", endpoint.Name)
 	}
 
-	value, err := strconv.ParseInt(string(decoded[1:]), 10, 64)
-
-	if err != nil || value < 0 {
-		return 0, invalid("invalid cursor")
-	}
-
-	return value, nil
-}
-
-func parseLimit(r *http.Request) (int, error) {
-	raw := r.URL.Query().Get("limit")
-
-	if raw == "" {
-		return defaultLimit, nil
-	}
-
-	limit, err := strconv.Atoi(raw)
-
-	if err != nil || limit < 1 || limit > maxLimit {
-		return 0, invalid("limit must be between 1 and %d", maxLimit)
-	}
-
-	return limit, nil
-}
-
-// projectFromQuery resolves ?project= given as an ID ("1") or a name ("backend").
-// Returns 0 when the parameter is absent.
-func (handler *Handler) projectFromQuery(r *http.Request) (int, error) {
-	raw := strings.TrimSpace(r.URL.Query().Get("project"))
-
-	if raw == "" {
-		return 0, nil
-	}
-
-	project, ok := handler.projects.List().Find(raw)
-
-	if !ok {
-		return 0, invalid("unknown project %q", raw)
-	}
-
-	return project.ID, nil
-}
-
-// projectsFromQuery is projectFromQuery as a filter list: none when absent.
-func (handler *Handler) projectsFromQuery(r *http.Request) ([]int, error) {
-	id, err := handler.projectFromQuery(r)
-
-	if err != nil || id == 0 {
-		return nil, err
-	}
-
-	return []int{id}, nil
-}
-
-// levelsFromQuery is ?level= as a filter list: none when absent.
-func levelsFromQuery(query url.Values) []string {
-	if level := query.Get("level"); level != "" {
-		return []string{level}
-	}
-
-	return nil
-}
-
-// projectName is empty for data of a deleted project: it stays readable.
-func (handler *Handler) projectName(projectID int) string {
-	project, _ := handler.projects.List().ByID(projectID)
-
-	return project.Name
-}
-
-func pathID(r *http.Request, name string) (int64, error) {
-	id, err := strconv.ParseInt(r.PathValue(name), 10, 64)
-
-	if err != nil || id < 1 {
-		return 0, store.ErrNotFound
-	}
-
-	return id, nil
-}
-
-func parseTimeParam(r *http.Request, name string) (time.Time, error) {
-	raw := r.URL.Query().Get(name)
-
-	if raw == "" {
-		return time.Time{}, nil
-	}
-
-	parsed, err := time.Parse(time.RFC3339Nano, raw)
+	input := map[string]any{}
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))
 
 	if err != nil {
-		return time.Time{}, invalid("%s must be an RFC 3339 time, e.g. 2026-11-11T10:00:00Z", name)
+		return nil, fmt.Errorf("read body: %w", err)
 	}
 
-	return parsed, nil
+	if len(strings.TrimSpace(string(body))) == 0 {
+		return input, nil
+	}
+
+	if err := json.Unmarshal(body, &input); err != nil {
+		return nil, fmt.Errorf("the body must be a JSON object: %w", err)
+	}
+
+	return input, nil
+}
+
+// queryInput converts query strings to the types of the input fields.
+func queryInput(endpoint endpoints.Endpoint, r *http.Request) (map[string]any, error) {
+	input := map[string]any{}
+
+	for name, values := range r.URL.Query() {
+		fieldType, itemType, ok := endpoint.FieldType(name)
+
+		if !ok {
+			return nil, fmt.Errorf("unknown parameter %q", name)
+		}
+
+		if fieldType == "array" {
+			var items []any
+
+			for _, value := range values {
+				for _, item := range strings.Split(value, ",") {
+					converted, err := convert(name, itemType, strings.TrimSpace(item))
+
+					if err != nil {
+						return nil, err
+					}
+
+					items = append(items, converted)
+				}
+			}
+
+			input[name] = items
+
+			continue
+		}
+
+		if len(values) > 1 {
+			return nil, fmt.Errorf("parameter %q given more than once", name)
+		}
+
+		converted, err := convert(name, fieldType, values[0])
+
+		if err != nil {
+			return nil, err
+		}
+
+		input[name] = converted
+	}
+
+	return input, nil
+}
+
+func convert(name, fieldType, value string) (any, error) {
+	switch fieldType {
+	case "integer":
+		number, err := strconv.ParseInt(value, 10, 64)
+
+		if err != nil {
+			return nil, fmt.Errorf("%s must be an integer", name)
+		}
+
+		return number, nil
+	case "boolean":
+		flag, err := strconv.ParseBool(value)
+
+		if err != nil {
+			return nil, fmt.Errorf("%s must be true or false", name)
+		}
+
+		return flag, nil
+	default:
+		return value, nil
+	}
 }

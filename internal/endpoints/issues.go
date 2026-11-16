@@ -1,4 +1,4 @@
-package mcp
+package endpoints
 
 import (
 	"context"
@@ -8,70 +8,12 @@ import (
 	"strings"
 	"time"
 
-	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/devforth/exception-monitoring/internal/agentprompt"
 	"github.com/devforth/exception-monitoring/internal/config"
-	"github.com/devforth/exception-monitoring/internal/oauth"
 	"github.com/devforth/exception-monitoring/internal/sentry"
 	"github.com/devforth/exception-monitoring/internal/store"
 	"github.com/devforth/exception-monitoring/internal/ui/services"
 )
-
-// The tools on projects, issues and their events.
-
-type projectOutput struct {
-	ID               int    `json:"id"`
-	Name             string `json:"name"`
-	UnresolvedIssues int    `json:"unresolved_issues"`
-}
-
-type listProjectsInput struct {
-	Limit  int    `json:"limit,omitempty" jsonschema:"Projects per page, 1 to 100 (default 20)."`
-	Cursor string `json:"cursor,omitempty" jsonschema:"next_cursor of the previous page."`
-}
-
-func (handler *Handler) listProjects(ctx context.Context, _ *sdk.CallToolRequest, input listProjectsInput) (*sdk.CallToolResult, any, error) {
-	limit, err := parseLimit(input.Limit)
-
-	if err != nil {
-		return handler.failed("list_projects", err)
-	}
-
-	offset, err := parseCursor(input.Cursor)
-
-	if err != nil {
-		return handler.failed("list_projects", err)
-	}
-
-	projects := handler.projects.List()
-	output := struct {
-		Projects   []projectOutput `json:"projects"`
-		NextCursor string          `json:"next_cursor,omitempty"`
-	}{Projects: []projectOutput{}}
-
-	if offset >= int64(len(projects)) {
-		return result(output)
-	}
-
-	counts, err := handler.store.UnresolvedCounts(ctx)
-
-	if err != nil {
-		return handler.failed("list_projects", err)
-	}
-
-	end := min(int(offset)+limit, len(projects))
-
-	for _, project := range projects[int(offset):end] {
-		output.Projects = append(output.Projects, projectOutput{ID: project.ID, Name: project.Name, UnresolvedIssues: counts[project.ID]})
-	}
-
-	if end < len(projects) {
-		output.NextCursor = strconv.Itoa(end)
-	}
-
-	return result(output)
-}
 
 type listIssuesInput struct {
 	Project string `json:"project,omitempty" jsonschema:"Project name or ID; every project when empty."`
@@ -80,6 +22,7 @@ type listIssuesInput struct {
 	Query   string `json:"query,omitempty" jsonschema:"Text in the issue title or location."`
 	Since   string `json:"since,omitempty" jsonschema:"RFC 3339 time, e.g. 2026-11-11T10:00:00Z: only issues with an event at or after it."`
 	Until   string `json:"until,omitempty" jsonschema:"RFC 3339 time: only issues with an event before it."`
+	DateBy  string `json:"date_by,omitempty" jsonschema:"What since/until apply to: event (default: any event of the issue), first_seen or last_seen."`
 	Sort    string `json:"sort,omitempty" jsonschema:"last_seen (default), first_seen, event_count or id, newest or most first (append _asc to reverse), or project (A to Z; project_desc reverses)."`
 	Limit   int    `json:"limit,omitempty" jsonschema:"Issues per page, 1 to 100 (default 20)."`
 	Cursor  string `json:"cursor,omitempty" jsonschema:"next_cursor of the previous page."`
@@ -98,18 +41,26 @@ type issueOutput struct {
 	ResolvedAt *time.Time `json:"resolved_at,omitempty"`
 }
 
-func (handler *Handler) issueOutput(issue store.Issue) issueOutput {
+func (handler *handlers) issueOutput(call Call, issue store.Issue) issueOutput {
 	return issueOutput{
-		ID: issue.ID, Project: handler.projectName(issue.ProjectID), Title: agentprompt.Redact(issue.Title), Location: agentprompt.Redact(issue.Culprit),
+		ID: issue.ID, Project: handler.projectName(issue.ProjectID), Title: call.Text(issue.Title), Location: call.Text(issue.Culprit),
 		Level: issue.Level, Status: issue.Status, EventCount: issue.EventCount, FirstSeen: issue.FirstSeen, LastSeen: issue.LastSeen, ResolvedAt: issue.ResolvedAt,
 	}
 }
 
-func (handler *Handler) listIssues(ctx context.Context, _ *sdk.CallToolRequest, input listIssuesInput) (*sdk.CallToolResult, any, error) {
+// projectName is empty for data of a deleted project.
+func (handler *handlers) projectName(projectID int) string {
+	project, _ := handler.projects.List().ByID(projectID)
+
+	return project.Name
+}
+
+func (handler *handlers) listIssues(ctx context.Context, call Call, input listIssuesInput) (Page[issueOutput], error) {
+	output := Page[issueOutput]{Items: []issueOutput{}}
 	filter, err := handler.issueFilter(input)
 
 	if err != nil {
-		return handler.failed("list_issues", err)
+		return output, err
 	}
 
 	limit := filter.Limit
@@ -117,29 +68,28 @@ func (handler *Handler) listIssues(ctx context.Context, _ *sdk.CallToolRequest, 
 	issues, err := handler.store.ListIssues(ctx, filter)
 
 	if err != nil {
-		return handler.failed("list_issues", err)
+		return output, err
 	}
 
 	issues, more := store.Page(issues, limit)
-	output := page[issueOutput]{Items: []issueOutput{}}
 
 	for _, issue := range issues {
-		output.Items = append(output.Items, handler.issueOutput(issue))
+		output.Items = append(output.Items, handler.issueOutput(call, issue))
 	}
 
 	if more {
 		output.NextCursor = strconv.Itoa(filter.Offset + limit)
 	}
 
-	return result(output)
+	return output, nil
 }
 
-func (handler *Handler) issueFilter(input listIssuesInput) (store.IssueFilter, error) {
-	filter := store.IssueFilter{Query: strings.TrimSpace(input.Query), Sort: input.Sort}
+func (handler *handlers) issueFilter(input listIssuesInput) (store.IssueFilter, error) {
+	filter := store.IssueFilter{Query: strings.TrimSpace(input.Query), Sort: input.Sort, DateField: input.DateBy}
 
 	var err error
 
-	if filter.ProjectIDs, err = handler.projectIDs(input.Project); err != nil {
+	if filter.ProjectIDs, err = projectIDs(handler.projects.List(), input.Project); err != nil {
 		return filter, err
 	}
 
@@ -150,7 +100,7 @@ func (handler *Handler) issueFilter(input listIssuesInput) (store.IssueFilter, e
 	case store.StatusUnresolved, store.StatusResolved, store.StatusIgnored:
 		filter.Status = input.Status
 	default:
-		return filter, invalid("status must be unresolved, resolved, ignored or all")
+		return filter, Invalid("status must be unresolved, resolved, ignored or all")
 	}
 
 	if filter.Levels, err = levels(input.Level, config.Levels); err != nil {
@@ -158,7 +108,11 @@ func (handler *Handler) issueFilter(input listIssuesInput) (store.IssueFilter, e
 	}
 
 	if !store.ValidIssueSort(filter.Sort) {
-		return filter, invalid("sort must be id, last_seen, first_seen or event_count (optionally with _asc), project or project_desc")
+		return filter, Invalid("sort must be id, last_seen, first_seen or event_count (optionally with _asc), project or project_desc")
+	}
+
+	if !store.ValidDateField(filter.DateField) {
+		return filter, Invalid("date_by must be event, first_seen or last_seen")
 	}
 
 	if filter.SeenSince, err = parseTime("since", input.Since); err != nil {
@@ -184,26 +138,26 @@ type getIssueInput struct {
 	EventID string `json:"event_id,omitempty" jsonschema:"An event of this issue (see list_issue_events); its latest event when empty."`
 }
 
-func (handler *Handler) getIssue(ctx context.Context, _ *sdk.CallToolRequest, input getIssueInput) (*sdk.CallToolResult, any, error) {
+func (handler *handlers) getIssue(ctx context.Context, _ Call, input getIssueInput) (Text, error) {
 	issue, err := handler.store.GetIssue(ctx, input.IssueID)
 
 	if err != nil {
-		return handler.failed("get_issue", err)
+		return "", err
 	}
 
-	event, err := handler.issues.SelectedEvent(ctx, issue, input.EventID)
+	event, err := handler.services.Issues.SelectedEvent(ctx, issue, input.EventID)
 
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
-		return handler.failed("get_issue", err)
+		return "", err
 	}
 
 	// Asked for an event the issue does not have: say so rather than
 	// describe another one.
 	if err != nil && input.EventID != "" {
-		return handler.failed("get_issue", fmt.Errorf("event %s of issue %d: %w", input.EventID, issue.ID, errNotFound))
+		return "", fmt.Errorf("event %s of issue %d: %w", input.EventID, issue.ID, ErrNotFound)
 	}
 
-	return handler.describe(ctx, "get_issue", issue, event)
+	return handler.describe(ctx, issue, event)
 }
 
 type getEventInput struct {
@@ -211,31 +165,42 @@ type getEventInput struct {
 	EventID string `json:"event_id" jsonschema:"Event ID: 32 hex characters, with or without dashes."`
 }
 
-func (handler *Handler) getEvent(ctx context.Context, _ *sdk.CallToolRequest, input getEventInput) (*sdk.CallToolResult, any, error) {
+func (handler *handlers) findEvent(ctx context.Context, input getEventInput) (store.Event, error) {
 	project, ok := handler.projects.List().Find(strings.TrimSpace(input.Project))
 
 	if !ok {
-		return handler.failed("get_event", invalid("unknown project %q", input.Project))
+		return store.Event{}, Invalid("unknown project %q (see list_projects)", input.Project)
 	}
 
-	event, err := handler.store.GetEvent(ctx, project.ID, sentry.NormalizeEventID(input.EventID))
+	return handler.store.GetEvent(ctx, project.ID, sentry.NormalizeEventID(input.EventID))
+}
+
+func (handler *handlers) getEvent(ctx context.Context, _ Call, input getEventInput) (Text, error) {
+	event, err := handler.findEvent(ctx, input)
 
 	if err != nil {
-		return handler.failed("get_event", err)
+		return "", err
 	}
 
 	issue, err := handler.store.GetIssue(ctx, event.IssueID)
 
 	if err != nil {
-		return handler.failed("get_event", err)
+		return "", err
 	}
 
-	return handler.describe(ctx, "get_event", issue, event)
+	return handler.describe(ctx, issue, event)
+}
+
+// getEventPayload is REST only: the payload holds everything the SDK sent.
+func (handler *handlers) getEventPayload(ctx context.Context, _ Call, input getEventInput) (store.Event, error) {
+	return handler.findEvent(ctx, input)
 }
 
 // describe writes an issue and one of its events (none when the events are
 // gone) as a full agent prompt, after a line of IDs for follow-up calls.
-func (handler *Handler) describe(ctx context.Context, tool string, issue store.Issue, event store.Event) (*sdk.CallToolResult, any, error) {
+// The prompt is built from an allowlist and redacted (package agentprompt),
+// whoever asks.
+func (handler *handlers) describe(ctx context.Context, issue store.Issue, event store.Event) (Text, error) {
 	var (
 		parsed      *sentry.Event
 		logs        []store.LogRecord
@@ -247,11 +212,11 @@ func (handler *Handler) describe(ctx context.Context, tool string, issue store.I
 
 	if event.EventID != "" {
 		if parsed, err = sentry.ParseEvent(event.Payload, event.EventID, event.ReceivedAt); err != nil {
-			return handler.failed(tool, err)
+			return "", err
 		}
 
-		if logs, fromRequest, err = handler.issues.RelatedLogsLimit(ctx, event, defaultLimit); err != nil {
-			return handler.failed(tool, err)
+		if logs, fromRequest, err = handler.services.Issues.RelatedLogsLimit(ctx, event, DefaultLimit); err != nil {
+			return "", err
 		}
 
 		ids = append(ids, "Event ID: "+event.EventID)
@@ -263,13 +228,13 @@ func (handler *Handler) describe(ctx context.Context, tool string, issue store.I
 		ids = append(ids, "No stored event: only the issue history is known.")
 	}
 
-	if len(logs) == defaultLimit {
+	if len(logs) == DefaultLimit {
 		ids = append(ids, "Related logs: limited to 20 recent matches; use filtered list_logs for more.")
 	}
 
 	input := services.AgentInput(handler.projectName(issue.ProjectID), issue, parsed, logs, fromRequest)
 
-	return text(strings.Join(ids, "\n") + "\n\n" + agentprompt.Build(input))
+	return Text(strings.Join(ids, "\n") + "\n\n" + agentprompt.Build(input)), nil
 }
 
 type listIssueEventsInput struct {
@@ -287,36 +252,37 @@ type eventOutput struct {
 	TraceID     string    `json:"trace_id,omitempty"`
 }
 
-func (handler *Handler) listIssueEvents(ctx context.Context, _ *sdk.CallToolRequest, input listIssueEventsInput) (*sdk.CallToolResult, any, error) {
+func (handler *handlers) listIssueEvents(ctx context.Context, call Call, input listIssueEventsInput) (Page[eventOutput], error) {
+	output := Page[eventOutput]{Items: []eventOutput{}}
+
 	if _, err := handler.store.GetIssue(ctx, input.IssueID); err != nil {
-		return handler.failed("list_issue_events", err)
+		return output, err
 	}
 
 	limit, err := parseLimit(input.Limit)
 
 	if err != nil {
-		return handler.failed("list_issue_events", err)
+		return output, err
 	}
 
 	beforeID, err := parseCursor(input.Cursor)
 
 	if err != nil {
-		return handler.failed("list_issue_events", err)
+		return output, err
 	}
 
 	events, err := handler.store.ListEvents(ctx, store.EventFilter{IssueID: input.IssueID, BeforeID: beforeID, Limit: limit + 1})
 
 	if err != nil {
-		return handler.failed("list_issue_events", err)
+		return output, err
 	}
 
 	events, more := store.Page(events, limit)
-	output := page[eventOutput]{Items: []eventOutput{}}
 
 	for _, event := range events {
 		output.Items = append(output.Items, eventOutput{
 			EventID: event.EventID, Timestamp: event.Timestamp, Level: event.Level,
-			Environment: agentprompt.Redact(event.Environment), Release: agentprompt.Redact(event.Release), TraceID: event.TraceID,
+			Environment: call.Text(event.Environment), Release: call.Text(event.Release), TraceID: event.TraceID,
 		})
 	}
 
@@ -324,10 +290,10 @@ func (handler *Handler) listIssueEvents(ctx context.Context, _ *sdk.CallToolRequ
 		output.NextCursor = strconv.FormatInt(events[limit-1].ID, 10)
 	}
 
-	return result(output)
+	return output, nil
 }
 
-type getIssuesInput struct {
+type issueIDsInput struct {
 	IssueIDs []int64 `json:"issue_ids" jsonschema:"1 to 100 known issue IDs. Duplicates are handled once."`
 }
 
@@ -336,7 +302,7 @@ type issueBatchOutput struct {
 	MissingIssueIDs []int64       `json:"missing_issue_ids,omitempty"`
 }
 
-func (handler *Handler) batchOutput(ids []int64, issues []store.Issue) issueBatchOutput {
+func (handler *handlers) batchOutput(call Call, ids []int64, issues []store.Issue) issueBatchOutput {
 	byID := make(map[int64]store.Issue, len(issues))
 
 	for _, issue := range issues {
@@ -347,7 +313,7 @@ func (handler *Handler) batchOutput(ids []int64, issues []store.Issue) issueBatc
 
 	for _, id := range ids {
 		if issue, found := byID[id]; found {
-			output.Issues = append(output.Issues, handler.issueOutput(issue))
+			output.Issues = append(output.Issues, handler.issueOutput(call, issue))
 		} else {
 			output.MissingIssueIDs = append(output.MissingIssueIDs, id)
 		}
@@ -356,20 +322,20 @@ func (handler *Handler) batchOutput(ids []int64, issues []store.Issue) issueBatc
 	return output
 }
 
-func (handler *Handler) getIssues(ctx context.Context, _ *sdk.CallToolRequest, input getIssuesInput) (*sdk.CallToolResult, any, error) {
+func (handler *handlers) getIssues(ctx context.Context, call Call, input issueIDsInput) (issueBatchOutput, error) {
 	ids, err := store.NormalizeIssueIDs(input.IssueIDs)
 
 	if err != nil {
-		return handler.failed("get_issues", invalid("%s", err))
+		return issueBatchOutput{}, Invalid("%s", err)
 	}
 
 	issues, err := handler.store.GetIssues(ctx, ids)
 
 	if err != nil {
-		return handler.failed("get_issues", err)
+		return issueBatchOutput{}, err
 	}
 
-	return result(handler.batchOutput(ids, issues))
+	return handler.batchOutput(call, ids, issues), nil
 }
 
 type updateIssueStatusInput struct {
@@ -377,38 +343,46 @@ type updateIssueStatusInput struct {
 	Status   string  `json:"status" jsonschema:"resolved, ignored or unresolved, for every issue in the call."`
 }
 
-// updateIssueStatus changes one or many issues at once: all or none.
-// The change is recorded in the issues' history as made by the user the
-// agent acts for.
-func (handler *Handler) updateIssueStatus(ctx context.Context, request *sdk.CallToolRequest, input updateIssueStatusInput) (*sdk.CallToolResult, any, error) {
+// updateIssueStatus changes one or many issues at once: all or none. The
+// change is recorded in the issues' history with the call's actor.
+func (handler *handlers) updateIssueStatus(ctx context.Context, call Call, input updateIssueStatusInput) (issueBatchOutput, error) {
 	ids, err := store.NormalizeIssueIDs(input.IssueIDs)
 
 	if err != nil {
-		return handler.failed("update_issue_status", invalid("%s", err))
+		return issueBatchOutput{}, Invalid("%s", err)
 	}
 
 	switch input.Status {
 	case store.StatusResolved, store.StatusIgnored, store.StatusUnresolved:
 	default:
-		return handler.failed("update_issue_status", invalid("status must be resolved, ignored or unresolved"))
+		return issueBatchOutput{}, Invalid("status must be resolved, ignored or unresolved")
 	}
 
-	grant, ok := oauth.GrantOf(request.Extra.TokenInfo)
-
-	if !ok {
-		return handler.failed("update_issue_status", errors.New("the request carries no grant"))
-	}
-
-	actor := store.Actor{UserID: grant.UserID, Name: grant.UserName, Source: store.SourceMCP}
-	issues, err := handler.store.SetIssuesStatus(ctx, ids, input.Status, actor)
+	issues, err := handler.store.SetIssuesStatus(ctx, ids, input.Status, call.Actor)
 
 	if errors.Is(err, store.ErrNotFound) {
-		return handler.failed("update_issue_status", invalid("one or more issue IDs were not found; no status changed"))
+		return issueBatchOutput{}, Invalid("one or more issue IDs were not found; no status changed")
 	}
 
 	if err != nil {
-		return handler.failed("update_issue_status", err)
+		return issueBatchOutput{}, err
 	}
 
-	return result(handler.batchOutput(ids, issues))
+	return handler.batchOutput(call, ids, issues), nil
+}
+
+type deleteIssueInput struct {
+	IssueID int64 `json:"issue_id" jsonschema:"Issue ID."`
+}
+
+type deletedOutput struct {
+	Deleted int64 `json:"deleted"`
+}
+
+func (handler *handlers) deleteIssue(ctx context.Context, _ Call, input deleteIssueInput) (deletedOutput, error) {
+	if err := handler.store.DeleteIssue(ctx, input.IssueID); err != nil {
+		return deletedOutput{}, err
+	}
+
+	return deletedOutput{Deleted: input.IssueID}, nil
 }

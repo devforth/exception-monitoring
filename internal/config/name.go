@@ -27,12 +27,12 @@ func parseAppName(value string) (string, error) {
 	return name, nil
 }
 
-// MCPServerName is the name agents register the MCP server under (`claude
-// mcp add <name> ...`): agents accept letters, digits, "-" and "_", so the
-// app name is lowercased with every other run of characters, spaces
-// included, turned into one "-" ("Acme Errors" → "acme-errors"). A name with
-// no Latin letters or digits falls back to "exception-monitoring".
-func MCPServerName(appName string) string {
+// AppSlug is the app name as an identifier: the name agents register the
+// MCP server under (`claude mcp add <name> ...`). Agents accept letters, digits, "-" and "_", so the app
+// name is lowercased with every other run of characters, spaces included,
+// turned into one "-" ("Acme Errors" → "acme-errors"). A name with no Latin
+// letters or digits falls back to "exception-monitoring".
+func AppSlug(appName string) string {
 	var name strings.Builder
 
 	for _, char := range strings.ToLower(appName) {
@@ -48,5 +48,5 @@ func MCPServerName(appName string) string {
 		return slug
 	}
 
-	return MCPServerName(DefaultAppName)
+	return AppSlug(DefaultAppName)
 }

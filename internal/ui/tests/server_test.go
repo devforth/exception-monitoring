@@ -5,6 +5,7 @@ package tests
 import (
 	"bytes"
 	"context"
+	"path/filepath"
 	"slices"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/devforth/exception-monitoring/internal/config"
+	"github.com/devforth/exception-monitoring/internal/endpoints"
 	"github.com/devforth/exception-monitoring/internal/fixtures"
 	"github.com/devforth/exception-monitoring/internal/ingest"
 	"github.com/devforth/exception-monitoring/internal/mcp"
@@ -27,6 +29,7 @@ import (
 	"github.com/devforth/exception-monitoring/internal/server"
 	"github.com/devforth/exception-monitoring/internal/store"
 	"github.com/devforth/exception-monitoring/internal/ui"
+	"github.com/devforth/exception-monitoring/internal/ui/services"
 )
 
 const (
@@ -61,7 +64,7 @@ func newTestServer(t *testing.T, adminPassword string) *testServer {
 func openDatabase(t *testing.T) *store.Store {
 	t.Helper()
 
-	database, err := store.Open(context.Background(), t.TempDir())
+	database, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
 
 	if err != nil {
 		t.Fatal(err)
@@ -91,10 +94,11 @@ func startServer(t *testing.T, database *store.Store, adminUsername, adminPasswo
 	logger := slog.New(slog.NewTextHandler(testLog{t}, nil))
 	smtp, mails := fixtures.FakeSMTP(t)
 	settings := &config.Config{
-		Projects:       fixtures.Projects(),
-		AllowedOrigins: []string{"*"},
-		AdminUsername:  adminUsername,
-		AdminPassword:  adminPassword,
+		Projects:        fixtures.Projects(),
+		AllowedOrigins:  []string{"*"},
+		AdminUsername:   adminUsername,
+		AdminPassword:   adminPassword,
+		SessionLifetime: config.DefaultSessionLifetime,
 		// Every connection type is available: SMTP for email, a key for chat tokens.
 		Notifications: config.Notifications{ChannelTypes: config.AllChannelTypes, SecretKey: secretKey, SMTP: smtp},
 		// Shown on the Projects page; nothing is deleted by the UI.
@@ -132,7 +136,8 @@ func startServer(t *testing.T, database *store.Store, adminUsername, adminPasswo
 	authorization := &oauth.Server{
 		Store: database, PublicURL: settings.Notifications.PublicURL, TrustedProxies: settings.TrustedProxies, ResourcePath: mcp.Path,
 	}
-	webUI, err := ui.New(context.Background(), logger, database, settings, registry, notify.Factory{SMTP: smtp, Box: box, TelegramURL: telegram.URL}, authorization)
+	factory := notify.Factory{SMTP: smtp, Box: box, TelegramURL: telegram.URL}
+	webUI, err := ui.New(context.Background(), logger, database, settings, registry, factory, authorization)
 
 	if err != nil {
 		t.Fatal(err)
@@ -143,7 +148,9 @@ func startServer(t *testing.T, database *store.Store, adminUsername, adminPasswo
 		Database: database,
 		Ingest:   ingest.New(logger, settings, registry, ingest.StoreSink{Store: database, Logger: logger}),
 		UI:       webUI,
-		MCP:      mcp.New(logger, database, registry, authorization, config.DefaultAppName, "test"),
+		MCP: mcp.New(logger, database, endpoints.New(database, registry, services.New(services.Dependencies{
+			Logger: logger, Store: database, Registry: registry, Settings: settings, Factory: factory, OAuth: authorization,
+		})), authorization, config.DefaultAppName, "test"),
 	}).Handler()
 
 	return &testServer{t: t, handler: handler, mails: mails}

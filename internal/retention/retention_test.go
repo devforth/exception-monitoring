@@ -27,7 +27,7 @@ type testSetup struct {
 func newSetup(t *testing.T) *testSetup {
 	t.Helper()
 
-	database, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "data"))
+	database, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
 
 	if err != nil {
 		t.Fatal(err)

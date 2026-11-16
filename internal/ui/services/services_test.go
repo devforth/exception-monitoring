@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
@@ -18,7 +19,7 @@ import (
 func openStore(t *testing.T) *store.Store {
 	t.Helper()
 
-	database, err := store.Open(context.Background(), t.TempDir())
+	database, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
 
 	if err != nil {
 		t.Fatal(err)
@@ -49,12 +50,12 @@ func TestConnectionsCreateUpdateDelete(t *testing.T) {
 	ctx := context.Background()
 	database := openStore(t)
 	factory := testFactory(t)
-	service := NewConnections(slog.New(slog.NewTextHandler(io.Discard, nil)), database, factory)
+	service := NewConnections(slog.New(slog.NewTextHandler(io.Discard, nil)), database, factory, config.Projects{}, &config.Config{})
 	firstSecret, _ := factory.EncryptSecret(notify.SlackSecret{WebhookURL: "https://hooks.slack.com/services/first"})
 
 	connection := store.Connection{Name: "alerts", Type: config.ChannelSlack, AllProjects: true, Levels: []string{"error"}, Active: true}
 
-	if err := service.Create(ctx, connection, firstSecret); err != nil {
+	if _, err := service.create(ctx, connection, firstSecret); err != nil {
 		t.Fatal(err)
 	}
 
@@ -74,7 +75,7 @@ func TestConnectionsCreateUpdateDelete(t *testing.T) {
 	secondSecret, _ := factory.EncryptSecret(notify.SlackSecret{WebhookURL: "https://hooks.slack.com/services/second"})
 	created.Name = "renamed"
 
-	if err := service.Update(ctx, created, secondSecret); err != nil {
+	if err := service.update(ctx, created, secondSecret); err != nil {
 		t.Fatal(err)
 	}
 
@@ -109,7 +110,7 @@ func TestConnectionsCreateUpdateDelete(t *testing.T) {
 func TestVerificationDestinations(t *testing.T) {
 	ctx := context.Background()
 	database := openStore(t)
-	verification := NewVerification(slog.New(slog.NewTextHandler(io.Discard, nil)), database, notify.Factory{})
+	verification := NewVerification(slog.New(slog.NewTextHandler(io.Discard, nil)), database, notify.Factory{}, nil)
 
 	first, err := verification.DestinationFor(ctx, "dev@example.com")
 
@@ -187,7 +188,7 @@ func TestSelectedEvent(t *testing.T) {
 // Saving an active connection retries its waiting messages now: a save is
 // usually the fix for why they failed.
 func TestSaveRetriesWaitingMessages(t *testing.T) {
-	database, err := store.Open(context.Background(), t.TempDir())
+	database, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
 
 	if err != nil {
 		t.Fatal(err)
@@ -212,9 +213,9 @@ func TestSaveRetriesWaitingMessages(t *testing.T) {
 	}
 
 	connection, _ := database.GetConnection(ctx, id)
-	connections := NewConnections(slog.New(slog.DiscardHandler), database, notify.Factory{})
+	connections := NewConnections(slog.New(slog.DiscardHandler), database, notify.Factory{}, config.Projects{}, &config.Config{})
 
-	if err := connections.Update(ctx, connection, ""); err != nil {
+	if err := connections.update(ctx, connection, ""); err != nil {
 		t.Fatal(err)
 	}
 

@@ -15,6 +15,7 @@ import (
 
 	"github.com/devforth/exception-monitoring/internal/api"
 	"github.com/devforth/exception-monitoring/internal/config"
+	"github.com/devforth/exception-monitoring/internal/endpoints"
 	"github.com/devforth/exception-monitoring/internal/ingest"
 	"github.com/devforth/exception-monitoring/internal/logging"
 	"github.com/devforth/exception-monitoring/internal/mcp"
@@ -50,6 +51,12 @@ func main() {
 		return
 	}
 
+	if len(os.Args) > 1 && os.Args[1] == "version" {
+		fmt.Println(version)
+
+		return
+	}
+
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
@@ -69,7 +76,7 @@ func run() error {
 
 	defer stop()
 
-	database, err := store.Open(ctx, settings.DataDir)
+	database, err := store.Open(ctx, settings.DatabaseFile())
 
 	if err != nil {
 		return err
@@ -159,6 +166,12 @@ func run() error {
 
 	logRetention(logger, settings.Retention)
 
+	// One catalog of requests, served as the REST API and as MCP tools, on
+	// the same services as the UI.
+	catalog := endpoints.New(database, registry, services.New(services.Dependencies{
+		Logger: logger, Store: database, Registry: registry, Settings: settings, Factory: factory, OAuth: authorization,
+	}))
+
 	sink := ingest.StoreSink{Store: database, Logger: logger, Notifier: notifier, PublicURL: settings.Notifications.PublicURL,
 		Retention: settings.Retention, Recording: settings.Recording}
 
@@ -174,8 +187,8 @@ func run() error {
 			Logger:         logger,
 			Database:       database,
 			Ingest:         ingest.New(logger, settings, registry, sink),
-			API:            api.New(logger, database, registry),
-			MCP:            mcp.New(logger, database, registry, authorization, settings.AppName, version),
+			API:            api.New(logger, catalog, settings.Notifications.PublicURL, settings.TrustedProxies),
+			MCP:            mcp.New(logger, database, catalog, authorization, settings.AppName, version),
 			UI:             webUI,
 			APIToken:       settings.APIToken,
 			AllowedIPs:     settings.AllowedIPs,
@@ -319,7 +332,8 @@ func resetPassword(args []string) error {
 	}
 
 	ctx := context.Background()
-	database, err := store.Open(ctx, settings.DataDir)
+	logger := logging.New(os.Stderr, settings.LogFormat, settings.LogLevel)
+	database, err := store.Open(ctx, settings.DatabaseFile())
 
 	if err != nil {
 		return err
@@ -341,7 +355,7 @@ func resetPassword(args []string) error {
 		username = superadmin.Username
 	}
 
-	users := services.NewUsers(logging.New(os.Stderr, settings.LogFormat, settings.LogLevel), database)
+	users := services.NewUsers(logger, database)
 	password, err := users.SetPasswordByOperator(ctx, username)
 
 	if errors.Is(err, store.ErrNotFound) {

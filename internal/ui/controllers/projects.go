@@ -10,7 +10,6 @@ import (
 	"github.com/devforth/exception-monitoring/internal/store"
 	"github.com/devforth/exception-monitoring/internal/ui/contracts"
 	"github.com/devforth/exception-monitoring/internal/ui/presenters"
-	"github.com/devforth/exception-monitoring/internal/ui/requests"
 )
 
 // The Projects page: each project with its DSN and retention, the storage
@@ -66,7 +65,7 @@ func (controller *Controllers) loadProject(w http.ResponseWriter, r *http.Reques
 		return store.Project{}, false
 	}
 
-	project, err := controller.registry.Get(r.Context(), int(id))
+	project, err := controller.projects.Get(r.Context(), int(id))
 
 	return project, !controller.failed(w, r, err)
 }
@@ -85,13 +84,6 @@ func (controller *Controllers) ProjectPage(w http.ResponseWriter, r *http.Reques
 	controller.views.Render(w, r, http.StatusOK, "project", view)
 }
 
-// readProjectForm applies the form to project (see requests.ReadProjectForm).
-func (controller *Controllers) readProjectForm(r *http.Request, project *store.Project, nameEditable bool) map[string]string {
-	paletteColor := controller.projects.Color(store.Project{ID: project.ID})
-
-	return requests.ReadProjectForm(r, project, nameEditable, controller.recording, paletteColor)
-}
-
 func (controller *Controllers) renderProjectForm(w http.ResponseWriter, r *http.Request, project store.Project, problems map[string]string) {
 	view := controller.projectViews.Form(project)
 	view.Errors = problems
@@ -108,60 +100,38 @@ func (controller *Controllers) renderProjectForm(w http.ResponseWriter, r *http.
 	controller.views.Render(w, r, http.StatusUnprocessableEntity, "project", view)
 }
 
-func (controller *Controllers) saveError(w http.ResponseWriter, r *http.Request, project store.Project, err error) {
-	if errors.Is(err, store.ErrProjectConflict) {
-		controller.renderProjectForm(w, r, project, map[string]string{"name": "Another project already has this name."})
-
-		return
-	}
-
-	controller.serverError(w, r, err)
-}
-
 func (controller *Controllers) CreateProject(w http.ResponseWriter, r *http.Request) {
-	_ = r.ParseForm()
-
-	var project store.Project
-
-	if problems := controller.readProjectForm(r, &project, true); len(problems) > 0 {
-		controller.renderProjectForm(w, r, project, problems)
-
-		return
-	}
-
-	id, err := controller.registry.Create(r.Context(), project)
-
-	if err != nil {
-		controller.saveError(w, r, project, err)
-
-		return
-	}
-
-	redirectAfterPost(w, r, fmt.Sprintf("/projects/%d?notice=created", id))
+	controller.saveProject(w, r, store.Project{}, "created")
 }
 
 func (controller *Controllers) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	project, ok := controller.loadProject(w, r)
 
-	if !ok {
-		return
+	if ok {
+		controller.saveProject(w, r, project, "saved")
 	}
+}
 
+// saveProject stores the posted form (services.Projects.Save) or shows it
+// again with the problems.
+func (controller *Controllers) saveProject(w http.ResponseWriter, r *http.Request, project store.Project, notice string) {
 	_ = r.ParseForm()
 
-	if problems := controller.readProjectForm(r, &project, !controller.registry.FromEnv(project.ID)); len(problems) > 0 {
-		controller.renderProjectForm(w, r, project, problems)
+	saved, problems, err := controller.projects.Save(r.Context(), r.PostForm, project)
+
+	if err != nil {
+		controller.serverError(w, r, err)
 
 		return
 	}
 
-	if err := controller.registry.Update(r.Context(), project); err != nil {
-		controller.saveError(w, r, project, err)
+	if len(problems) > 0 {
+		controller.renderProjectForm(w, r, saved, problems)
 
 		return
 	}
 
-	redirectAfterPost(w, r, fmt.Sprintf("/projects/%d?notice=saved", project.ID))
+	redirectAfterPost(w, r, fmt.Sprintf("/projects/%d?notice=%s", saved.ID, notice))
 }
 
 func (controller *Controllers) DeleteProject(w http.ResponseWriter, r *http.Request) {
@@ -171,7 +141,7 @@ func (controller *Controllers) DeleteProject(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if err := controller.registry.Delete(r.Context(), project.ID); err != nil {
+	if err := controller.projects.Delete(r.Context(), project.ID); err != nil {
 		if errors.Is(err, projects.ErrFromEnv) {
 			http.Error(w, err.Error(), http.StatusConflict)
 

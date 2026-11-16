@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -22,7 +23,7 @@ const testUserID = 1
 
 func testAuthorization(t *testing.T) (*Server, http.Handler) {
 	t.Helper()
-	database, err := store.Open(context.Background(), t.TempDir())
+	database, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
 
 	if err != nil {
 		t.Fatal(err)

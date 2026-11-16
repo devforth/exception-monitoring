@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/devforth/exception-monitoring/internal/endpoints"
 )
 
 //go:embed instructions.md skills/*/SKILL.md
@@ -26,11 +26,13 @@ var skills = []agentSkill{
 	{"update-issue-status", "what the statuses mean and when to change them"},
 }
 
-var fetchSkillTool = &sdk.Tool{
+// fetchSkill is a tool for agents only, not part of the REST API.
+var fetchSkill = endpoints.Define(endpoints.Endpoint{
 	Name:        "fetch_skill",
 	Description: "Detailed guidance by name: fetch-data, analyze-errors or update-issue-status. Only when the server instructions do not settle the task; reuse a skill already loaded.",
-	Annotations: readOnly,
-}
+	ReadOnly:    true,
+	AgentsOnly:  true,
+}, readSkill)
 
 // serverInstructions is instructions.md with {{app}} replaced by appName.
 func serverInstructions(appName string) string {
@@ -55,7 +57,7 @@ type fetchSkillInput struct {
 	Name string `json:"name" jsonschema:"fetch-data, analyze-errors or update-issue-status."`
 }
 
-func (handler *Handler) fetchSkill(_ context.Context, _ *sdk.CallToolRequest, input fetchSkillInput) (*sdk.CallToolResult, any, error) {
+func readSkill(_ context.Context, _ endpoints.Call, input fetchSkillInput) (endpoints.Text, error) {
 	for _, skill := range skills {
 		if skill.name != input.Name {
 			continue
@@ -64,11 +66,11 @@ func (handler *Handler) fetchSkill(_ context.Context, _ *sdk.CallToolRequest, in
 		content, err := skillFiles.ReadFile("skills/" + skill.name + "/SKILL.md")
 
 		if err != nil {
-			return handler.failed("fetch_skill", err)
+			return "", err
 		}
 
-		return text(string(content))
+		return endpoints.Text(content), nil
 	}
 
-	return handler.failed("fetch_skill", invalid("unknown skill %q: use fetch-data, analyze-errors or update-issue-status", input.Name))
+	return "", endpoints.Invalid("unknown skill %q: use fetch-data, analyze-errors or update-issue-status", input.Name)
 }

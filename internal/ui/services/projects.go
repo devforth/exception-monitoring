@@ -2,11 +2,11 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/netip"
 	"net/url"
-	"strconv"
 
 	"github.com/devforth/exception-monitoring/internal/access"
 	"github.com/devforth/exception-monitoring/internal/config"
@@ -19,12 +19,56 @@ import (
 type Projects struct {
 	store          *store.Store
 	registry       *projects.Registry
+	recording      config.Recording
 	publicURL      string
 	trustedProxies []netip.Prefix
 }
 
-func NewProjects(database *store.Store, registry *projects.Registry, publicURL string, trustedProxies []netip.Prefix) *Projects {
-	return &Projects{store: database, registry: registry, publicURL: publicURL, trustedProxies: trustedProxies}
+func NewProjects(database *store.Store, registry *projects.Registry, recording config.Recording, publicURL string, trustedProxies []netip.Prefix) *Projects {
+	return &Projects{store: database, registry: registry, recording: recording, publicURL: publicURL, trustedProxies: trustedProxies}
+}
+
+// FromEnv: the project comes from PROJECTS (its name and key are fixed).
+func (service *Projects) FromEnv(id int) bool {
+	return service.registry.FromEnv(id)
+}
+
+// Get reads a project with its settings; store.ErrNotFound when missing.
+func (service *Projects) Get(ctx context.Context, id int) (store.Project, error) {
+	return service.registry.Get(ctx, id)
+}
+
+// Save applies the form to project and stores it: a new one when its ID is
+// 0, the stored one otherwise (a project from PROJECTS keeps its name).
+// It returns the project as read from the form (with its id once saved) and
+// the field errors when nothing was saved.
+func (service *Projects) Save(ctx context.Context, form url.Values, project store.Project) (store.Project, map[string]string, error) {
+	nameEditable := project.ID == 0 || !service.registry.FromEnv(project.ID)
+	problems := readProjectForm(form, &project, nameEditable, service.recording, service.Color(store.Project{ID: project.ID}))
+
+	if len(problems) > 0 {
+		return project, problems, nil
+	}
+
+	var err error
+
+	if project.ID == 0 {
+		project.ID, err = service.registry.Create(ctx, project)
+	} else {
+		err = service.registry.Update(ctx, project)
+	}
+
+	if errors.Is(err, store.ErrProjectConflict) {
+		return project, map[string]string{"name": "Another project already has this name."}, nil
+	}
+
+	return project, nil, err
+}
+
+// Delete removes a project added in the UI with its data; one from
+// PROJECTS cannot be deleted (projects.ErrFromEnv).
+func (service *Projects) Delete(ctx context.Context, id int) error {
+	return service.registry.Delete(ctx, id)
 }
 
 // Names lists the current projects for the project filter.
@@ -62,13 +106,9 @@ func (service *Projects) Name(projectID int) string {
 	return fmt.Sprintf("project %d", projectID)
 }
 
-// DSN is the DSN of a project, at the server's address (see address). The
-// scheme stays: SDKs need it to parse the DSN.
+// DSN is the DSN of a project at the server's address (see address).
 func (service *Projects) DSN(r *http.Request, project config.Project) string {
-	base := service.address(r)
-	base.User = url.User(project.PublicKey)
-
-	return base.JoinPath(strconv.Itoa(project.ID)).String()
+	return project.DSN(service.address(r))
 }
 
 // URL is the address of path on this server, such as the MCP endpoint.

@@ -2,6 +2,7 @@ package presenters
 
 import (
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -94,6 +95,19 @@ func TestNewConnectionDefaults(t *testing.T) {
 
 	if chat := presenter.NewConnection(); chat.Type != config.ChannelTelegram || !chat.HideIssueLink {
 		t.Errorf("new connection without SMTP = %+v, want a chat without issue links", chat)
+	}
+
+	// The levels are those recorded by default (RECORD_EVENT_LEVELS); all when all are recorded.
+	presenter.Recording = config.Recording{EventLevels: []string{"warning", "error"}}
+
+	if levels := presenter.NewConnection().Levels; !slices.Equal(levels, []string{"warning", "error"}) {
+		t.Errorf("levels = %v, want the recorded ones", levels)
+	}
+
+	presenter.Recording = config.Recording{}
+
+	if levels := presenter.NewConnection().Levels; !slices.Equal(levels, config.Levels) {
+		t.Errorf("levels = %v, want every level", levels)
 	}
 }
 

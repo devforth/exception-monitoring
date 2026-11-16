@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 )
 
 func env(values map[string]string) func(string) string {
@@ -20,7 +21,7 @@ func TestLoadDefaults(t *testing.T) {
 
 	if config.Port != DefaultPort || config.DataDir != DefaultDataDir || config.LogLevel != DefaultLogLevel || config.Projects != nil || config.APIToken != "" || config.AllowedIPs != nil ||
 		len(config.AllowedOrigins) != 1 || config.AllowedOrigins[0] != DefaultAllowedOrigins || config.RateLimitPerMinute != DefaultRateLimitPerMinute ||
-		config.AdminUsername != DefaultAdminUsername || config.AdminPassword != "" {
+		config.AdminUsername != DefaultAdminUsername || config.AdminPassword != "" || config.SessionLifetime != 24*time.Hour {
 		t.Fatalf("unexpected defaults: %+v", config)
 	}
 }
@@ -37,6 +38,7 @@ func TestLoadValues(t *testing.T) {
 		"TRUSTED_PROXIES":       "172.17.0.1",
 		"ADMIN_USERNAME":        "root",
 		"ADMIN_PASSWORD":        "root-password",
+		"SESSION_LIFETIME":      "12h",
 		// IDs are explicit, so they don't have to follow list order or be contiguous.
 		"PROJECTS": "3:frontend:0123456789abcdef0123, 1:backend:a1b2c3d4e5f6a7b8",
 	}))
@@ -45,7 +47,7 @@ func TestLoadValues(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if config.Port != 9000 || config.DataDir != "/data" || config.LogLevel != slog.LevelDebug {
+	if config.Port != 9000 || config.DataDir != "/data" || config.LogLevel != slog.LevelDebug || config.SessionLifetime != 12*time.Hour {
 		t.Fatalf("unexpected config: %+v", config)
 	}
 
@@ -109,6 +111,8 @@ func TestLoadErrors(t *testing.T) {
 		{"negative rate limit", "RATE_LIMIT_PER_MINUTE", "-1", "RATE_LIMIT_PER_MINUTE"},
 		{"short api token", "API_TOKEN", "secret", "at least"},
 		{"short admin password", "ADMIN_PASSWORD", "short-pass", "at least 12"},
+		{"bad session lifetime", "SESSION_LIFETIME", "forever", "SESSION_LIFETIME"},
+		{"zero session lifetime", "SESSION_LIFETIME", "0", "SESSION_LIFETIME"},
 		{"bad allowed ip", "ALLOWED_IPS", "10.0.0.300", "invalid address"},
 		{"bad network", "TRUSTED_PROXIES", "10.0.0.0/40", "invalid network"},
 		{"duplicate key", "PROJECTS", "1:backend:a1b2c3d4e5f6a7b8,2:frontend:a1b2c3d4e5f6a7b8", "already used"},

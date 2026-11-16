@@ -62,7 +62,10 @@ type Dependencies struct {
 
 func New(dependencies Dependencies) *Controllers {
 	settings := dependencies.Settings
-	projectService := services.NewProjects(dependencies.Store, dependencies.Registry, settings.Notifications.PublicURL, settings.TrustedProxies)
+	all := services.New(services.Dependencies{
+		Logger: dependencies.Logger, Store: dependencies.Store, Registry: dependencies.Registry,
+		Settings: settings, Factory: dependencies.Factory, OAuth: dependencies.OAuth,
+	})
 
 	return &Controllers{
 		logger:        dependencies.Logger,
@@ -73,23 +76,23 @@ func New(dependencies Dependencies) *Controllers {
 		factory:       dependencies.Factory,
 		views:         dependencies.Views,
 		auth:          dependencies.Auth,
-		issues:        services.NewIssues(dependencies.Store),
-		projects:      projectService,
-		connections:   services.NewConnections(dependencies.Logger, dependencies.Store, dependencies.Factory),
-		deliveries:    services.NewDeliveries(dependencies.Store),
-		verification:  services.NewVerification(dependencies.Logger, dependencies.Store, dependencies.Factory),
-		logs:          services.NewLogs(dependencies.Store),
-		agents:        services.NewAgents(dependencies.OAuth, dependencies.Store),
-		users:         services.NewUsers(dependencies.Logger, dependencies.Store),
+		issues:        all.Issues,
+		projects:      all.Projects,
+		connections:   all.Connections,
+		deliveries:    all.Deliveries,
+		verification:  all.Verification,
+		logs:          all.Logs,
+		agents:        all.Agents,
+		users:         all.Users,
 		ipsRestricted: len(settings.AllowedIPs) > 0,
 		appName:       settings.AppName,
 		connectionViews: presenters.Connections{
-			Factory: dependencies.Factory, Notifications: settings.Notifications,
-			Projects: dependencies.Registry, ProjectName: projectService.Name,
+			Factory: dependencies.Factory, Notifications: settings.Notifications, Recording: settings.Recording,
+			Projects: dependencies.Registry, ProjectName: all.Projects.Name,
 		},
 		projectViews: presenters.Projects{
 			Retention: settings.Retention, Recording: settings.Recording,
-			FromEnv: dependencies.Registry.FromEnv, Color: projectService.Color,
+			FromEnv: dependencies.Registry.FromEnv, Color: all.Projects.Color,
 		},
 	}
 }

@@ -23,6 +23,7 @@ type Connections struct {
 	// Factory decrypts chat secrets to show the chat id (never the token).
 	Factory       notify.Factory
 	Notifications config.Notifications
+	Recording     config.Recording // a new connection starts with its event levels
 	Projects      config.ProjectList
 	ProjectName   ProjectName
 }
@@ -93,23 +94,16 @@ func (presenter Connections) Row(connection store.Connection) contracts.Connecti
 }
 
 // NewConnection is what the form of a new connection starts with.
+// The first type that can be used is preselected (app.js switches the
+// issue link default with the type chosen in the form).
 func (presenter Connections) NewConnection() store.Connection {
-	connection := store.Connection{AllProjects: true, Levels: []string{"error", "fatal"}, Active: true}
-
-	// Preselect the first type that can be used.
 	for _, channelType := range config.AllChannelTypes {
 		if available, _ := presenter.Notifications.ChannelAvailable(channelType); available {
-			connection.Type = channelType
-
-			break
+			return store.NewConnection(channelType, presenter.Recording)
 		}
 	}
 
-	// Issue links go to email by default; a chat may be public, so it gets
-	// them only when asked (app.js follows the type chosen in the form).
-	connection.HideIssueLink = connection.Type != config.ChannelEmail
-
-	return connection
+	return store.NewConnection("", presenter.Recording)
 }
 
 // Form fills the form from a connection (empty for a new one).

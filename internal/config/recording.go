@@ -91,6 +91,17 @@ func (recording Recording) LogLevelsFor(own *[]string) []string {
 	return ownOr(own, recording.LogLevels)
 }
 
+// RecordedEventLevels lists the event levels recorded by default
+// (RECORD_EVENT_LEVELS), every level when all are; a new notification
+// connection starts with them.
+func (recording Recording) RecordedEventLevels() []string {
+	if recording.EventLevels == nil {
+		return slices.Clone(Levels)
+	}
+
+	return slices.Clone(recording.EventLevels)
+}
+
 func ownOr(own *[]string, defaults []string) []string {
 	if own != nil {
 		return *own

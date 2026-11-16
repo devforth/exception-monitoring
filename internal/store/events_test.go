@@ -12,7 +12,7 @@ import (
 
 func openTestStore(t *testing.T) *Store {
 	t.Helper()
-	database, err := Open(context.Background(), filepath.Join(t.TempDir(), "data"))
+	database, err := Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
 
 	if err != nil {
 		t.Fatal(err)

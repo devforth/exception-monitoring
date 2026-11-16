@@ -165,7 +165,7 @@ func (users *Users) UpdateName(ctx context.Context, viewer store.User, name stri
 		return problems, nil
 	}
 
-	return nil, users.store.UpdateUser(ctx, viewer.ID, nameOr(name, viewer.Username), viewer.Role)
+	return nil, users.store.UpdateUserName(ctx, viewer.ID, nameOr(name, viewer.Username))
 }
 
 // SetPasswordByOperator is the reset-password command: run on the server,

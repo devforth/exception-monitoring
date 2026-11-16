@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -106,7 +107,7 @@ type testSetup struct {
 func newSetup(t *testing.T) *testSetup {
 	t.Helper()
 
-	database, err := store.Open(context.Background(), t.TempDir())
+	database, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
 
 	if err != nil {
 		t.Fatal(err)

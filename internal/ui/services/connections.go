@@ -18,14 +18,22 @@ import (
 // Connections: the notification connections, what tells them apart and
 // names them, and their delivery health.
 type Connections struct {
-	logger  *slog.Logger
-	store   *store.Store
-	factory notify.Factory
-	now     func() time.Time
+	logger        *slog.Logger
+	store         *store.Store
+	factory       notify.Factory
+	projects      config.ProjectList
+	notifications config.Notifications
+	recording     config.Recording
+	now           func() time.Time
 }
 
-func NewConnections(logger *slog.Logger, database *store.Store, factory notify.Factory) *Connections {
-	return &Connections{logger: logger, store: database, factory: factory, now: time.Now}
+func NewConnections(logger *slog.Logger, database *store.Store, factory notify.Factory, projects config.ProjectList, settings *config.Config) *Connections {
+	return &Connections{logger: logger, store: database, factory: factory, projects: projects, notifications: settings.Notifications, recording: settings.Recording, now: time.Now}
+}
+
+// New is what a new connection of channelType starts with (store.NewConnection).
+func (service *Connections) New(channelType string) store.Connection {
+	return store.NewConnection(channelType, service.recording)
 }
 
 // List returns every connection.
@@ -43,30 +51,29 @@ func (service *Connections) Get(ctx context.Context, id int64) (store.Connection
 	return service.store.GetConnection(ctx, id)
 }
 
-// Create saves a new connection. chatSecret is the encrypted secret of a
-// chat (empty for email): the chat's destination is created first.
-func (service *Connections) Create(ctx context.Context, connection store.Connection, chatSecret string) error {
+// create saves a new connection and returns its id. chatSecret is the
+// encrypted secret of a chat (empty for email): the chat's destination is
+// created first.
+func (service *Connections) create(ctx context.Context, connection store.Connection, chatSecret string) (int64, error) {
 	if chatSecret != "" {
 		// Chats need no confirmation: whoever has the token owns the chat.
 		now := service.now()
 		destinationID, err := service.store.CreateDestination(ctx, store.Destination{Type: connection.Type, Secret: chatSecret, Verified: true, VerifiedAt: now}, now)
 
 		if err != nil {
-			return err
+			return 0, err
 		}
 
 		connection.DestinationID = destinationID
 	}
 
-	_, err := service.store.CreateConnection(ctx, connection, service.now())
-
-	return err
+	return service.store.CreateConnection(ctx, connection, service.now())
 }
 
-// Update saves a connection. newChatSecret is the encrypted chat secret read
+// update saves a connection. newChatSecret is the encrypted chat secret read
 // from the form (empty for email); the destination gets it when it differs
 // from the stored one.
-func (service *Connections) Update(ctx context.Context, connection store.Connection, newChatSecret string) error {
+func (service *Connections) update(ctx context.Context, connection store.Connection, newChatSecret string) error {
 	if newChatSecret != "" && newChatSecret != connection.Secret {
 		if err := service.store.UpdateDestinationSecret(ctx, connection.DestinationID, newChatSecret, service.now()); err != nil {
 			return err
@@ -76,8 +83,13 @@ func (service *Connections) Update(ctx context.Context, connection store.Connect
 	return service.saved(ctx, connection)
 }
 
-// SetActive turns a connection on or off.
+// SetActive turns a connection on or off; an unconfirmed address cannot be
+// turned on (store.ErrNotVerified).
 func (service *Connections) SetActive(ctx context.Context, connection store.Connection, active bool) error {
+	if active && !connection.Verified {
+		return store.ErrNotVerified
+	}
+
 	connection.Active = active
 
 	return service.saved(ctx, connection)

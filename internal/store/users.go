@@ -203,6 +203,11 @@ func (store *Store) UpdateUser(ctx context.Context, id int64, name, role string)
 	return affectedOne(store.DB.ExecContext(ctx, `UPDATE users SET name = ?, role = ? WHERE id = ?`, name, role, id))
 }
 
+// UpdateUserName changes only the name, so a role changed meanwhile stays.
+func (store *Store) UpdateUserName(ctx context.Context, id int64, name string) error {
+	return affectedOne(store.DB.ExecContext(ctx, `UPDATE users SET name = ? WHERE id = ?`, name, id))
+}
+
 // PasswordChange is a new password hash and what it ends.
 type PasswordChange struct {
 	Hash               string

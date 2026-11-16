@@ -1,3 +1,7 @@
+// Package requests reads what the UI's requests carry that is about HTTP
+// itself: bulk issue selections, local redirect targets, htmx and the
+// viewer. Forms whose rules agents share (projects, connections) are read
+// by services.
 package requests
 
 import (

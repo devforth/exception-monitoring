@@ -11,19 +11,18 @@ import (
 	_ "modernc.org/sqlite" // pure-Go SQLite driver, no cgo
 )
 
-const fileName = "exception-monitoring.db"
-
 type Store struct {
 	DB *sql.DB
 }
 
-// Open opens (or creates) the database in dataDir and applies pending migrations.
-func Open(ctx context.Context, dataDir string) (*Store, error) {
-	if err := os.MkdirAll(dataDir, 0o750); err != nil {
+// Open opens (or creates) the database file at path, with its directory,
+// and applies pending migrations.
+func Open(ctx context.Context, path string) (*Store, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return nil, fmt.Errorf("create data dir: %w", err)
 	}
 
-	return openWithMigrations(ctx, filepath.Join(dataDir, fileName), migrations)
+	return openWithMigrations(ctx, path, migrations)
 }
 
 func openWithMigrations(ctx context.Context, path string, migrationList []migration) (*Store, error) {

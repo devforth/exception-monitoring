@@ -11,7 +11,7 @@ import (
 
 func TestOpenCreatesDatabaseInWALMode(t *testing.T) {
 	ctx := context.Background()
-	database, err := Open(ctx, filepath.Join(t.TempDir(), "nested", "data"))
+	database, err := Open(ctx, filepath.Join(t.TempDir(), "nested", "test.db"))
 
 	if err != nil {
 		t.Fatal(err)
@@ -218,8 +218,7 @@ func closeDatabase(t *testing.T, database *Store) {
 // incremental auto_vacuum; a database created without it is switched once.
 func TestOpenEnablesIncrementalVacuum(t *testing.T) {
 	ctx := context.Background()
-	dataDir := t.TempDir()
-	path := filepath.Join(dataDir, fileName)
+	path := filepath.Join(t.TempDir(), "test.db")
 
 	plain, err := sql.Open("sqlite", "file:"+path)
 
@@ -233,7 +232,7 @@ func TestOpenEnablesIncrementalVacuum(t *testing.T) {
 
 	_ = plain.Close()
 
-	database, err := Open(ctx, dataDir)
+	database, err := Open(ctx, path)
 
 	if err != nil {
 		t.Fatal(err)

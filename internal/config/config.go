@@ -6,11 +6,14 @@ import (
 	"fmt"
 	"log/slog"
 	"net/netip"
+	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/devforth/exception-monitoring/internal/logging"
 )
@@ -32,6 +35,16 @@ type Project struct {
 	// Color marks the project in lists and emails: "#rrggbb", set in the UI
 	// or picked from ProjectPalette by id.
 	Color string
+}
+
+// DSN is what a Sentry SDK is configured with: the server address (base,
+// see access.PublicURL) with the project's key as the user and its ID as the
+// path. The scheme stays: SDKs cannot parse a DSN without it.
+func (project Project) DSN(base *url.URL) string {
+	address := *base
+	address.User = url.User(project.PublicKey)
+
+	return address.JoinPath(strconv.Itoa(project.ID)).String()
 }
 
 // ProjectPalette gives projects distinct colors until one is chosen in the
@@ -133,6 +146,9 @@ type Config struct {
 	// An empty password means the UI is closed.
 	AdminUsername string
 	AdminPassword string
+	// SessionLifetime (SESSION_LIFETIME) is how long a UI login lasts; it
+	// is not extended by use.
+	SessionLifetime time.Duration
 	// Notifications: where to send alerts about new and regressed issues.
 	Notifications Notifications
 	// Retention: how long and how much data is kept.
@@ -150,6 +166,12 @@ const (
 	DefaultRateLimitPerMinute = 1000
 
 	DefaultAdminUsername = "admin"
+
+	DefaultSessionLifetime = 24 * time.Hour
+
+	// DatabaseFileName is the SQLite file in DATA_DIR. Fixed, not derived
+	// from APP_NAME: renaming the app must not lose the data.
+	DatabaseFileName = "database.db"
 
 	// MinAPITokenLength keeps tokens out of brute-force range.
 	MinAPITokenLength = 32
@@ -178,6 +200,11 @@ var (
 	originRe      = regexp.MustCompile(`^https?://([a-z0-9.-]+|\[[0-9a-f:]+\])(:[0-9]{1,5})?$`)
 )
 
+// DatabaseFile is the path of the database: DATA_DIR/database.db.
+func (config *Config) DatabaseFile() string {
+	return filepath.Join(config.DataDir, DatabaseFileName)
+}
+
 // Load reads the configuration from the process environment.
 func Load() (*Config, error) {
 	return loadFrom(os.Getenv)
@@ -191,6 +218,7 @@ func loadFrom(getenv func(string) string) (*Config, error) {
 		AllowedOrigins:     []string{DefaultAllowedOrigins},
 		RateLimitPerMinute: DefaultRateLimitPerMinute,
 		AdminUsername:      DefaultAdminUsername,
+		SessionLifetime:    DefaultSessionLifetime,
 	}
 
 	var err error
@@ -268,6 +296,12 @@ func loadFrom(getenv func(string) string) (*Config, error) {
 		}
 
 		config.AdminPassword = value
+	}
+
+	if value := strings.TrimSpace(getenv("SESSION_LIFETIME")); value != "" {
+		if config.SessionLifetime, err = parseDuration(value); err != nil {
+			return nil, fmt.Errorf("SESSION_LIFETIME: %w", err)
+		}
 	}
 
 	notifications, err := parseNotifications(getenv)

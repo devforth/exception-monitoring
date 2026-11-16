@@ -1,4 +1,4 @@
-package mcp
+package endpoints
 
 import (
 	"context"
@@ -6,9 +6,6 @@ import (
 	"strings"
 	"time"
 
-	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
-
-	"github.com/devforth/exception-monitoring/internal/agentprompt"
 	"github.com/devforth/exception-monitoring/internal/config"
 	"github.com/devforth/exception-monitoring/internal/store"
 )
@@ -32,11 +29,12 @@ type logOutput struct {
 	TraceID string    `json:"trace_id,omitempty"`
 }
 
-func (handler *Handler) listLogs(ctx context.Context, _ *sdk.CallToolRequest, input listLogsInput) (*sdk.CallToolResult, any, error) {
+func (handler *handlers) listLogs(ctx context.Context, call Call, input listLogsInput) (Page[logOutput], error) {
+	output := Page[logOutput]{Items: []logOutput{}}
 	filter, err := handler.logFilter(input)
 
 	if err != nil {
-		return handler.failed("list_logs", err)
+		return output, err
 	}
 
 	limit := filter.Limit
@@ -44,16 +42,15 @@ func (handler *Handler) listLogs(ctx context.Context, _ *sdk.CallToolRequest, in
 	logs, err := handler.store.ListLogs(ctx, filter)
 
 	if err != nil {
-		return handler.failed("list_logs", err)
+		return output, err
 	}
 
 	logs, more := store.Page(logs, limit)
-	output := page[logOutput]{Items: []logOutput{}}
 
 	for _, record := range logs {
 		output.Items = append(output.Items, logOutput{
 			Time: record.Timestamp, Project: handler.projectName(record.ProjectID), Level: record.Level,
-			Body: agentprompt.Redact(record.Body), TraceID: record.TraceID,
+			Body: call.Text(record.Body), TraceID: record.TraceID,
 		})
 	}
 
@@ -61,15 +58,15 @@ func (handler *Handler) listLogs(ctx context.Context, _ *sdk.CallToolRequest, in
 		output.NextCursor = strconv.FormatInt(logs[limit-1].ID, 10)
 	}
 
-	return result(output)
+	return output, nil
 }
 
-func (handler *Handler) logFilter(input listLogsInput) (store.LogFilter, error) {
+func (handler *handlers) logFilter(input listLogsInput) (store.LogFilter, error) {
 	filter := store.LogFilter{Query: strings.TrimSpace(input.Query), TraceID: strings.TrimSpace(input.TraceID)}
 
 	var err error
 
-	if filter.ProjectIDs, err = handler.projectIDs(input.Project); err != nil {
+	if filter.ProjectIDs, err = projectIDs(handler.projects.List(), input.Project); err != nil {
 		return filter, err
 	}
 
@@ -92,4 +89,40 @@ func (handler *Handler) logFilter(input listLogsInput) (store.LogFilter, error) 
 	filter.BeforeID, err = parseCursor(input.Cursor)
 
 	return filter, err
+}
+
+type listTraceInput struct {
+	TraceID string `json:"trace_id" jsonschema:"Trace ID: 32 hex characters."`
+}
+
+type traceOutput struct {
+	TraceID string               `json:"trace_id"`
+	Events  []store.EventSummary `json:"events"`
+	Logs    []store.LogRecord    `json:"logs"`
+}
+
+// listTrace is REST only: log attributes are raw SDK data.
+func (handler *handlers) listTrace(ctx context.Context, _ Call, input listTraceInput) (traceOutput, error) {
+	traceID := strings.TrimSpace(input.TraceID)
+
+	if traceID == "" {
+		return traceOutput{}, Invalid("trace_id is required")
+	}
+
+	output := traceOutput{TraceID: traceID}
+	events, err := handler.store.ListEvents(ctx, store.EventFilter{TraceID: traceID, Limit: MaxLimit})
+
+	if err != nil {
+		return output, err
+	}
+
+	logs, err := handler.store.ListLogs(ctx, store.LogFilter{TraceID: traceID, Limit: MaxLimit})
+
+	if err != nil {
+		return output, err
+	}
+
+	output.Events, output.Logs = append([]store.EventSummary{}, events...), append([]store.LogRecord{}, logs...)
+
+	return output, nil
 }

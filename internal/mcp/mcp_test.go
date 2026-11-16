@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -19,26 +20,30 @@ import (
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/devforth/exception-monitoring/internal/config"
+	"github.com/devforth/exception-monitoring/internal/endpoints"
 	"github.com/devforth/exception-monitoring/internal/fixtures"
 	"github.com/devforth/exception-monitoring/internal/ingest"
 	"github.com/devforth/exception-monitoring/internal/mcp"
 	"github.com/devforth/exception-monitoring/internal/oauth"
+	"github.com/devforth/exception-monitoring/internal/projects"
 	"github.com/devforth/exception-monitoring/internal/server"
 	"github.com/devforth/exception-monitoring/internal/store"
+	"github.com/devforth/exception-monitoring/internal/ui/services"
 )
 
 type testServer struct {
-	t        *testing.T
-	url      string
-	database *store.Store
-	token    string
-	session  *sdk.ClientSession
+	t             *testing.T
+	url           string
+	database      *store.Store
+	authorization *oauth.Server
+	token         string
+	session       *sdk.ClientSession
 }
 
 func newTestServer(t *testing.T, configure ...func(*config.Config)) *testServer {
 	t.Helper()
 
-	database, err := store.Open(context.Background(), t.TempDir())
+	database, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
 
 	if err != nil {
 		t.Fatal(err)
@@ -67,11 +72,18 @@ func newTestServer(t *testing.T, configure ...func(*config.Config)) *testServer 
 		t.Fatal(err)
 	}
 
+	registry, err := projects.Open(context.Background(), logger, database, settings.Projects)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	all := services.New(services.Dependencies{Logger: logger, Store: database, Registry: registry, Settings: settings, OAuth: authorization})
 	handler := server.New(server.Options{
 		Logger:   logger,
 		Database: database,
-		Ingest:   ingest.New(logger, settings, settings.Projects, ingest.StoreSink{Store: database, Logger: logger}),
-		MCP:      mcp.New(logger, database, settings.Projects, authorization, config.DefaultAppName, "test"),
+		Ingest:   ingest.New(logger, settings, registry, ingest.StoreSink{Store: database, Logger: logger}),
+		MCP:      mcp.New(logger, database, endpoints.New(database, registry, all), authorization, config.DefaultAppName, "test"),
 	}).Handler()
 
 	for _, fixture := range fixtures.All(t) {
@@ -87,7 +99,7 @@ func newTestServer(t *testing.T, configure ...func(*config.Config)) *testServer 
 
 	t.Cleanup(httpServer.Close)
 
-	return &testServer{t: t, url: httpServer.URL + mcp.Path, database: database, token: token}
+	return &testServer{t: t, url: httpServer.URL + mcp.Path, database: database, authorization: authorization, token: token}
 }
 
 // withToken adds the personal token to every request, as an agent configured with
@@ -199,28 +211,45 @@ func TestTools(t *testing.T) {
 	// What the UI lists is what agents get.
 	var listed []string
 
-	for _, tool := range mcp.Tools() {
+	for _, tool := range mcp.Tools(store.User{ID: 1, Role: store.RoleSuperadmin}) {
 		listed = append(listed, tool.Name)
 	}
 
 	slices.Sort(names)
 	slices.Sort(listed)
 
-	if !slices.Equal(names, listed) || len(names) != 9 {
+	if !slices.Equal(names, listed) || !slices.Contains(names, "list_issues") {
 		t.Errorf("tools %v, mcp.Tools() lists %v", names, listed)
 	}
 
 	var projects struct {
 		Projects []struct {
+			ID               int    `json:"id"`
 			Name             string `json:"name"`
 			UnresolvedIssues int    `json:"unresolved_issues"`
-		} `json:"projects"`
+			DSN              string `json:"dsn"`
+		} `json:"items"`
 	}
 
 	server.decode("list_projects", nil, &projects)
 
 	if len(projects.Projects) != 2 || projects.Projects[0].Name != "backend" || projects.Projects[0].UnresolvedIssues == 0 {
 		t.Fatalf("projects: %+v", projects)
+	}
+
+	// The DSN an agent puts into an app's SDK config: this server, as reached.
+	address := strings.TrimSuffix(server.url, mcp.Path)
+
+	for _, project := range projects.Projects {
+		key := fixtures.BackendKey
+
+		if project.Name != "backend" {
+			key = fixtures.BrowserKey
+		}
+
+		if want := strings.Replace(address, "://", "://"+key+"@", 1) + "/" + strconv.Itoa(project.ID); project.DSN != want {
+			t.Errorf("%s DSN = %q, want %q", project.Name, project.DSN, want)
+		}
 	}
 }
 
@@ -483,7 +512,7 @@ func TestSkillsDiscoveryAndLoading(t *testing.T) {
 	}
 	// Project lists use the same pagination contract as other lists.
 	var page struct {
-		Projects   []json.RawMessage `json:"projects"`
+		Projects   []json.RawMessage `json:"items"`
 		NextCursor string            `json:"next_cursor"`
 	}
 	server.decode("list_projects", map[string]any{"limit": 1}, &page)
@@ -540,7 +569,7 @@ func TestListPageLimits(t *testing.T) {
 		args map[string]any
 		key  string
 	}{
-		{"list_projects", map[string]any{}, "projects"},
+		{"list_projects", map[string]any{}, "items"},
 		{"list_issues", map[string]any{"query": "Pagination issue"}, "items"},
 		{"list_issue_events", map[string]any{"issue_id": issueID}, "items"},
 		{"list_logs", map[string]any{"trace_id": traceID}, "items"},

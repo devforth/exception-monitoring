@@ -22,8 +22,16 @@ func TestAppName(t *testing.T) {
 		"my_app 2":             "my_app-2",
 		"Моніторинг":           "exception-monitoring", // nothing agents accept is left
 	} {
-		if got := MCPServerName(name); got != want {
-			t.Errorf("MCPServerName(%q) = %q, want %q", name, got, want)
+		if got := AppSlug(name); got != want {
+			t.Errorf("AppSlug(%q) = %q, want %q", name, got, want)
 		}
+	}
+}
+
+func TestDatabaseFileIgnoresAppName(t *testing.T) {
+	settings := &Config{DataDir: "/data", AppName: "Acme Errors"}
+
+	if got := settings.DatabaseFile(); got != "/data/database.db" {
+		t.Errorf("DatabaseFile() = %q", got)
 	}
 }
