@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/devforth/exception-monitoring/internal/config"
+	"github.com/devforth/exception-monitoring/internal/platform/config"
 )
 
 // The MCP page tells how to connect an agent, at the address agents reach,

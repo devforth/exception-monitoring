@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/devforth/exception-monitoring/internal/oauth"
+	"github.com/devforth/exception-monitoring/internal/api/oauth"
 	"github.com/devforth/exception-monitoring/internal/ui/controllers"
 	"github.com/devforth/exception-monitoring/internal/ui/middleware"
 	"github.com/devforth/exception-monitoring/internal/ui/services"

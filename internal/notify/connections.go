@@ -9,9 +9,9 @@ import (
 	"slices"
 	"time"
 
-	"github.com/devforth/exception-monitoring/internal/config"
-	"github.com/devforth/exception-monitoring/internal/secret"
-	"github.com/devforth/exception-monitoring/internal/store"
+	"github.com/devforth/exception-monitoring/internal/platform/config"
+	"github.com/devforth/exception-monitoring/internal/platform/secret"
+	"github.com/devforth/exception-monitoring/internal/storage/store"
 )
 
 // Secrets of chat connections, stored as encrypted JSON in Connection.Secret.

@@ -6,8 +6,8 @@ import (
 	"net/url"
 	"slices"
 
-	"github.com/devforth/exception-monitoring/internal/oauth"
-	"github.com/devforth/exception-monitoring/internal/store"
+	"github.com/devforth/exception-monitoring/internal/api/oauth"
+	"github.com/devforth/exception-monitoring/internal/storage/store"
 )
 
 // Agents: the coding agents connected to the MCP server, the personal tokens

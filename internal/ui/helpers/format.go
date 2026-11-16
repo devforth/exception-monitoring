@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/devforth/exception-monitoring/internal/config"
-	"github.com/devforth/exception-monitoring/internal/sentry"
+	"github.com/devforth/exception-monitoring/internal/ingest/sentry"
+	"github.com/devforth/exception-monitoring/internal/platform/config"
 )
 
 // Short returns the first n characters, for IDs shown in tables.

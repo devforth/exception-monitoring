@@ -13,19 +13,19 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/devforth/exception-monitoring/internal/api"
-	"github.com/devforth/exception-monitoring/internal/config"
-	"github.com/devforth/exception-monitoring/internal/endpoints"
+	"github.com/devforth/exception-monitoring/internal/api/catalog"
+	"github.com/devforth/exception-monitoring/internal/api/mcp"
+	"github.com/devforth/exception-monitoring/internal/api/oauth"
+	"github.com/devforth/exception-monitoring/internal/api/rest"
 	"github.com/devforth/exception-monitoring/internal/ingest"
-	"github.com/devforth/exception-monitoring/internal/logging"
-	"github.com/devforth/exception-monitoring/internal/mcp"
 	"github.com/devforth/exception-monitoring/internal/notify"
-	"github.com/devforth/exception-monitoring/internal/oauth"
-	"github.com/devforth/exception-monitoring/internal/projects"
-	"github.com/devforth/exception-monitoring/internal/retention"
-	"github.com/devforth/exception-monitoring/internal/secret"
+	"github.com/devforth/exception-monitoring/internal/platform/config"
+	"github.com/devforth/exception-monitoring/internal/platform/logging"
+	"github.com/devforth/exception-monitoring/internal/platform/secret"
 	"github.com/devforth/exception-monitoring/internal/server"
-	"github.com/devforth/exception-monitoring/internal/store"
+	"github.com/devforth/exception-monitoring/internal/storage/projects"
+	"github.com/devforth/exception-monitoring/internal/storage/retention"
+	"github.com/devforth/exception-monitoring/internal/storage/store"
 	"github.com/devforth/exception-monitoring/internal/ui"
 	"github.com/devforth/exception-monitoring/internal/ui/services"
 )
@@ -168,7 +168,7 @@ func run() error {
 
 	// One catalog of requests, served as the REST API and as MCP tools, on
 	// the same services as the UI.
-	catalog := endpoints.New(database, registry, services.New(services.Dependencies{
+	endpoints := catalog.New(database, registry, services.New(services.Dependencies{
 		Logger: logger, Store: database, Registry: registry, Settings: settings, Factory: factory, OAuth: authorization,
 	}))
 
@@ -187,8 +187,8 @@ func run() error {
 			Logger:         logger,
 			Database:       database,
 			Ingest:         ingest.New(logger, settings, registry, sink),
-			API:            api.New(logger, catalog, settings.Notifications.PublicURL, settings.TrustedProxies),
-			MCP:            mcp.New(logger, database, catalog, authorization, settings.AppName, version),
+			API:            rest.New(logger, endpoints, settings.Notifications.PublicURL, settings.TrustedProxies),
+			MCP:            mcp.New(logger, database, endpoints, authorization, settings.AppName, version),
 			UI:             webUI,
 			APIToken:       settings.APIToken,
 			AllowedIPs:     settings.AllowedIPs,

@@ -25,9 +25,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/devforth/exception-monitoring/internal/access"
-	"github.com/devforth/exception-monitoring/internal/config"
-	"github.com/devforth/exception-monitoring/internal/store"
+	"github.com/devforth/exception-monitoring/internal/platform/config"
+	"github.com/devforth/exception-monitoring/internal/server/access"
+	"github.com/devforth/exception-monitoring/internal/storage/store"
 )
 
 const (

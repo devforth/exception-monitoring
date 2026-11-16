@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/devforth/exception-monitoring/internal/config"
 	"github.com/devforth/exception-monitoring/internal/fixtures"
-	"github.com/devforth/exception-monitoring/internal/sentry"
-	"github.com/devforth/exception-monitoring/internal/store"
+	"github.com/devforth/exception-monitoring/internal/ingest/sentry"
+	"github.com/devforth/exception-monitoring/internal/platform/config"
+	"github.com/devforth/exception-monitoring/internal/storage/store"
 )
 
 func fixtureEvent(t *testing.T, name string) *sentry.Event {

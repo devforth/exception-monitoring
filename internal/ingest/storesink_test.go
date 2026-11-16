@@ -12,11 +12,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/devforth/exception-monitoring/internal/config"
 	"github.com/devforth/exception-monitoring/internal/fixtures"
+	"github.com/devforth/exception-monitoring/internal/ingest/sentry"
 	"github.com/devforth/exception-monitoring/internal/notify"
-	"github.com/devforth/exception-monitoring/internal/sentry"
-	"github.com/devforth/exception-monitoring/internal/store"
+	"github.com/devforth/exception-monitoring/internal/platform/config"
+	"github.com/devforth/exception-monitoring/internal/storage/store"
 )
 
 // Replays every recorded SDK request into a real database, twice.

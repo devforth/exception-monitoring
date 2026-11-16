@@ -19,8 +19,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/devforth/exception-monitoring/internal/config"
-	"github.com/devforth/exception-monitoring/internal/sentry"
+	"github.com/devforth/exception-monitoring/internal/ingest/sentry"
+	"github.com/devforth/exception-monitoring/internal/platform/config"
 )
 
 //go:embed templates/email.html

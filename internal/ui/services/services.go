@@ -3,11 +3,11 @@ package services
 import (
 	"log/slog"
 
-	"github.com/devforth/exception-monitoring/internal/config"
+	"github.com/devforth/exception-monitoring/internal/api/oauth"
 	"github.com/devforth/exception-monitoring/internal/notify"
-	"github.com/devforth/exception-monitoring/internal/oauth"
-	"github.com/devforth/exception-monitoring/internal/projects"
-	"github.com/devforth/exception-monitoring/internal/store"
+	"github.com/devforth/exception-monitoring/internal/platform/config"
+	"github.com/devforth/exception-monitoring/internal/storage/projects"
+	"github.com/devforth/exception-monitoring/internal/storage/store"
 )
 
 // Dependencies are what the services are built from.
@@ -21,7 +21,7 @@ type Dependencies struct {
 }
 
 // All are the services the UI pages and the agents' tools (package
-// endpoints) share, so both apply the same rules.
+// catalog) share, so both apply the same rules.
 type All struct {
 	Issues       *Issues
 	Projects     *Projects

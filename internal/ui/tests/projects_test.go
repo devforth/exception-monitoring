@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/devforth/exception-monitoring/internal/config"
 	"github.com/devforth/exception-monitoring/internal/fixtures"
+	"github.com/devforth/exception-monitoring/internal/platform/config"
 )
 
 var dsnPattern = regexp.MustCompile(`http://([0-9a-f]{32})@example\.com/(\d+)`)

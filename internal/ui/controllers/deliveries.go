@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"slices"
 
-	"github.com/devforth/exception-monitoring/internal/store"
+	"github.com/devforth/exception-monitoring/internal/storage/store"
 	"github.com/devforth/exception-monitoring/internal/ui/contracts"
 	"github.com/devforth/exception-monitoring/internal/ui/lists"
 	"github.com/devforth/exception-monitoring/internal/ui/presenters"

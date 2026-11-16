@@ -5,8 +5,8 @@ import (
 	"net/url"
 	"strconv"
 
-	"github.com/devforth/exception-monitoring/internal/config"
-	"github.com/devforth/exception-monitoring/internal/mcp"
+	"github.com/devforth/exception-monitoring/internal/api/mcp"
+	"github.com/devforth/exception-monitoring/internal/platform/config"
 	"github.com/devforth/exception-monitoring/internal/ui/presenters"
 	"github.com/devforth/exception-monitoring/internal/ui/requests"
 )

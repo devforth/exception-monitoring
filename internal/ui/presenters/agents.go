@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/devforth/exception-monitoring/internal/mcp"
-	"github.com/devforth/exception-monitoring/internal/store"
+	"github.com/devforth/exception-monitoring/internal/api/mcp"
+	"github.com/devforth/exception-monitoring/internal/storage/store"
 	"github.com/devforth/exception-monitoring/internal/ui/contracts"
 )
 

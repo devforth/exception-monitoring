@@ -1,6 +1,6 @@
 package contracts
 
-import "github.com/devforth/exception-monitoring/internal/store"
+import "github.com/devforth/exception-monitoring/internal/storage/store"
 
 // The logged-in user is a store.User (requests.Viewer, $.Viewer in
 // templates); what their role allows is asked from its methods.

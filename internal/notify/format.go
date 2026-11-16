@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/devforth/exception-monitoring/internal/agentprompt"
-	"github.com/devforth/exception-monitoring/internal/config"
+	"github.com/devforth/exception-monitoring/internal/api/agentprompt"
+	"github.com/devforth/exception-monitoring/internal/platform/config"
 )
 
 // Shared wording of the short formats (Slack, Telegram). Email has its own

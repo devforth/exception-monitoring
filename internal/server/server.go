@@ -8,8 +8,8 @@ import (
 	"net/netip"
 	"time"
 
-	"github.com/devforth/exception-monitoring/internal/access"
-	"github.com/devforth/exception-monitoring/internal/httpjson"
+	"github.com/devforth/exception-monitoring/internal/server/access"
+	"github.com/devforth/exception-monitoring/internal/server/httpjson"
 )
 
 // Pinger reports whether the storage is reachable.
