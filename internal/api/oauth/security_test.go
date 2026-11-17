@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/devforth/exception-monitoring/internal/storage/sqlite"
+
 	"github.com/devforth/exception-monitoring/internal/server/access"
 	"github.com/devforth/exception-monitoring/internal/storage/store"
 )
@@ -23,7 +25,7 @@ const testUserID = 1
 
 func testAuthorization(t *testing.T) (*Server, http.Handler) {
 	t.Helper()
-	database, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
+	database, err := sqlite.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
 
 	if err != nil {
 		t.Fatal(err)

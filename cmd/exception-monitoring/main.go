@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/devforth/exception-monitoring/internal/storage/sqlite"
+
 	"github.com/devforth/exception-monitoring/internal/api/catalog"
 	"github.com/devforth/exception-monitoring/internal/api/mcp"
 	"github.com/devforth/exception-monitoring/internal/api/oauth"
@@ -77,7 +79,7 @@ func run() error {
 
 	defer stop()
 
-	database, err := store.Open(ctx, settings.DatabaseFile())
+	database, err := sqlite.Open(ctx, settings.DatabaseFile())
 
 	if err != nil {
 		return err
@@ -366,7 +368,7 @@ func resetPassword(args []string) error {
 
 	ctx := context.Background()
 	logger := logging.New(os.Stderr, settings.LogFormat, settings.LogLevel)
-	database, err := store.Open(ctx, settings.DatabaseFile())
+	database, err := sqlite.Open(ctx, settings.DatabaseFile())
 
 	if err != nil {
 		return err
@@ -416,7 +418,7 @@ const (
 // the logs it lacks (from before it existed, or after retention emptied it)
 // in small batches with a store.WritePause between them, so ingest is never
 // held up; a failed batch is tried again later.
-func indexLogSearch(ctx context.Context, logger *slog.Logger, database *store.Store) {
+func indexLogSearch(ctx context.Context, logger *slog.Logger, database store.Store) {
 	var started time.Time
 
 	for ctx.Err() == nil {

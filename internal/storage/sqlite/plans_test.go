@@ -1,4 +1,4 @@
-package store
+package sqlite
 
 import (
 	"context"
@@ -48,7 +48,7 @@ func TestListQueriesUseIndexes(t *testing.T) {
 
 	defer closeDatabase(t, database)
 
-	issues, issueArgs := IssueFilter{Status: StatusUnresolved}.where()
+	issues, issueArgs := issueWhere(IssueFilter{Status: StatusUnresolved})
 
 	for _, query := range []struct {
 		sql   string
@@ -75,9 +75,9 @@ func TestTraceAndSpanLookupsUseIndexes(t *testing.T) {
 
 	defer closeDatabase(t, database)
 
-	eventsByTrace, eventArgs := EventFilter{TraceID: "trace"}.where()
-	logsByTrace, traceArgs := LogFilter{TraceID: "trace"}.where()
-	logsBySpan, spanArgs := LogFilter{SpanIDs: []string{"a", "b"}}.where()
+	eventsByTrace, eventArgs := eventWhere(EventFilter{TraceID: "trace"})
+	logsByTrace, traceArgs := logWhere(LogFilter{TraceID: "trace"})
+	logsBySpan, spanArgs := logWhere(LogFilter{SpanIDs: []string{"a", "b"}})
 
 	for _, query := range []struct {
 		sql   string

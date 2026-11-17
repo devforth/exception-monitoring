@@ -36,7 +36,7 @@ type Handler struct {
 	auth        *session.Auth
 }
 
-func New(ctx context.Context, logger *slog.Logger, database *store.Store, settings *config.Config, registry *projects.Registry, factory notify.Factory,
+func New(ctx context.Context, logger *slog.Logger, database store.Store, settings *config.Config, registry *projects.Registry, factory notify.Factory,
 	authorization *oauth.Server,
 ) (*Handler, error) {
 	renderer, err := views.New(logger, registry, services.NewIssues(database), requests.Viewer, settings.AppName)

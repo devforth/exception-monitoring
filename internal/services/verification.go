@@ -33,14 +33,14 @@ var ResendCooldown = 30 * time.Second
 // Verification mails and checks the codes that confirm email addresses.
 type Verification struct {
 	logger      *slog.Logger
-	store       *store.Store
+	store       store.Store
 	factory     notify.Factory
 	connections *Connections
 	now         func() time.Time
 }
 
 // NewVerification: connections finds an address that is already connected.
-func NewVerification(logger *slog.Logger, database *store.Store, factory notify.Factory, connections *Connections) *Verification {
+func NewVerification(logger *slog.Logger, database store.Store, factory notify.Factory, connections *Connections) *Verification {
 	return &Verification{logger: logger, store: database, factory: factory, connections: connections, now: time.Now}
 }
 
@@ -145,7 +145,7 @@ func (verification *Verification) EmailDestination(ctx context.Context, id int64
 	return emailDestination(ctx, verification.store, id)
 }
 
-func emailDestination(ctx context.Context, database *store.Store, id int64) (store.Destination, error) {
+func emailDestination(ctx context.Context, database store.Store, id int64) (store.Destination, error) {
 	destination, err := database.GetDestination(ctx, id)
 
 	if err == nil && destination.Type != config.ChannelEmail {

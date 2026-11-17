@@ -10,16 +10,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/devforth/exception-monitoring/internal/storage/sqlite"
+
 	"github.com/devforth/exception-monitoring/internal/notify"
 	"github.com/devforth/exception-monitoring/internal/platform/config"
 	"github.com/devforth/exception-monitoring/internal/platform/secret"
 	"github.com/devforth/exception-monitoring/internal/storage/store"
 )
 
-func openStore(t *testing.T) *store.Store {
+func openStore(t *testing.T) *sqlite.Store {
 	t.Helper()
 
-	database, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
+	database, err := sqlite.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
 
 	if err != nil {
 		t.Fatal(err)
@@ -188,7 +190,7 @@ func TestSelectedEvent(t *testing.T) {
 // Saving an active connection retries its waiting messages now: a save is
 // usually the fix for why they failed.
 func TestSaveRetriesWaitingMessages(t *testing.T) {
-	database, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
+	database, err := sqlite.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
 
 	if err != nil {
 		t.Fatal(err)

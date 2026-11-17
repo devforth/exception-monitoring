@@ -8,10 +8,10 @@ import (
 
 // Deliveries reads the notification outbox for the delivery log.
 type Deliveries struct {
-	store *store.Store
+	store store.Store
 }
 
-func NewDeliveries(database *store.Store) *Deliveries {
+func NewDeliveries(database store.Store) *Deliveries {
 	return &Deliveries{store: database}
 }
 

@@ -42,7 +42,7 @@ const Path = "/mcp"
 type Handler struct {
 	oauth  *oauth.Server
 	logger *slog.Logger
-	store  *store.Store
+	store  store.Store
 	http   http.Handler
 }
 
@@ -50,7 +50,7 @@ type Handler struct {
 var roles = []string{store.RoleSuperadmin, store.RoleAdmin, store.RoleUser}
 
 // New builds the MCP servers from the catalog; appName (APP_NAME) names them to agents.
-func New(logger *slog.Logger, database *store.Store, endpoints []catalog.Endpoint, authorization *oauth.Server, appName, version string) *Handler {
+func New(logger *slog.Logger, database store.Store, endpoints []catalog.Endpoint, authorization *oauth.Server, appName, version string) *Handler {
 	handler := &Handler{oauth: authorization, logger: logger, store: database}
 	servers := map[string]*sdk.Server{}
 

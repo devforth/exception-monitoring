@@ -17,14 +17,14 @@ import (
 // Projects answers what pages show about projects: names, DSNs, colors,
 // unresolved issues and the storage used.
 type Projects struct {
-	store          *store.Store
+	store          store.Store
 	registry       *projects.Registry
 	recording      config.Recording
 	publicURL      string
 	trustedProxies []netip.Prefix
 }
 
-func NewProjects(database *store.Store, registry *projects.Registry, recording config.Recording, publicURL string, trustedProxies []netip.Prefix) *Projects {
+func NewProjects(database store.Store, registry *projects.Registry, recording config.Recording, publicURL string, trustedProxies []netip.Prefix) *Projects {
 	return &Projects{store: database, registry: registry, recording: recording, publicURL: publicURL, trustedProxies: trustedProxies}
 }
 

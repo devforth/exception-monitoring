@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/devforth/exception-monitoring/internal/storage/sqlite"
+
 	"github.com/devforth/exception-monitoring/internal/fixtures"
 	"github.com/devforth/exception-monitoring/internal/ingest/sentry"
 	"github.com/devforth/exception-monitoring/internal/notify"
@@ -21,7 +23,7 @@ import (
 
 // Replays every recorded SDK request into a real database, twice.
 func TestFixturesEndToEnd(t *testing.T) {
-	database, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
+	database, err := sqlite.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
 
 	if err != nil {
 		t.Fatal(err)
@@ -109,7 +111,7 @@ func (notifier *recordingNotifier) Notify(notification notify.Notification) {
 
 // New issues and regressions are notified; repeats of a known issue are not.
 func TestStoreSinkNotifies(t *testing.T) {
-	database, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
+	database, err := sqlite.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
 
 	if err != nil {
 		t.Fatal(err)
@@ -167,7 +169,7 @@ func TestStoreSinkNotifies(t *testing.T) {
 // A message logged in a loop keeps its newest RETENTION_LOGS_PER_MESSAGE
 // copies; a project can set its own number.
 func TestStoreSinkLimitsRepeatedLogs(t *testing.T) {
-	database, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
+	database, err := sqlite.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
 
 	if err != nil {
 		t.Fatal(err)
@@ -205,7 +207,7 @@ func TestStoreSinkLimitsRepeatedLogs(t *testing.T) {
 // Events and logs of levels a project does not record are dropped: not
 // stored and no notification.
 func TestStoreSinkRecordsChosenLevels(t *testing.T) {
-	database, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
+	database, err := sqlite.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
 
 	if err != nil {
 		t.Fatal(err)

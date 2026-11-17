@@ -15,10 +15,10 @@ import (
 // may see or disconnect is store.User.CanAccessAgentsOf.
 type Agents struct {
 	authorization *oauth.Server
-	store         *store.Store
+	store         store.Store
 }
 
-func NewAgents(authorization *oauth.Server, database *store.Store) *Agents {
+func NewAgents(authorization *oauth.Server, database store.Store) *Agents {
 	return &Agents{authorization: authorization, store: database}
 }
 

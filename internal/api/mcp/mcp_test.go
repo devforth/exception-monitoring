@@ -17,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/devforth/exception-monitoring/internal/storage/sqlite"
+
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/devforth/exception-monitoring/internal/api/catalog"
@@ -34,7 +36,7 @@ import (
 type testServer struct {
 	t             *testing.T
 	url           string
-	database      *store.Store
+	database      *sqlite.Store
 	authorization *oauth.Server
 	token         string
 	session       *sdk.ClientSession
@@ -43,7 +45,7 @@ type testServer struct {
 func newTestServer(t *testing.T, configure ...func(*config.Config)) *testServer {
 	t.Helper()
 
-	database, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
+	database, err := sqlite.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
 
 	if err != nil {
 		t.Fatal(err)

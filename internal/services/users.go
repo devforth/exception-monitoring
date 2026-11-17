@@ -23,11 +23,11 @@ var ErrForbidden = errors.New("not allowed")
 // showed. Users change their own password through Auth.
 type Users struct {
 	logger *slog.Logger
-	store  *store.Store
+	store  store.Store
 	now    func() time.Time
 }
 
-func NewUsers(logger *slog.Logger, database *store.Store) *Users {
+func NewUsers(logger *slog.Logger, database store.Store) *Users {
 	return &Users{logger: logger, store: database, now: time.Now}
 }
 
@@ -249,7 +249,7 @@ func nameOr(name, username string) string {
 
 // setPassword stores a new password hash with what the change ends. It
 // checks no role: callers are the methods of Users, which do.
-func setPassword(ctx context.Context, database *store.Store, id int64, password string, change store.PasswordChange) error {
+func setPassword(ctx context.Context, database store.Store, id int64, password string, change store.PasswordChange) error {
 	hash, err := HashPassword(password)
 
 	if err != nil {

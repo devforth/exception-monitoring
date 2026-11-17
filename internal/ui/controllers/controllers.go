@@ -52,7 +52,7 @@ type Controllers struct {
 // Dependencies are the parts Controllers is built from.
 type Dependencies struct {
 	Logger   *slog.Logger
-	Store    *store.Store
+	Store    store.Store
 	Registry *projects.Registry
 	Settings *config.Config
 	Factory  notify.Factory

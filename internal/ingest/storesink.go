@@ -18,7 +18,7 @@ import (
 // It is the bridge between the Sentry format and the store, which knows
 // nothing about Sentry.
 type StoreSink struct {
-	Store  *store.Store
+	Store  store.Store
 	Logger *slog.Logger
 	Now    func() time.Time // nil means time.Now
 	// Notifier is told about new and regressed issues. Nil sends nothing.

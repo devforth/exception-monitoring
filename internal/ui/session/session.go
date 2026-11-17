@@ -133,7 +133,7 @@ func IsHTTPS(r *http.Request, trustedProxies []netip.Prefix) bool {
 // Auth is the login of the panel's users: sessions and the limit on failed logins.
 type Auth struct {
 	logger         *slog.Logger
-	store          *store.Store
+	store          store.Store
 	users          *services.Users // checks passwords
 	trustedProxies []netip.Prefix
 	sessionLife    time.Duration // SESSION_LIFETIME
@@ -147,7 +147,7 @@ type Auth struct {
 	opened atomic.Bool
 }
 
-func NewAuth(logger *slog.Logger, database *store.Store, settings *config.Config) *Auth {
+func NewAuth(logger *slog.Logger, database store.Store, settings *config.Config) *Auth {
 	return &Auth{logger: logger, store: database, users: services.NewUsers(logger, database), trustedProxies: settings.TrustedProxies, sessionLife: settings.SessionLifetime, byAddress: newLoginLimiter(), byUsername: newLoginLimiter(), now: time.Now}
 }
 

@@ -37,7 +37,7 @@ The image has a writable `/tmp` (scratch has none): SQLite needs it for temporar
 - `platform/`: what every part uses: `config` (with the field limits and the level order, `HighestFirst`/`InLevelOrder`), `logging`, `secret`, `text` (`TruncateRunes`, `EmailLocalPart`).
 - `server/`: the HTTP shell (routes, health) with `access` (IP allowlist, token) and `httpjson`.
 - `ingest/`: receiving from Sentry SDKs (handler, `StoreSink`) with `sentry` (wire format), `scrub`, `compact`, `grouping`.
-- `storage/`: `store` (SQLite, migrations), `projects` (registry), `retention`.
+- `storage/`: `store` (the records, their rules and the `Store` interface everything else uses), `sqlite` (its SQLite implementation with the migrations; to be replaced by goleveldb, see `docs/storage-plan.md`), `projects` (registry), `retention`. Where this file says `store` for SQL, migrations or queries, the code is in `sqlite` now; the rest of the code takes `store.Store`, and only `main` and tests open `sqlite.Open`.
 - `notify/`: notifications.
 - `api/`: the request catalog and its transports: `catalog`, `rest`, `mcp`, `oauth` (MCP sign-in), `agentprompt`.
 - `services/`: the rules of the application, the only way the UI and the agents' tools reach the database (see below).

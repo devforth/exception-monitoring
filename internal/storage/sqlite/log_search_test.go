@@ -1,4 +1,4 @@
-package store
+package sqlite
 
 import (
 	"context"
@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	domain "github.com/devforth/exception-monitoring/internal/storage/store"
 )
 
 func saveBodies(t *testing.T, database *Store, bodies ...string) {
@@ -154,9 +156,9 @@ func TestLogCountStopsAtTheLimit(t *testing.T) {
 	database := openTestStore(t)
 	saveBodies(t, database, strings.Split("a b c d e f g", " ")...)
 
-	defer func(limit int) { LogCountLimit = limit }(LogCountLimit)
+	defer func(limit int) { domain.LogCountLimit = limit }(domain.LogCountLimit)
 
-	LogCountLimit = 5
+	domain.LogCountLimit = 5
 
 	if count, more, err := database.CountLogs(context.Background(), LogFilter{}); err != nil || count != 5 || !more {
 		t.Errorf("count %d, more %v, err %v", count, more, err)

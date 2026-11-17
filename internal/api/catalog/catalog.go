@@ -8,7 +8,7 @@ import (
 
 // handlers holds what the handlers read; one per server.
 type handlers struct {
-	store    *store.Store
+	store    store.Store
 	projects config.ProjectList
 	services *services.All
 }
@@ -18,7 +18,7 @@ type handlers struct {
 // Descriptions say when to use an endpoint; the MCP instructions and skills
 // hold the workflow. Called with nil arguments it serves only to read the
 // definitions (the MCP page lists them).
-func New(database *store.Store, projects config.ProjectList, all *services.All) []Endpoint {
+func New(database store.Store, projects config.ProjectList, all *services.All) []Endpoint {
 	handler := &handlers{store: database, projects: projects, services: all}
 
 	return append([]Endpoint{

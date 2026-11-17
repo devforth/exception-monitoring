@@ -20,7 +20,7 @@ import (
 // Dependencies are what the services are built from.
 type Dependencies struct {
 	Logger   *slog.Logger
-	Store    *store.Store
+	Store    store.Store
 	Registry *projects.Registry
 	Settings *config.Config
 	Factory  notify.Factory

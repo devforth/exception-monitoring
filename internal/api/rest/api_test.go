@@ -17,6 +17,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/devforth/exception-monitoring/internal/storage/sqlite"
+
 	"github.com/devforth/exception-monitoring/internal/api/catalog"
 	"github.com/devforth/exception-monitoring/internal/api/rest"
 	"github.com/devforth/exception-monitoring/internal/fixtures"
@@ -25,7 +27,6 @@ import (
 	"github.com/devforth/exception-monitoring/internal/server"
 	"github.com/devforth/exception-monitoring/internal/services"
 	"github.com/devforth/exception-monitoring/internal/storage/projects"
-	"github.com/devforth/exception-monitoring/internal/storage/store"
 )
 
 const (
@@ -39,7 +40,7 @@ type testServer struct {
 
 func newTestServer(t *testing.T, allowedIPs ...string) *testServer {
 	t.Helper()
-	database, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
+	database, err := sqlite.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
 
 	if err != nil {
 		t.Fatal(err)

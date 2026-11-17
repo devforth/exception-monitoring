@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/devforth/exception-monitoring/internal/storage/sqlite"
+
 	"github.com/devforth/exception-monitoring/internal/platform/config"
 	"github.com/devforth/exception-monitoring/internal/storage/retention"
 	"github.com/devforth/exception-monitoring/internal/storage/store"
@@ -20,14 +22,14 @@ var now = time.Date(2026, 11, 12, 12, 0, 0, 0, time.UTC)
 type testSetup struct {
 	t        *testing.T
 	ctx      context.Context
-	database *store.Store
+	database *sqlite.Store
 	count    int
 }
 
 func newSetup(t *testing.T) *testSetup {
 	t.Helper()
 
-	database, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
+	database, err := sqlite.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
 
 	if err != nil {
 		t.Fatal(err)

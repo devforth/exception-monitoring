@@ -8,10 +8,10 @@ import (
 
 // Logs reads the logs list.
 type Logs struct {
-	store *store.Store
+	store store.Store
 }
 
-func NewLogs(database *store.Store) *Logs {
+func NewLogs(database store.Store) *Logs {
 	return &Logs{store: database}
 }
 

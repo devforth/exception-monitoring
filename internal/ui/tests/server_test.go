@@ -9,6 +9,8 @@ import (
 	"slices"
 	"time"
 
+	"github.com/devforth/exception-monitoring/internal/storage/sqlite"
+
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -61,10 +63,10 @@ func newTestServer(t *testing.T, adminPassword string) *testServer {
 	return startServer(t, openDatabase(t), "admin", adminPassword)
 }
 
-func openDatabase(t *testing.T) *store.Store {
+func openDatabase(t *testing.T) *sqlite.Store {
 	t.Helper()
 
-	database, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
+	database, err := sqlite.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
 
 	if err != nil {
 		t.Fatal(err)
@@ -88,7 +90,7 @@ func newTestServerWith(t *testing.T, configure func(settings *config.Config)) *t
 	return startServer(t, openDatabase(t), "admin", password, configure)
 }
 
-func startServer(t *testing.T, database *store.Store, adminUsername, adminPassword string, configure ...func(settings *config.Config)) *testServer {
+func startServer(t *testing.T, database store.Store, adminUsername, adminPassword string, configure ...func(settings *config.Config)) *testServer {
 	t.Helper()
 
 	logger := slog.New(slog.NewTextHandler(testLog{t}, nil))

@@ -15,10 +15,10 @@ import (
 // Issues: the issue list and pages, the actions on issues and the logs
 // shown with an event.
 type Issues struct {
-	store *store.Store
+	store store.Store
 }
 
-func NewIssues(database *store.Store) *Issues {
+func NewIssues(database store.Store) *Issues {
 	return &Issues{store: database}
 }
 

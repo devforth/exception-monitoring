@@ -18,7 +18,7 @@ import (
 // names them, and their delivery health.
 type Connections struct {
 	logger        *slog.Logger
-	store         *store.Store
+	store         store.Store
 	factory       notify.Factory
 	projects      config.ProjectList
 	notifications config.Notifications
@@ -26,7 +26,7 @@ type Connections struct {
 	now           func() time.Time
 }
 
-func NewConnections(logger *slog.Logger, database *store.Store, factory notify.Factory, projects config.ProjectList, settings *config.Config) *Connections {
+func NewConnections(logger *slog.Logger, database store.Store, factory notify.Factory, projects config.ProjectList, settings *config.Config) *Connections {
 	return &Connections{logger: logger, store: database, factory: factory, projects: projects, notifications: settings.Notifications, recording: settings.Recording, now: time.Now}
 }
 

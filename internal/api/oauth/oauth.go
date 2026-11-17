@@ -59,7 +59,7 @@ const (
 )
 
 type Server struct {
-	Store *store.Store
+	Store store.Store
 	// Name (APP_NAME) is how agents show this server.
 	Name string
 	// PublicURL and TrustedProxies give the server's address, as for DSNs.

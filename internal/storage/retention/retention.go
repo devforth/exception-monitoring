@@ -47,7 +47,7 @@ type Store interface {
 	RefreshLogSearch(ctx context.Context) (bool, error)
 }
 
-var _ Store = (*store.Store)(nil)
+var _ Store = (store.Store)(nil)
 
 type Cleaner struct {
 	Store    Store

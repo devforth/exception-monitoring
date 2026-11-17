@@ -105,7 +105,7 @@ func (err *RetryAfterError) Error() string {
 
 func (err *RetryAfterError) Unwrap() error { return err.Err }
 
-// Store is what the notifier needs from the database (implemented by *store.Store).
+// Store is what the notifier needs from the database (implemented by store.Store).
 type Store interface {
 	ListConnections(ctx context.Context) ([]store.Connection, error)
 	GetConnection(ctx context.Context, id int64) (store.Connection, error)

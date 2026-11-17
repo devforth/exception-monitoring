@@ -24,7 +24,7 @@ import (
 )
 
 type Registry struct {
-	store *store.Store
+	store store.Store
 	env   config.Projects
 	// current holds the list and its stylesheet together, so a reader never
 	// sees one from before a change and the other from after.
@@ -46,7 +46,7 @@ type Stylesheet struct {
 var _ config.ProjectList = (*Registry)(nil)
 
 // Open seeds the projects of PROJECTS and loads the list.
-func Open(ctx context.Context, logger *slog.Logger, database *store.Store, env config.Projects) (*Registry, error) {
+func Open(ctx context.Context, logger *slog.Logger, database store.Store, env config.Projects) (*Registry, error) {
 	registry := &Registry{store: database, env: env}
 
 	for _, project := range env {
