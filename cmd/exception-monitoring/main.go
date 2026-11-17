@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"syscall"
 	"time"
@@ -97,6 +98,22 @@ func run() error {
 		logger.Warn("ALLOWED_IPS is not set, the API and UI are reachable from any address")
 	}
 
+	// Chat tokens are stored encrypted: without SECRET_KEY the key is the one
+	// generated into the data directory.
+	if settings.Notifications.SecretKey == "" {
+		key, created, err := secret.KeyFile(settings.DataDir)
+
+		if err != nil {
+			return fmt.Errorf("secret key: %w", err)
+		}
+
+		if created {
+			logger.Info("secret key generated: set SECRET_KEY to keep it outside the data directory", "file", filepath.Join(settings.DataDir, secret.KeyFileName))
+		}
+
+		settings.Notifications.SecretKey = key
+	}
+
 	factory, err := notificationFactory(logger, settings.AppName, settings.Notifications)
 
 	if err != nil {
@@ -165,6 +182,22 @@ func run() error {
 	}()
 
 	logRetention(logger, settings.Retention)
+
+	// Logs from before the search index are added to it in the background;
+	// until then a search reads logs as before.
+	indexingCtx, stopIndexing := context.WithCancel(ctx)
+	indexingDone := make(chan struct{})
+
+	go func() {
+		defer close(indexingDone)
+
+		indexLogSearch(indexingCtx, logger, database)
+	}()
+
+	defer func() {
+		stopIndexing()
+		<-indexingDone
+	}()
 
 	// One catalog of requests, served as the REST API and as MCP tools, on
 	// the same services as the UI.
@@ -369,4 +402,55 @@ func resetPassword(args []string) error {
 	fmt.Printf("Temporary password of %s: %s\nLog in with it and choose a new password.\n", username, password)
 
 	return nil
+}
+
+// Log search indexing: logs per transaction (one took up to 0.3 s on 3.6M
+// logs), and how often a filled index is checked for a refill started by
+// retention (store.RefreshLogSearch).
+const (
+	logSearchBatch = 2000
+	logSearchCheck = time.Minute
+)
+
+// indexLogSearch keeps the log search index filled until ctx ends: it adds
+// the logs it lacks (from before it existed, or after retention emptied it)
+// in small batches with a store.WritePause between them, so ingest is never
+// held up; a failed batch is tried again later.
+func indexLogSearch(ctx context.Context, logger *slog.Logger, database *store.Store) {
+	var started time.Time
+
+	for ctx.Err() == nil {
+		pause := store.WritePause
+
+		switch {
+		case database.LogSearchReady(ctx):
+			if !started.IsZero() {
+				logger.Info("logs indexed for search", "took", time.Since(started).Round(time.Second))
+				started = time.Time{}
+			}
+
+			pause = logSearchCheck
+		case started.IsZero():
+			remaining, err := database.LogsToIndex(ctx)
+
+			if err != nil {
+				logger.Warn("count logs to index for search", "err", err)
+			}
+
+			logger.Info("indexing logs for search in the background", "logs", remaining)
+
+			started = time.Now()
+		default:
+			if _, err := database.IndexLogsForSearch(ctx, logSearchBatch); err != nil && ctx.Err() == nil {
+				logger.Warn("index logs for search, will retry", "err", err)
+
+				pause = 10 * time.Second
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+		case <-time.After(pause):
+		}
+	}
 }

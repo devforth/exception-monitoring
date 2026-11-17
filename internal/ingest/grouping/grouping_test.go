@@ -270,3 +270,61 @@ func TestLogFingerprint(t *testing.T) {
 		t.Error("different messages must not share a fingerprint")
 	}
 }
+
+// browserEvent builds a stack as a browser SDK sends it in dev: every frame
+// in-app, no source; "file|function|line", oldest first.
+func browserEvent(t *testing.T, value string, frames ...string) *sentry.Event {
+	t.Helper()
+
+	var frameJSON []string
+
+	for _, frame := range frames {
+		parts := strings.Split(frame, "|")
+		frameJSON = append(frameJSON, `{"filename":"http://web.tracklify.localhost:8080`+parts[0]+`","function":"`+parts[1]+`","lineno":`+parts[2]+`,"in_app":true}`)
+	}
+
+	return parse(t, `{"exception":{"values":[{"type":"TypeError","value":"`+value+`",
+		"stacktrace":{"frames":[`+strings.Join(frameJSON, ",")+`]}}]}}`)
+}
+
+// The same error in a Vue page: once with only Vue's scheduler under it, once
+// with the async path the click took (Firefox adds it, marked with "*"), the
+// library frames all marked in-app by the browser SDK. One issue.
+func TestBrowserErrorGroupsByItsSynchronousAppFrames(t *testing.T) {
+	const value = `can't access property \"name\", taskUnderEdit.value.lastEditor is undefined`
+
+	alone := browserEvent(t, value,
+		"/node_modules/.vite/deps/vue.runtime.esm-bundler-DTzGrwt5.js|flushJobs|2146",
+		"/node_modules/.vite/deps/vue.runtime.esm-bundler-DTzGrwt5.js|flushPostFlushCbs|2102",
+		"/node_modules/.vite/deps/vue.runtime.esm-bundler-DTzGrwt5.js|callWithErrorHandling|1960",
+		"/src/views/TaskView.vue|setup/<|65")
+	fromClick := browserEvent(t, value,
+		"/node_modules/.vite/deps/@sentry_vue.js|sentryWrapped|12683",
+		"/src/components/widgets/Task.vue|_sfc_render/_cache[6]|430",
+		"/src/views/MyTasks.vue|onClick|392",
+		"/src/views/MyTasks.vue|openTaskDialog|105",
+		"/src/store/project.js|mutationOpenTaskPopup|390",
+		"/node_modules/.vite/deps/vue-router.js|promise callback*pushWithRedirect|6677",
+		"/node_modules/.vite/deps/vue-router.js|finalizeNavigation|6768",
+		"/node_modules/.vite/deps/vue.runtime.esm-bundler-DTzGrwt5.js|promise callback*queueFlush|2051",
+		"/node_modules/.vite/deps/vue.runtime.esm-bundler-DTzGrwt5.js|flushJobs|2146",
+		"/node_modules/.vite/deps/vue.runtime.esm-bundler-DTzGrwt5.js|flushPostFlushCbs|2102",
+		"/src/views/TaskView.vue|setup/<|65")
+
+	if Fingerprint(alone) != Fingerprint(fromClick) {
+		t.Errorf("one error, two issues:\n%v\n%v", Components(alone), Components(fromClick))
+	}
+
+	if culprit := Culprit(fromClick); culprit != "setup/< (/src/views/TaskView.vue)" {
+		t.Errorf("culprit = %q", culprit)
+	}
+
+	// Another place in the app's code is another problem.
+	elsewhere := browserEvent(t, value,
+		"/node_modules/.vite/deps/vue.runtime.esm-bundler-DTzGrwt5.js|flushJobs|2146",
+		"/src/views/TaskHistory.vue|setup/<|40")
+
+	if Fingerprint(alone) == Fingerprint(elsewhere) {
+		t.Error("errors of two components grouped together")
+	}
+}

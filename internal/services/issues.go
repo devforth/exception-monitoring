@@ -161,7 +161,9 @@ func (issues *Issues) TraceLogs(ctx context.Context, event store.Event) (int, er
 		return 0, nil
 	}
 
-	return issues.store.CountLogs(ctx, store.LogFilter{TraceID: event.TraceID})
+	count, _, err := issues.store.CountLogs(ctx, store.LogFilter{TraceID: event.TraceID})
+
+	return count, err
 }
 
 // relatedLogsWindow bounds the fallback by time: logs of the same trace this

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/devforth/exception-monitoring/docs"
+
 	"github.com/devforth/exception-monitoring/internal/fixtures"
 	"github.com/devforth/exception-monitoring/internal/platform/config"
 )
@@ -130,6 +132,48 @@ func TestProjectFromEnv(t *testing.T) {
 
 	if response := server.post("/projects/1", url.Values{"retention_events": {"forever"}}); response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), "Enter a period") {
 		t.Fatalf("invalid retention: %d", response.Code)
+	}
+}
+
+// Levels to record and Retention start closed, their headings showing the
+// values set inside; a refused retention value opens its section.
+func TestProjectFormSectionsShowTheirValues(t *testing.T) {
+	server := newTestServer(t, password)
+	server.login()
+
+	if response := server.post("/projects/1", url.Values{"retention_events": {"90d"}, "event_level": {"fatal"}}); response.Code != http.StatusSeeOther {
+		t.Fatalf("update: %d %s", response.Code, response.Body)
+	}
+
+	page := server.page("/projects/1")
+
+	if strings.Contains(page, `<details class="form-section" open>`) {
+		t.Error("a section is open")
+	}
+
+	summary := regexp.MustCompile(`(?s)<summary>\s*<span class="section-title">Levels to record</span>(.*?)</summary>`).FindStringSubmatch(page)
+
+	if summary == nil || !strings.Contains(summary[1], ">fatal</span>") || strings.Contains(summary[1], ">error</span>") {
+		t.Errorf("levels summary: %v", summary)
+	}
+
+	if !strings.Contains(page, `data-summary-field="retention_events" data-summary-label="events" data-summary-zero="forever">events 90d</span>`) ||
+		!strings.Contains(page, `data-summary-field="retention_logs" data-summary-label="logs" data-summary-zero="forever" class="muted" title="Default">logs `) {
+		t.Error("the retention summary does not show the own and the default values")
+	}
+
+	// Each field explains itself with the text of the docs: retention from
+	// configuration.md, the others from ui.md.
+	hint, _ := docs.Setting("RETENTION_EVENTS")
+
+	if !strings.Contains(page, `title="`+hint+`"`) || strings.Count(page, `class="hint"`) != 9 {
+		t.Error("the retention fields lack their hints")
+	}
+
+	refused := server.post("/projects/1", url.Values{"retention_logs": {"forever"}}).Body.String()
+
+	if !strings.Contains(refused, `<details class="form-section" open>`) {
+		t.Error("the section with a refused value stays closed")
 	}
 }
 

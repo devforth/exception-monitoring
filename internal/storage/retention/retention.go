@@ -44,6 +44,7 @@ type Store interface {
 	CountRecords(ctx context.Context) (int64, error)
 	DatabaseSize(ctx context.Context) (int64, error)
 	ReleaseFreeSpace(ctx context.Context) error
+	RefreshLogSearch(ctx context.Context) (bool, error)
 }
 
 var _ Store = (*store.Store)(nil)
@@ -146,6 +147,16 @@ func (cleaner *Cleaner) Clean(ctx context.Context) (Result, error) {
 
 			result.OversizeEvents += deleted
 
+			// Deleted logs keep their place in the search index until it is
+			// filled anew; past that point emptying it frees the most.
+			if err := cleaner.refreshLogSearch(ctx); err != nil {
+				return result, err
+			}
+
+			if err := store.Pause(ctx); err != nil {
+				return result, err
+			}
+
 			if result.SizeBytes, err = cleaner.Store.DatabaseSize(ctx); err != nil {
 				return result, err
 			}
@@ -154,6 +165,10 @@ func (cleaner *Cleaner) Clean(ctx context.Context) (Result, error) {
 
 	if !result.deletedAnything() {
 		return result, nil
+	}
+
+	if err := cleaner.refreshLogSearch(ctx); err != nil {
+		return result, err
 	}
 
 	if err := cleaner.Store.ReleaseFreeSpace(ctx); err != nil {
@@ -247,4 +262,16 @@ func (cleaner *Cleaner) now() time.Time {
 	}
 
 	return time.Now()
+}
+
+// refreshLogSearch empties the search index when it holds mostly deleted
+// logs; the background indexing fills it again.
+func (cleaner *Cleaner) refreshLogSearch(ctx context.Context) error {
+	refreshed, err := cleaner.Store.RefreshLogSearch(ctx)
+
+	if refreshed {
+		cleaner.Logger.Info("log search index holds mostly deleted logs, filling it anew in the background")
+	}
+
+	return err
 }

@@ -18,3 +18,6 @@
 
 {{/* A log line; app.js shows "Expand" when it is taller than the box. */}}
 {{define "log-body"}}<div class="log-text"><pre class="log-body">{{cleanLog .}}</pre><div class="log-actions"><button type="button" class="link small expand" hidden>Expand</button><button type="button" class="link small full-screen">Full screen</button></div></div>{{end}}
+
+{{/* A question mark whose tooltip explains a field: {{template "hint" (settingHelp "RETENTION_EVENTS")}}. */}}
+{{define "hint"}}{{with .}}<span class="hint" tabindex="0" role="img" title="{{.}}" aria-label="{{.}}">?</span>{{end}}{{end}}

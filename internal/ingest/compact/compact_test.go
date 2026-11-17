@@ -65,6 +65,19 @@ func TestEventKeepsLibrarySourceWithoutAppFrames(t *testing.T) {
 	}
 }
 
+// A dev server (Vite) serves libraries from the page's origin, so the browser
+// SDK marks their frames in-app; they are still library code.
+func TestEventDropsSourceOfInstalledPackagesMarkedInApp(t *testing.T) {
+	payload := `{"exception": {"values": [{"type": "Error", "stacktrace": {"frames": [
+		{"filename": "http://localhost:8080/node_modules/.vite/deps/vue.js", "in_app": true, "context_line": "library source"},
+		{"filename": "http://localhost:8080/src/App.vue", "in_app": true, "context_line": "app source"}]}}]}}`
+	compacted := string(compactJSON([]byte(payload)))
+
+	if strings.Contains(compacted, "library source") || !strings.Contains(compacted, "app source") {
+		t.Fatalf("library source kept or app source dropped: %s", compacted)
+	}
+}
+
 func TestEventLeavesOtherInputAlone(t *testing.T) {
 	for _, payload := range []string{"not json", `["a list"]`, "null"} {
 		if got := string(compactJSON([]byte(payload))); got != payload {

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/mail"
 	"net/url"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -12,9 +11,9 @@ import (
 
 // Notifications are the server-wide settings of alerts. Where alerts go
 // (email addresses, Telegram chats, Slack webhooks) is managed in the UI and
-// stored in the database; the environment only says which channel types are
-// allowed and provides what they need: SMTP for email, SECRET_KEY to encrypt
-// tokens in the database.
+// stored in the database; the environment provides what the types need: SMTP
+// for email, SECRET_KEY to encrypt chat tokens in the database (generated in
+// the data directory when not set).
 type Notifications struct {
 	// PublicURL is where the server is reachable (e.g. https://errors.example.com),
 	// used for links in notifications and for the DSNs shown on the Projects
@@ -22,10 +21,8 @@ type Notifications struct {
 	// UI was opened with.
 	PublicURL string
 
-	// ChannelTypes are the connection types allowed (NOTIFY_CHANNEL_TYPES).
-	ChannelTypes []string
-
-	// SecretKey encrypts chat tokens and webhook URLs in the database.
+	// SecretKey encrypts chat tokens and webhook URLs in the database:
+	// SECRET_KEY, or the key generated in the data directory at startup.
 	SecretKey string
 
 	SMTP SMTP
@@ -61,7 +58,17 @@ const (
 	ChannelSlack    = "slack"
 )
 
-// AllChannelTypes is every supported type, the default of NOTIFY_CHANNEL_TYPES.
+// Patterns of the chat fields of a connection. They are also the pattern
+// attributes of the form, which browsers read in the "v" mode, hence the
+// escaped "-" in classes; the server anchors them.
+const (
+	TelegramTokenPattern = `\d+:[A-Za-z0-9_\-]{20,}`
+	TelegramChatPattern  = `-?\d+|@[A-Za-z0-9_]{5,}`
+	SlackTokenPattern    = `xoxb-[A-Za-z0-9\-]{10,}`
+	SlackChannelPattern  = `#?[A-Za-z0-9._\-]{1,80}`
+)
+
+// AllChannelTypes is every supported type.
 var AllChannelTypes = []string{ChannelEmail, ChannelTelegram, ChannelSlack}
 
 const (
@@ -81,20 +88,19 @@ func (smtp SMTP) Enabled() bool { return smtp.Host != "" }
 // ChannelAvailable reports whether new connections of this type can be
 // created, and if not, what is missing, for the UI.
 func (notifications Notifications) ChannelAvailable(channelType string) (bool, string) {
-	if !slices.Contains(notifications.ChannelTypes, channelType) {
-		return false, "not in NOTIFY_CHANNEL_TYPES"
-	}
-
 	switch channelType {
 	case ChannelEmail:
 		if !notifications.SMTP.Enabled() {
 			return false, "set SMTP_HOST and EMAIL_FROM"
 		}
 	case ChannelTelegram, ChannelSlack:
-		// Their tokens are stored encrypted, so they need the key.
+		// Their tokens are stored encrypted, so they need the key; the server
+		// always has one (SECRET_KEY or generated), tests may not.
 		if notifications.SecretKey == "" {
 			return false, "set SECRET_KEY"
 		}
+	default:
+		return false, "unknown type"
 	}
 
 	return true, ""
@@ -102,11 +108,10 @@ func (notifications Notifications) ChannelAvailable(channelType string) (bool, s
 
 func parseNotifications(getenv func(string) string) (Notifications, error) {
 	notifications := Notifications{
-		ChannelTypes: AllChannelTypes,
-		SMTP:         SMTP{Port: DefaultSMTPPort},
-		RetryFor:     DefaultNotifyRetryFor,
-		KeepSent:     DefaultNotifyKeepSent,
-		KeepFailed:   DefaultNotifyKeepFailed,
+		SMTP:       SMTP{Port: DefaultSMTPPort},
+		RetryFor:   DefaultNotifyRetryFor,
+		KeepSent:   DefaultNotifyKeepSent,
+		KeepFailed: DefaultNotifyKeepFailed,
 	}
 
 	for _, setting := range []struct {
@@ -136,16 +141,6 @@ func parseNotifications(getenv func(string) string) (Notifications, error) {
 		notifications.PublicURL = value
 	}
 
-	if value := getenv("NOTIFY_CHANNEL_TYPES"); value != "" {
-		types, err := parseChannelTypes(value)
-
-		if err != nil {
-			return notifications, fmt.Errorf("NOTIFY_CHANNEL_TYPES: %w", err)
-		}
-
-		notifications.ChannelTypes = types
-	}
-
 	if value := getenv("SECRET_KEY"); value != "" {
 		if len(value) < MinSecretKeyLength {
 			return notifications, fmt.Errorf("SECRET_KEY: must be at least %d characters (e.g. openssl rand -hex 32)", MinSecretKeyLength)
@@ -158,26 +153,6 @@ func parseNotifications(getenv func(string) string) (Notifications, error) {
 	notifications.SMTP = smtp
 
 	return notifications, err
-}
-
-// parseChannelTypes parses "email,slack"; "none" allows no type.
-func parseChannelTypes(raw string) ([]string, error) {
-	types := []string{}
-
-	for _, entry := range strings.Split(raw, ",") {
-		entry = strings.ToLower(strings.TrimSpace(entry))
-
-		switch {
-		case entry == "" || entry == "none":
-			continue
-		case !slices.Contains(AllChannelTypes, entry):
-			return nil, fmt.Errorf("unknown type %q (expected %s or none)", entry, strings.Join(AllChannelTypes, ", "))
-		case !slices.Contains(types, entry):
-			types = append(types, entry)
-		}
-	}
-
-	return types, nil
 }
 
 func parseSMTP(getenv func(string) string, smtp SMTP) (SMTP, error) {

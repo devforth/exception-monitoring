@@ -21,15 +21,8 @@ type AgentsView struct {
 	// viewer manages, chosen from Owners (empty when there is no choice).
 	OwnerID       int64
 	Owners        []AgentOwner
-	Tools         []AgentTool
 	IPsRestricted bool // ALLOWED_IPS limits who may connect
 	Unencrypted   bool // tokens would cross the network without TLS
-}
-
-type AgentTool struct {
-	Name        string
-	Description string
-	ReadOnly    bool
 }
 
 // AgentTab selects the instructions for one MCP client.

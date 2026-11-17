@@ -10,20 +10,24 @@
 <form class="connection-form project-form" method="post" action="{{if .New}}/projects{{else}}/projects/{{.ID}}{{end}}">
   {{if .FromEnv}}
   <p class="muted">Name and key are set in <code>PROJECTS</code>; change them there. Retention can be set here.</p>
-  {{else}}
-  <label>Name
-    <input name="name" value="{{.Name}}" maxlength="{{limits.ProjectName}}" required pattern="{{limits.ProjectNamePattern}}" placeholder="backend">
-  </label>
-  {{with index .Errors "name"}}<p class="field-error">{{.}}</p>{{end}}
   {{end}}
 
-  <label class="color-field">Color
-    <span class="inline-form"><input type="color" name="color" value="{{.Color}}"> <span class="muted small">marks the project in lists and emails</span></span>
-  </label>
+  {{/* The color sits next to the name: it marks the project in lists and emails. */}}
+  <div class="field-row">
+    <label class="color-field"><span>Color {{template "hint" (fieldHelp "Projects" "Color")}}</span>
+      <input type="color" name="color" value="{{.Color}}">
+    </label>
+    {{if not .FromEnv}}
+    <label class="grow">Name
+      <input name="name" value="{{.Name}}" maxlength="{{limits.ProjectName}}" required pattern="{{limits.ProjectNamePattern}}" placeholder="backend">
+    </label>
+    {{end}}
+  </div>
+  {{with index .Errors "name"}}<p class="field-error">{{.}}</p>{{end}}
   {{with index .Errors "color"}}<p class="field-error">{{.}}</p>{{end}}
 
   {{with .DSN}}
-  <div class="field">DSN
+  <div class="field"><span>DSN {{template "hint" (fieldHelp "Projects" "DSN")}}</span>
     <div class="copy-row dsn-row">
       <input class="dsn" id="project-dsn" value="{{.}}" readonly aria-label="DSN">
       {{template "copy-button" (copyButton "project-dsn" "Copy" "Copy the DSN" "DSN copied to clipboard.")}}
@@ -33,44 +37,57 @@
   <p class="muted small">A DSN key is generated when the project is added.</p>
   {{end}}
 
-  <fieldset>
-    <legend>Levels to record</legend>
+  <details class="form-section">
+    <summary>
+      {{template "section-heading" (sectionHeading "Levels to record" "")}}
+      <span class="section-values lines">
+        <span class="summary-line"><span class="muted small">Errors</span> <span class="summary-badges" data-summary-of="event_level">{{range .RecordedEventLevels}}{{template "badge" (label "level" .)}}{{else}}<span class="muted">none</span>{{end}}</span></span>
+        <span class="summary-line"><span class="muted small">Logs</span> <span class="summary-badges" data-summary-of="log_level">{{range .RecordedLogLevels}}{{template "badge" (label "level" .)}}{{else}}<span class="muted">none</span>{{end}}</span></span>
+      </span>
+    </summary>
+    <fieldset>
     <p class="muted small">Errors and logs of levels left unchecked are dropped when they arrive: not stored, no notifications.</p>
     <div class="level-choices">
-      <span class="muted small">Errors and messages</span>
+      <span class="muted small">Errors and messages {{template "hint" (fieldHelp "Projects" "Errors and messages")}}</span>
       {{range .EventLevels}}<label class="option"><input type="checkbox" name="event_level" value="{{.Name}}" {{if .Selected}}checked{{end}}> {{template "badge" (label "level" .Name)}}</label>{{end}}
     </div>
     <div class="level-choices">
-      <span class="muted small">Logs</span>
+      <span class="muted small">Logs {{template "hint" (fieldHelp "Projects" "Logs")}}</span>
       {{range .LogLevels}}<label class="option"><input type="checkbox" name="log_level" value="{{.Name}}" {{if .Selected}}checked{{end}}> {{template "badge" (label "level" .Name)}}</label>{{end}}
     </div>
-  </fieldset>
+    </fieldset>
+  </details>
 
-  <fieldset>
-    <legend>Retention</legend>
-    <p class="muted small">Leave a field empty to use the default (shown in grey). Periods take days or hours: 30d, 12h; 0 keeps forever.</p>
-    <label>Keep events
+  <details class="form-section" {{if .RetentionInvalid}}open{{end}}>
+    <summary>
+      {{template "section-heading" (sectionHeading "Retention" "")}}
+      <span class="section-values small">{{range $index, $setting := .RetentionSummary}}{{if $index}} · {{end}}<span data-summary-field="{{.Field}}" data-summary-label="{{.Label}}" data-summary-zero="{{.Zero}}"{{if .Default}} class="muted" title="Default"{{end}}>{{.Label}} {{.Value}}</span>{{end}}</span>
+    </summary>
+    <fieldset>
+    <p class="muted small">Leave a field empty to use the default (shown in grey). Periods take days or hours: 30d, 12h; 0 turns a limit off.</p>
+    <label><span>Keep events {{template "hint" (settingHelp "RETENTION_EVENTS")}}</span>
       <input name="retention_events" value="{{.Events}}" placeholder="{{.DefaultEvents}}">
     </label>
     {{with index .Errors "retention_events"}}<p class="field-error">{{.}}</p>{{end}}
-    <label>Keep logs
+    <label><span>Keep logs {{template "hint" (settingHelp "RETENTION_LOGS")}}</span>
       <input name="retention_logs" value="{{.Logs}}" placeholder="{{.DefaultLogs}}">
     </label>
     {{with index .Errors "retention_logs"}}<p class="field-error">{{.}}</p>{{end}}
-    <label>Logs kept per repeated message (the newest; the same text with other numbers or IDs; 0 keeps all)
+    <label><span>Logs per repeated message {{template "hint" (settingHelp "RETENTION_LOGS_PER_MESSAGE")}}</span>
       <input name="retention_logs_per_message" value="{{.LogsPerMessage}}" inputmode="numeric" placeholder="{{.DefaultLogsPerMessage}}">
     </label>
     {{with index .Errors "retention_logs_per_message"}}<p class="field-error">{{.}}</p>{{end}}
-    <label>Events kept per issue (the newest; 0 keeps all)
+    <label><span>Events per issue {{template "hint" (settingHelp "RETENTION_EVENTS_PER_ISSUE")}}</span>
       <input name="retention_events_per_issue" value="{{.EventsPerIssue}}" inputmode="numeric" placeholder="{{.DefaultEventsPerIssue}}">
     </label>
     {{with index .Errors "retention_events_per_issue"}}<p class="field-error">{{.}}</p>{{end}}
-    <label>Delete issues not seen for
+    <label><span>Delete issues not seen for {{template "hint" (settingHelp "RETENTION_ISSUES")}}</span>
       <input name="retention_issues" value="{{.Issues}}" placeholder="{{.DefaultIssues}}">
     </label>
     {{with index .Errors "retention_issues"}}<p class="field-error">{{.}}</p>{{end}}
     <p class="muted small">Every issue keeps its latest event until it is deleted.</p>
-  </fieldset>
+    </fieldset>
+  </details>
 
   <div class="actions">
     <button type="submit" class="primary">{{if .New}}Add{{else}}Save{{end}}</button>

@@ -94,6 +94,22 @@ func TestIssueDetails(t *testing.T) {
 			t.Errorf("issue page is missing %q", want)
 		}
 	}
+
+	if !strings.Contains(body, `<a href="#events" title="Show the events">`) || !strings.Contains(body, `<section id="events">`) {
+		t.Error("the event count does not lead to the events")
+	}
+
+	// The stack and the event's details start closed, their headings the toggles.
+	if !strings.Contains(body, `<details class="section stacktrace">`) {
+		t.Error("the stack trace is not a closed section")
+	}
+
+	for _, section := range []string{"Logs from the same request", "Breadcrumbs", "Request"} {
+		if !strings.Contains(body, `<details class="section">
+  <summary><h2>`+section+`</h2>`) {
+			t.Errorf("%s is not a closed section", section)
+		}
+	}
 }
 
 func TestEventTextIsEscaped(t *testing.T) {
@@ -111,6 +127,29 @@ func TestEventTextIsEscaped(t *testing.T) {
 		if strings.Contains(body, "<script>alert") || strings.Contains(body, "<img src=x") {
 			t.Fatal("event text must be HTML-escaped")
 		}
+	}
+}
+
+// A frame unfolds only when it has something to show: browser SDKs send no
+// source, so their frames are plain rows.
+func TestOnlyFramesWithSourceUnfold(t *testing.T) {
+	server := newTestServer(t, password)
+	server.login()
+
+	envelope := `{}` + "\n" + `{"type":"event"}` + "\n" +
+		`{"exception":{"values":[{"type":"Error","value":"frames","stacktrace":{"frames":[
+			{"filename":"/app/bare.js","function":"bare","lineno":1,"in_app":true},
+			{"filename":"/app/source.js","function":"withSource","lineno":2,"in_app":true,"context_line":"throw error"}]}}]}}`
+	server.sendEnvelope(fixtures.BackendEnvelopeURL, []byte(strings.ReplaceAll(envelope, "\n\t\t\t", "")))
+
+	body := server.page("/issues/" + issueIDs(server.page("/issues"))[0])
+
+	if !regexp.MustCompile(`<details class="frame in-app" open>\s*<summary><span class="function">withSource`).MatchString(body) {
+		t.Error("the frame with source does not unfold")
+	}
+
+	if !strings.Contains(body, `<div class="frame frame-bare in-app"><span class="function">bare</span>`) {
+		t.Error("the frame without source is not a plain row")
 	}
 }
 

@@ -35,7 +35,7 @@ func (controller *Controllers) LogsPage(w http.ResponseWriter, r *http.Request) 
 		Until:      data.Dates.Until,
 	}
 
-	total, err := controller.logs.Count(r.Context(), filter)
+	total, more, err := controller.logs.Count(r.Context(), filter)
 
 	if err != nil {
 		controller.serverError(w, r, err)
@@ -44,6 +44,7 @@ func (controller *Controllers) LogsPage(w http.ResponseWriter, r *http.Request) 
 	}
 
 	data.Pager = lists.NewPager(data.Filter, page, perPage, total, "log-list")
+	data.Pager.More = more
 	filter.Limit, filter.Offset = perPage, (data.Pager.Page-1)*perPage
 
 	logs, err := controller.logs.List(r.Context(), filter)

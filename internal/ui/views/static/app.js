@@ -253,6 +253,11 @@ function updateConnectionForm(form) {
   if (selected) {
     form.querySelectorAll(".type-fields").forEach((fields) => {
       fields.hidden = fields.dataset.type !== selected.value;
+      // The fields of the other types are neither checked nor sent: a hidden
+      // invalid field (a browser filling a login into it) would block the form.
+      fields.querySelectorAll("input, select, textarea").forEach((field) => {
+        field.disabled = fields.hidden;
+      });
     });
   }
 
@@ -277,6 +282,25 @@ function updateConnectionForm(form) {
     button.disabled = !button.dataset.testNeeds.split("|").some((group) => group.split(" ").every(filled));
   });
 
+  // "Find chat ID" opens the bot's getUpdates once the token is valid (its
+  // pattern leaves nothing to escape in the URL). A saved token is not in the
+  // page, so it needs to be typed again.
+  const botToken = form.querySelector('input[name="bot_token"]');
+
+  form.querySelectorAll("a[data-telegram-updates]").forEach((link) => {
+    const token = botToken && !botToken.disabled ? botToken.value.trim() : "";
+    const valid = token !== "" && botToken.checkValidity();
+
+    if (valid) {
+      link.href = `https://api.telegram.org/bot${token}/getUpdates`;
+    } else {
+      link.removeAttribute("href");
+    }
+
+    link.classList.toggle("disabled", !valid);
+    link.setAttribute("aria-disabled", String(!valid));
+  });
+
   // An email connection is filled in only after its address is confirmed.
   const rest = form.querySelector(".connection-rest");
 
@@ -291,6 +315,76 @@ function updateConnectionForm(form) {
     projectChoices.hidden = allProjects.checked;
   }
 }
+
+// Closed form sections (details.form-section) show in their heading what is
+// set inside; it follows the fields as they change. [data-summary-of] lists
+// the badges of the checked boxes of that name ("All projects" while its
+// data-summary-all box is checked), [data-summary-field] the value of a field
+// or, when it is empty, its placeholder (the default) in grey.
+function updateSectionSummaries(form) {
+  form.querySelectorAll("[data-summary-of]").forEach((target) => {
+    const all = target.dataset.summaryAll && form.querySelector(`input[name="${target.dataset.summaryAll}"]`);
+
+    if (all && all.checked) {
+      target.textContent = "All projects";
+      return;
+    }
+
+    const badges = [...form.querySelectorAll(`input[name="${target.dataset.summaryOf}"]:checked`)].map(summaryBadge);
+
+    if (badges.length === 0) {
+      const none = document.createElement("span");
+      none.className = "muted";
+      none.textContent = "none";
+      badges.push(none);
+    }
+
+    target.replaceChildren(...badges);
+  });
+
+  form.querySelectorAll("[data-summary-field]").forEach((target) => {
+    const input = form.querySelector(`[name="${target.dataset.summaryField}"]`);
+
+    if (!input) {
+      return;
+    }
+
+    const own = input.value.trim();
+    const value = own || input.placeholder;
+
+    target.textContent = `${target.dataset.summaryLabel} ${value === "0" ? target.dataset.summaryZero : value}`;
+    target.classList.toggle("muted", !own);
+    target.title = own ? "" : "Default";
+  });
+}
+
+// The badge a checkbox shows next to it, or a project badge of its name.
+function summaryBadge(input) {
+  const label = input.closest("label");
+  const badge = label && label.querySelector(".badge");
+
+  if (badge) {
+    return badge.cloneNode(true);
+  }
+
+  const name = label ? label.textContent.trim() : input.value;
+  const project = document.createElement("span");
+  project.className = "project";
+  project.dataset.project = name;
+  project.textContent = name;
+
+  return project;
+}
+
+["change", "input"].forEach((type) => {
+  document.addEventListener(type, (event) => {
+    const form = event.target.form;
+
+    if (form && form.querySelector(".form-section")) {
+      updateSectionSummaries(form);
+    }
+  });
+});
 
 // Multi-select filters: the field says how many values are checked ("All
 // levels", "Levels: 2"). The form is not swapped by htmx, so it is kept in

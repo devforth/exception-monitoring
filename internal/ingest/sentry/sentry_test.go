@@ -292,3 +292,24 @@ func TestInvalidEventJSON(t *testing.T) {
 		t.Fatal("expected an error")
 	}
 }
+
+func TestFrameIsInApp(t *testing.T) {
+	marked, unmarked := true, false
+	cases := []struct {
+		frame Frame
+		want  bool
+	}{
+		{Frame{Filename: "/app/src/server.js", InApp: &marked}, true},
+		{Frame{Filename: "/app/src/server.js", InApp: &unmarked}, false},
+		{Frame{Filename: "/app/src/server.js"}, false},
+		{Frame{Filename: "http://localhost:8080/node_modules/.vite/deps/vue.js", InApp: &marked}, false},
+		{Frame{Filename: "node_modules/express/lib/router.js", InApp: &marked}, false},
+		{Frame{Filename: "app:///main.js", AbsPath: `C:\app\node_modules\pkg\index.js`, InApp: &marked}, false},
+	}
+
+	for _, test := range cases {
+		if got := test.frame.IsInApp(); got != test.want {
+			t.Errorf("IsInApp(%q, %q) = %v, want %v", test.frame.Filename, test.frame.AbsPath, got, test.want)
+		}
+	}
+}

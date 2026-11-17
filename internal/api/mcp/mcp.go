@@ -170,25 +170,6 @@ func (handler *Handler) failed(endpoint catalog.Endpoint, err error) (*sdk.CallT
 	return result, nil
 }
 
-// ToolInfo describes a tool for people (the MCP page of the UI).
-type ToolInfo struct {
-	Name        string
-	Description string
-	ReadOnly    bool
-}
-
-// Tools lists the tools an agent of viewer is offered. Only the
-// definitions are read, so the catalog is built without a database.
-func Tools(viewer store.User) []ToolInfo {
-	var list []ToolInfo
-
-	for _, endpoint := range agentEndpoints(catalog.New(nil, nil, nil), viewer) {
-		list = append(list, ToolInfo{Name: endpoint.Name, Description: endpoint.Description, ReadOnly: endpoint.ReadOnly})
-	}
-
-	return list
-}
-
 // Register adds the endpoint and the open OAuth endpoints to router, wrapped
 // with protect (the IP allowlist). The endpoint itself needs a token. No
 // method in its pattern: the transport answers GET and DELETE itself.

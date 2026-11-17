@@ -13,7 +13,7 @@ func TestRetentionDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	want := Retention{Events: 30 * 24 * time.Hour, Logs: 14 * 24 * time.Hour, EventsPerIssue: 100, MaxDatabaseBytes: 2 << 30, Issues: 365 * 24 * time.Hour, LogsPerMessage: 50}
+	want := Retention{Events: 14 * 24 * time.Hour, Logs: 7 * 24 * time.Hour, EventsPerIssue: 20, MaxDatabaseBytes: 2 << 30, Issues: 90 * 24 * time.Hour, LogsPerMessage: 10}
 
 	if config.Retention != want {
 		t.Fatalf("defaults: %+v", config.Retention)

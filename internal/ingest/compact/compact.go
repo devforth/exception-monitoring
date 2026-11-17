@@ -14,6 +14,8 @@
 // Everything else stays as the SDK sent it.
 package compact
 
+import "github.com/devforth/exception-monitoring/internal/ingest/sentry"
+
 // maxBreadcrumbs: the last steps before the error tell the story; SDKs keep
 // up to 100.
 const maxBreadcrumbs = 50
@@ -94,7 +96,7 @@ func compactStacktrace(node any) {
 	hasAppFrames := false
 
 	for _, item := range frames {
-		if frame, ok := item.(map[string]any); ok && frame["in_app"] == true {
+		if frame, ok := item.(map[string]any); ok && isAppFrame(frame) {
 			hasAppFrames = true
 
 			break
@@ -106,10 +108,19 @@ func compactStacktrace(node any) {
 	}
 
 	for _, item := range frames {
-		if frame, ok := item.(map[string]any); ok && frame["in_app"] != true {
+		if frame, ok := item.(map[string]any); ok && !isAppFrame(frame) {
 			for _, key := range []string{"pre_context", "context_line", "post_context", "vars"} {
 				delete(frame, key)
 			}
 		}
 	}
+}
+
+// isAppFrame is sentry.Frame.IsInApp on a decoded frame: marked in-app by the
+// SDK, and not a file of an installed package.
+func isAppFrame(frame map[string]any) bool {
+	filename, _ := frame["filename"].(string)
+	absPath, _ := frame["abs_path"].(string)
+
+	return frame["in_app"] == true && !sentry.IsLibraryPath(filename) && !sentry.IsLibraryPath(absPath)
 }

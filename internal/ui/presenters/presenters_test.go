@@ -15,7 +15,7 @@ import (
 func testConnections() Connections {
 	return Connections{
 		// SMTP but no SECRET_KEY: only email can be used.
-		Notifications: config.Notifications{SMTP: config.SMTP{Host: "smtp.example.com"}, ChannelTypes: config.AllChannelTypes},
+		Notifications: config.Notifications{SMTP: config.SMTP{Host: "smtp.example.com"}},
 		Projects:      config.Projects{{ID: 1, Name: "backend"}},
 		ProjectName:   func(projectID int) string { return fmt.Sprintf("project %d", projectID) },
 	}

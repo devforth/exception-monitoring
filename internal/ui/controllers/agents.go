@@ -32,7 +32,7 @@ func (controller *Controllers) renderAgents(w http.ResponseWriter, r *http.Reque
 	}
 
 	view := presenters.Agents(presenters.AgentsInput{
-		Endpoint: controller.projects.URL(r, mcp.Path), ServerName: config.AppSlug(controller.appName), Client: client, Token: token, Tools: mcp.Tools(requests.Viewer(r)),
+		Endpoint: controller.projects.URL(r, mcp.Path), ServerName: config.AppSlug(controller.appName), Client: client, Token: token,
 		IPsRestricted: controller.ipsRestricted, Unencrypted: controller.agents.Unencrypted(r),
 		Owner: page.Owner, Owners: page.Owners, Grants: page.Grants, TokenSet: page.TokenSet,
 	})

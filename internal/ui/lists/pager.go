@@ -32,7 +32,8 @@ func ReadPaging(query url.Values) (page, perPage int) {
 type Pager struct {
 	Page, Pages    int
 	Total          int
-	First, Last    int // the rows shown, from 1
+	More           bool // there are more rows than Total ("of 10000+"): logs are counted up to a limit
+	First, Last    int  // the rows shown, from 1
 	PerPage        int
 	PerPageChoices []int
 	PrevURL        string

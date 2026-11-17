@@ -1,6 +1,6 @@
 # Deployment
 
-The server is one container, `devforth/exception-monitoring`, for amd64 and arm64. It keeps all its data in one SQLite database in `/data` and needs nothing else. The database file is `/data/database.db`.
+The server is one container, `devforth/exception-monitoring`, for amd64 and arm64. It keeps all its data in one SQLite database in `/data` and needs nothing else. The database file is `/data/database.db`; without `SECRET_KEY`, the key that encrypts chat tokens is `/data/secret.key`.
 
 Image tags: `latest` (newest release), `X.Y` (newest patch of a minor version), `X.Y.Z`. Pin `X.Y` or `X.Y.Z` in production and upgrade on purpose.
 
@@ -12,7 +12,7 @@ Image tags: `latest` (newest release), `X.Y` (newest patch of a minor version), 
    ```sh
    PUBLIC_URL=https://errors.example.com
    ADMIN_PASSWORD=<at least 12 characters>
-   SECRET_KEY=<openssl rand -hex 32>
+   SECRET_KEY=<openssl rand -hex 32>   # encrypts chat tokens; generated into /data when not set
    TRUSTED_PROXIES=172.16.0.0/12      # the proxy, see below
    ```
 

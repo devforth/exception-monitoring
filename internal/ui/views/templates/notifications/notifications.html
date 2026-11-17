@@ -14,7 +14,7 @@
 {{with .Notice}}<p class="notice-success" role="status">{{.}}</p>{{end}}
 
 {{if not .CanCreate}}
-<p class="notice">No connection type can be added: allow types with <code>NOTIFY_CHANNEL_TYPES</code> and set <code>SMTP_HOST</code> for email or <code>SECRET_KEY</code> for Telegram and Slack.</p>
+<p class="notice">No connection type can be added: set <code>SMTP_HOST</code> for email or <code>SECRET_KEY</code> for Telegram and Slack.</p>
 {{end}}
 
 {{if .Rows}}

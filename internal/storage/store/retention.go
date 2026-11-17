@@ -42,6 +42,48 @@ func (store *Store) deleteInBatches(ctx context.Context, query string, args ...a
 		if deleted < retentionBatch || ctx.Err() != nil {
 			return total, ctx.Err()
 		}
+
+		if err := Pause(ctx); err != nil {
+			return total, err
+		}
+	}
+}
+
+// WritePause is the rest between the steps of long background work
+// (retention, filling the search index): each step is a write transaction,
+// and a writer waiting for the lock (ingest) must get it in between. SQLite's
+// busy handler retries every 100 ms at most, so a shorter rest goes unseen.
+const WritePause = 100 * time.Millisecond
+
+// workSlice is how long a loop of small writes runs before a WritePause.
+const workSlice = 200 * time.Millisecond
+
+// pacer rests after every workSlice of work, for loops of many small writes
+// (one per issue or message), where a rest after each would take hours.
+type pacer struct{ since time.Time }
+
+func (pacer *pacer) rest(ctx context.Context) error {
+	if pacer.since.IsZero() {
+		pacer.since = time.Now()
+	}
+
+	if time.Since(pacer.since) < workSlice {
+		return ctx.Err()
+	}
+
+	err := Pause(ctx)
+	pacer.since = time.Now()
+
+	return err
+}
+
+// Pause rests WritePause, or less if ctx ends (its error).
+func Pause(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(WritePause):
+		return nil
 	}
 }
 
@@ -114,14 +156,21 @@ func (store *Store) TrimLogMessages(ctx context.Context, scope ProjectScope, kee
 		return 0, err
 	}
 
-	var total int64
+	var (
+		total int64
+		pace  pacer
+	)
 
 	for _, message := range messages {
 		deleted, err := trimMessage(ctx, store.DB, message, keep)
 		total += deleted
 
-		if err != nil || ctx.Err() != nil {
-			return total, errors.Join(err, ctx.Err())
+		if err != nil {
+			return total, err
+		}
+
+		if err := pace.rest(ctx); err != nil {
+			return total, err
 		}
 	}
 
@@ -165,7 +214,10 @@ func (store *Store) TrimIssueEvents(ctx context.Context, scope ProjectScope, kee
 		return 0, err
 	}
 
-	var total int64
+	var (
+		total int64
+		pace  pacer
+	)
 
 	for _, issueID := range issueIDs {
 		result, err := store.DB.ExecContext(ctx, `
@@ -180,8 +232,8 @@ func (store *Store) TrimIssueEvents(ctx context.Context, scope ProjectScope, kee
 		deleted, _ := result.RowsAffected()
 		total += deleted
 
-		if ctx.Err() != nil {
-			return total, ctx.Err()
+		if err := pace.rest(ctx); err != nil {
+			return total, err
 		}
 	}
 
@@ -295,9 +347,10 @@ func (store *Store) DatabaseSize(ctx context.Context) (int64, error) {
 	return (pageCount - freePages) * pageSize, nil
 }
 
-// vacuumStep is how many free pages one step gives back (8 MB of 4 KB
+// vacuumStep is how many free pages one step gives back (2 MB of 4 KB
 // pages): each step is a write transaction, so ingest gets the lock between.
-const vacuumStep = 2000
+// Moving pages in a large, fragmented file is slow: 2000 took up to 5 s.
+const vacuumStep = 500
 
 // ReleaseFreeSpace returns the pages freed by deletes to the file system.
 func (store *Store) ReleaseFreeSpace(ctx context.Context) error {
@@ -319,6 +372,10 @@ func (store *Store) ReleaseFreeSpace(ctx context.Context) error {
 		}
 
 		if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+			return err
+		}
+
+		if err := Pause(ctx); err != nil {
 			return err
 		}
 	}

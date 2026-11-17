@@ -15,8 +15,9 @@ func NewLogs(database *store.Store) *Logs {
 	return &Logs{store: database}
 }
 
-// Count counts the logs that match filter (its Limit and Offset are ignored).
-func (service *Logs) Count(ctx context.Context, filter store.LogFilter) (int, error) {
+// Count counts the logs that match filter (its Limit and Offset are
+// ignored) up to store.LogCountLimit; more says there are more.
+func (service *Logs) Count(ctx context.Context, filter store.LogFilter) (count int, more bool, err error) {
 	return service.store.CountLogs(ctx, filter)
 }
 

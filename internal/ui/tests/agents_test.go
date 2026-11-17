@@ -29,11 +29,16 @@ func TestAgentsPage(t *testing.T) {
 		"claude mcp add --transport http exception-monitoring https://errors.example.com/monitoring/mcp",
 		`"url": "https://errors.example.com/monitoring/mcp"`,
 		"codex mcp add exception-monitoring --url https://errors.example.com/monitoring/mcp",
-		"get_issue", "update_issue_status", `data-copy="mcp-command"`,
+		`data-copy="mcp-command"`,
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("missing %q", want)
 		}
+	}
+
+	// Agents list the tools themselves; the page does not repeat them.
+	if strings.Contains(page, "Available tools") {
+		t.Error("the page lists the tools")
 	}
 
 	if strings.Contains(page, token) {

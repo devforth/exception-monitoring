@@ -4,5 +4,9 @@ envelopes
 data
 testdata
 tools
-docs
+# the UI quotes these docs as field hints (package docs embeds them)
+docs/*
+!docs/configuration.md
+!docs/ui.md
+!docs/docs.go
 *.md

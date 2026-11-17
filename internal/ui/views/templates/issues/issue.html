@@ -12,7 +12,7 @@
     <div><dt>ID</dt><dd>{{.Issue.ID}}</dd></div>
     <div><dt>Project</dt><dd>{{template "badge" (projectBadge .Issue.ProjectName)}}</dd></div>
     <div><dt>Status</dt><dd>{{template "badge" (statusBadge .Issue.Status)}}{{with .LastChange}} <span class="muted small">{{template "status-change-author" .}} · {{template "time" .CreatedAt}}</span>{{end}}</dd></div>
-    <div><dt>Events</dt><dd>{{.Issue.EventCount}}</dd></div>
+    <div><dt>Events</dt><dd>{{if .Events}}<a href="#events" title="Show the events">{{.Issue.EventCount}}</a>{{else}}{{.Issue.EventCount}}{{end}}</dd></div>
     <div><dt>First seen</dt><dd>{{template "time" .Issue.FirstSeen}}</dd></div>
     <div><dt>Last seen</dt><dd>{{template "time" .Issue.LastSeen}}</dd></div>
     {{if .Issue.ResolvedAt}}<div><dt>Resolved</dt><dd>{{template "time" .Issue.Resolved}}</dd></div>{{end}}
@@ -54,18 +54,25 @@
     </h3>
     {{with .Value}}<p class="exception-value">{{.}}</p>{{end}}
 
-    {{range .Stacktrace.NewestFirst}}
+    {{with .Stacktrace.NewestFirst}}
+    <details class="section stacktrace">
+    <summary><span class="muted">Stack trace</span> <span class="muted small">{{len .}} frames</span></summary>
+    {{range .}}
     {{$inApp := .IsInApp}}
+    {{if or .SourceLines .Vars}}
     <details class="frame {{if $inApp}}in-app{{end}}" {{if and $inApp .ContextLine}}open{{end}}>
-      <summary>
-        <span class="function">{{or .Function "<anonymous>"}}</span>
-        <span class="muted">{{or .Filename .Module}}{{if .Lineno}}:{{.Lineno}}{{end}}{{if .Colno}}:{{.Colno}}{{end}}</span>
-      </summary>
+      <summary>{{template "frame-location" .}}</summary>
       {{with .SourceLines}}
-      <pre class="code">{{range .}}<span class="line {{if .Current}}current{{end}}"><span class="number">{{.Number}}</span>{{.Text}}</span>
-{{end}}</pre>
+      {{/* No newline between the lines: each is a block already. */}}
+      <pre class="code">{{range .}}<span class="line {{if .Current}}current{{end}}"><span class="number">{{.Number}}</span>{{.Text}}</span>{{end}}</pre>
       {{end}}
       {{with .Vars}}<details class="vars"><summary>Local variables</summary><pre>{{prettyJSON .}}</pre></details>{{end}}
+    </details>
+    {{else}}
+    {{/* nothing to unfold: browser SDKs send no source */}}
+    <div class="frame frame-bare {{if $inApp}}in-app{{end}}">{{template "frame-location" .}}</div>
+    {{end}}
+    {{end}}
     </details>
     {{end}}
   </div>
@@ -97,7 +104,7 @@
 
 {{/* The other events of the issue, right after what went wrong. */}}
 {{if $.Data.Events}}
-<section>
+<section id="events">
   <h2>Events</h2>
   <div class="table-scroll"><table class="list compact">
     <thead><tr><th>Event</th><th>Received</th><th>Environment</th><th>Release</th></tr></thead>
@@ -117,13 +124,9 @@
 {{end}}
 
 {{with $.Data.RelatedLogs}}
-<section>
-  {{if $.Data.LogsFromRequest}}
-  <h2>Logs from the same request</h2>
-  {{else}}
-  <h2>Logs from the same trace</h2>
-  <p class="muted small">Not linked to this request exactly: logs of the same trace within a minute of the error.</p>
-  {{end}}
+<section><details class="section">
+  <summary><h2>{{if $.Data.LogsFromRequest}}Logs from the same request{{else}}Logs from the same trace{{end}}</h2> <span class="muted">{{len .}}</span></summary>
+  {{if not $.Data.LogsFromRequest}}<p class="muted small">Not linked to this request exactly: logs of the same trace within a minute of the error.</p>{{end}}
   <div class="table-scroll"><table class="list compact logs">
     <tbody>
       {{range .}}
@@ -135,12 +138,12 @@
       {{end}}
     </tbody>
   </table></div>
-</section>
+</details></section>
 {{end}}
 
 {{if .Breadcrumbs}}
-<section>
-  <h2>Breadcrumbs</h2>
+<section><details class="section">
+  <summary><h2>Breadcrumbs</h2> <span class="muted">{{len .Breadcrumbs}}</span></summary>
   <div class="table-scroll"><table class="list compact">
     <thead><tr><th>Time</th><th>Category</th><th>Level</th><th>Message</th></tr></thead>
     <tbody>
@@ -157,52 +160,51 @@
       {{end}}
     </tbody>
   </table></div>
-</section>
+</details></section>
 {{end}}
 
 {{with parseRequest .Request}}
-<section>
-  <h2>Request</h2>
-  <p><code>{{.Method}} {{.URL}}</code></p>
+<section><details class="section">
+  <summary><h2>Request</h2> <code class="muted">{{.Method}} {{.URL}}</code></summary>
   {{with .Headers}}
   <div class="table-scroll"><table class="list compact kv"><tbody>
     {{range $name, $value := .}}<tr><th>{{$name}}</th><td>{{$value}}</td></tr>{{end}}
   </tbody></table></div>
   {{end}}
-</section>
+</details></section>
 {{end}}
 
 {{if or .Tags .User}}
 <section class="columns">
   {{with .Tags}}
-  <div>
-    <h2>Tags</h2>
+  <details class="section">
+    <summary><h2>Tags</h2> <span class="muted">{{len .}}</span></summary>
     <div class="table-scroll"><table class="list compact kv"><tbody>
       {{range $name, $value := .}}<tr><th>{{$name}}</th><td>{{$value}}</td></tr>{{end}}
     </tbody></table></div>
-  </div>
+  </details>
   {{end}}
   {{with .User}}
-  <div>
-    <h2>User</h2>
+  <details class="section">
+    <summary><h2>User</h2></summary>
     <div class="table-scroll"><table class="list compact kv"><tbody>
       {{with .ID}}<tr><th>ID</th><td>{{.}}</td></tr>{{end}}
       {{with .Email}}<tr><th>Email</th><td>{{.}}</td></tr>{{end}}
       {{with .Username}}<tr><th>Username</th><td>{{.}}</td></tr>{{end}}
       {{with .IPAddress}}<tr><th>IP address</th><td>{{.}}</td></tr>{{end}}
     </tbody></table></div>
-  </div>
+  </details>
   {{end}}
 </section>
 {{end}}
 
 {{with .Contexts}}
-<section>
-  <h2>Contexts</h2>
+<section><details class="section">
+  <summary><h2>Contexts</h2> <span class="muted">{{len .}}</span></summary>
   {{range $name, $value := .}}
   <details><summary>{{$name}}</summary><pre>{{prettyJSON $value}}</pre></details>
   {{end}}
-</section>
+</details></section>
 {{end}}
 
 <section>
@@ -215,3 +217,7 @@
 
 {{/* Who made a status change (store.StatusChange). */}}
 {{define "status-change-author"}}{{if .ByEvent}}reopened: happened again{{with .EventID}} (<a href="?event={{.}}">event</a>){{end}}{{else}}by {{or .Name "a deleted user"}}{{if .ViaMCP}} via MCP{{end}}{{end}}{{end}}
+
+{{/* A stack frame: function and where it is. */}}
+{{define "frame-location"}}<span class="function">{{or .Function "<anonymous>"}}</span>
+<span class="muted">{{or .Filename .Module}}{{if .Lineno}}:{{.Lineno}}{{end}}{{if .Colno}}:{{.Colno}}{{end}}</span>{{end}}

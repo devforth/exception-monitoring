@@ -208,18 +208,8 @@ func TestTools(t *testing.T) {
 		names = append(names, tool.Name)
 	}
 
-	// What the UI lists is what agents get.
-	var listed []string
-
-	for _, tool := range mcp.Tools(store.User{ID: 1, Role: store.RoleSuperadmin}) {
-		listed = append(listed, tool.Name)
-	}
-
-	slices.Sort(names)
-	slices.Sort(listed)
-
-	if !slices.Equal(names, listed) || !slices.Contains(names, "list_issues") {
-		t.Errorf("tools %v, mcp.Tools() lists %v", names, listed)
+	if !slices.Contains(names, "list_issues") {
+		t.Errorf("tools %v lack list_issues", names)
 	}
 
 	var projects struct {

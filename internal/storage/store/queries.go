@@ -452,22 +452,59 @@ func (filter LogFilter) where() (string, []any) {
 	return " WHERE " + strings.Join(where, " AND "), args
 }
 
-// CountLogs counts the logs matching the filter (Limit and Offset are ignored).
-func (store *Store) CountLogs(ctx context.Context, filter LogFilter) (int, error) {
-	where, args := filter.where()
+// LogCountLimit is where counting logs stops: an exact count of millions of
+// matches reads them all, while a pager only needs to know there are many.
+var LogCountLimit = 10000
 
-	var count int
+// logQuery is the FROM, WHERE and ORDER BY of a log query: through the search
+// index when the text can use it (log_search.go), else over logs newest first.
+// Both read rows newest first and stop at the LIMIT.
+func (store *Store) logQuery(ctx context.Context, filter LogFilter) (from, where string, args []any, order string) {
+	if filter.Query == "" || !store.usesSearchIndex(ctx, filter.Query) {
+		where, args = filter.where()
 
-	err := store.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM logs`+where, args...).Scan(&count)
+		return " FROM logs", where, args, " ORDER BY logs.id DESC"
+	}
 
-	return count, err
+	rest := filter
+	rest.Query = ""
+	where, args = rest.where()
+
+	// The index finds the logs holding every piece of the text; LIKE checks
+	// the text itself (log_search.go).
+	search := `logs_search MATCH ? AND logs.body LIKE ? ESCAPE '\'`
+
+	if where == "" {
+		where = " WHERE " + search
+	} else {
+		where += " AND " + search
+	}
+
+	return " FROM logs_search JOIN logs ON logs.id = logs_search.rowid", where,
+		append(args, searchMatch(filter.Query), likePattern(filter.Query)),
+		" ORDER BY logs_search.rowid DESC"
+}
+
+// CountLogs counts the logs matching the filter (Limit and Offset are
+// ignored) up to LogCountLimit; more says there are more than that.
+func (store *Store) CountLogs(ctx context.Context, filter LogFilter) (count int, more bool, err error) {
+	from, where, args, _ := store.logQuery(ctx, filter)
+
+	err = store.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM (SELECT 1`+from+where+` LIMIT ?)`,
+		append(args, LogCountLimit+1)...).Scan(&count)
+
+	if count > LogCountLimit {
+		return LogCountLimit, true, err
+	}
+
+	return count, false, err
 }
 
 func (store *Store) ListLogs(ctx context.Context, filter LogFilter) ([]LogRecord, error) {
-	where, args := filter.where()
+	from, where, args, order := store.logQuery(ctx, filter)
 
-	query := `SELECT id, project_id, timestamp, level, severity_number, body, trace_id, span_id, attributes FROM logs` + where +
-		" ORDER BY id DESC LIMIT ? OFFSET ?"
+	query := `SELECT logs.id, project_id, timestamp, level, severity_number, logs.body, trace_id, span_id, attributes` + from + where +
+		order + " LIMIT ? OFFSET ?"
 
 	args = append(args, filter.Limit, filter.Offset)
 

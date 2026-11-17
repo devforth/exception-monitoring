@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/devforth/exception-monitoring/internal/api/mcp"
 	"github.com/devforth/exception-monitoring/internal/storage/store"
 	"github.com/devforth/exception-monitoring/internal/ui/contracts"
 )
@@ -19,7 +18,6 @@ type AgentsInput struct {
 	Owners        []store.User // whom the viewer may choose
 	Grants        []store.Grant
 	TokenSet      bool // the viewer has a personal token
-	Tools         []mcp.ToolInfo
 	IPsRestricted bool
 	Unencrypted   bool
 }
@@ -66,10 +64,6 @@ func Agents(input AgentsInput) contracts.AgentsView {
 		view.Connections = append(view.Connections, contracts.AgentConnection{
 			ID: grant.ID, Name: grant.Name, Personal: grant.Kind == store.GrantToken, Connected: grant.CreatedAt, LastActive: grant.LastUsedAt,
 		})
-	}
-
-	for _, tool := range input.Tools {
-		view.Tools = append(view.Tools, contracts.AgentTool(tool))
 	}
 
 	return view

@@ -10,7 +10,6 @@ import (
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/devforth/exception-monitoring/internal/api/mcp"
 	"github.com/devforth/exception-monitoring/internal/storage/store"
 )
 
@@ -74,19 +73,6 @@ func TestToolsFollowTheRole(t *testing.T) {
 
 	user, userID := server.as(store.RoleUser)
 	names := toolNames(t, user.connect())
-
-	var listed []string
-
-	for _, tool := range mcp.Tools(store.User{ID: userID, Role: store.RoleUser}) {
-		listed = append(listed, tool.Name)
-	}
-
-	slices.Sort(names)
-	slices.Sort(listed)
-
-	if !slices.Equal(names, listed) {
-		t.Errorf("user tools %v, mcp.Tools lists %v", names, listed)
-	}
 
 	for _, name := range []string{"create_user", "list_users", "delete_issue", "create_connection", "update_project", "get_project"} {
 		if slices.Contains(names, name) {

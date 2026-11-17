@@ -57,7 +57,7 @@
 {{define "pager"}}
 {{if gt .Total 0}}
 <nav class="pager" aria-label="Pages">
-  <span class="muted small">{{.First}}–{{.Last}} of {{.Total}}</span>
+  <span class="muted small">{{.First}}–{{.Last}} of {{.Total}}{{if .More}}+{{end}}</span>
   {{if gt .Pages 1}}
   <span class="pager-links">
     {{if .PrevURL}}<a href="{{.PrevURL}}" hx-get="{{.PrevURL}}" hx-target="#{{.Target}}" hx-swap="outerHTML show:top" hx-push-url="true" rel="prev">← Prev</a>{{else}}<span class="disabled">← Prev</span>{{end}}
@@ -69,3 +69,8 @@
 </nav>
 {{end}}
 {{end}}
+
+{{/* The heading of a closed form section (details.form-section): its title,
+     an optional hint, and under them the values set inside, which the caller
+     writes in a .section-values span right after this partial. */}}
+{{define "section-heading"}}<span class="section-title">{{.Title}}</span>{{template "hint" .Hint}}{{end}}

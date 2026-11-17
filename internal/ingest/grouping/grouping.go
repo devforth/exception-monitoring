@@ -6,8 +6,13 @@
 //  1. If the SDK sent a custom fingerprint, its values are the components.
 //     "{{ default }}" inside it expands to the default components.
 //  2. Otherwise, for exceptions: each exception in the chain contributes its
-//     type and its stack frames (only in-app frames if there are any). A frame
-//     is the file (or module), the function and the source line of the call
+//     type and its stack frames (only in-app frames if there are any; files
+//     of installed packages never count as in-app, see sentry.Frame.IsInApp).
+//     Only the frames from the error back to the nearest async boundary count
+//     (Firefox and Safari mark the frame that scheduled the async work with
+//     "*", as in "promise callback*queueFlush"): the path that led there, such
+//     as which list a task was opened from, differs while the error is the
+//     same. A frame is the file (or module), the function and the source line of the call
 //     (context_line), without line numbers: a deploy that shifts code by a few
 //     lines does not create a new issue, while two throws in one function, or
 //     two functions with the same name (JS names `handler: () => {}` after the
@@ -103,16 +108,19 @@ func defaultComponents(event *sentry.Event) []string {
 	return components
 }
 
-// groupingFrames returns the in-app frames, or all frames if none is marked in-app.
+// groupingFrames returns the in-app frames of the synchronous part of the
+// stack, or all its frames if none is in-app.
 func groupingFrames(stacktrace *sentry.Stacktrace) []sentry.Frame {
 	if stacktrace == nil {
 		return nil
 	}
 
+	frames := synchronousFrames(stacktrace.Frames)
+
 	var inApp []sentry.Frame
 
-	for _, frame := range stacktrace.Frames {
-		if frame.InApp != nil && *frame.InApp {
+	for _, frame := range frames {
+		if frame.IsInApp() {
 			inApp = append(inApp, frame)
 		}
 	}
@@ -121,7 +129,23 @@ func groupingFrames(stacktrace *sentry.Stacktrace) []sentry.Frame {
 		return inApp
 	}
 
-	return stacktrace.Frames
+	return frames
+}
+
+// synchronousFrames are the frames (oldest first) after the newest async
+// boundary: a frame whose function names the async parent with "*".
+func synchronousFrames(frames []sentry.Frame) []sentry.Frame {
+	for index := len(frames) - 1; index >= 0; index-- {
+		if strings.Contains(frames[index].Function, "*") {
+			if index == len(frames)-1 {
+				return frames
+			}
+
+			return frames[index+1:]
+		}
+	}
+
+	return frames
 }
 
 // frameLocation is the module, or the file if there is no module. Both are

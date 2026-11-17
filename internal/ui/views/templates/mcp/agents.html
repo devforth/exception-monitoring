@@ -2,13 +2,6 @@
 {{define "content"}}
 <div class="page-heading"><h1>MCP</h1></div>
 {{template "mcp-settings" .}}
-<details class="mcp-tools">
-  <summary>Available tools</summary>
-  <table class="list compact">
-    <thead><tr><th>Tool</th><th>What it does</th><th>Access</th></tr></thead>
-    <tbody>{{range .Data.Tools}}<tr><td><code>{{.Name}}</code></td><td>{{.Description}}</td><td>{{if .ReadOnly}}Read{{else}}Changes data{{end}}</td></tr>{{end}}</tbody>
-  </table>
-</details>
 {{end}}
 
 {{define "mcp-settings"}}

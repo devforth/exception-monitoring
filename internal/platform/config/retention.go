@@ -64,12 +64,12 @@ func (retention Retention) For(override RetentionOverride) Retention {
 
 // Retention defaults.
 const (
-	DefaultRetentionEvents         = 30 * 24 * time.Hour
-	DefaultRetentionLogs           = 14 * 24 * time.Hour
-	DefaultRetentionEventsPerIssue = 100
+	DefaultRetentionEvents         = 14 * 24 * time.Hour
+	DefaultRetentionLogs           = 7 * 24 * time.Hour
+	DefaultRetentionEventsPerIssue = 20
 	DefaultMaxDatabaseBytes        = 2 << 30 // 2 GB
-	DefaultRetentionIssues         = 365 * 24 * time.Hour
-	DefaultRetentionLogsPerMessage = 50
+	DefaultRetentionIssues         = 90 * 24 * time.Hour
+	DefaultRetentionLogsPerMessage = 10
 )
 
 func parseRetention(getenv func(string) string) (Retention, error) {

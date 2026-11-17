@@ -2,6 +2,8 @@ package secret
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -61,5 +63,48 @@ func TestWrongKeyOrDamagedValue(t *testing.T) {
 func TestShortKeyRejected(t *testing.T) {
 	if _, err := New("short"); err == nil {
 		t.Fatal("expected an error for a short key")
+	}
+}
+
+// Without SECRET_KEY the key is generated once into the data directory,
+// readable by the owner only, and the same key is read at every start.
+func TestKeyFile(t *testing.T) {
+	dir := t.TempDir()
+	first, created, err := KeyFile(dir)
+
+	if err != nil || !created || len(first) != 64 {
+		t.Fatalf("key %q, created %v, err %v", first, created, err)
+	}
+
+	info, err := os.Stat(filepath.Join(dir, KeyFileName))
+
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("key file: %v %v", info, err)
+	}
+
+	again, created, err := KeyFile(dir)
+
+	if err != nil || created || again != first {
+		t.Fatalf("second start: key %q, created %v, err %v", again, created, err)
+	}
+
+	if _, err := New(first); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, _ := os.ReadDir(dir)
+
+	if len(entries) != 1 {
+		t.Errorf("left behind: %v", entries)
+	}
+
+	// A damaged file stops startup instead of replacing the key, which would
+	// make the stored tokens unreadable.
+	if err := os.WriteFile(filepath.Join(dir, KeyFileName), []byte("short\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := KeyFile(dir); err == nil {
+		t.Error("a short key was accepted")
 	}
 }

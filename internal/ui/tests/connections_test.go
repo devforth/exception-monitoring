@@ -2,6 +2,7 @@ package tests
 
 import (
 	"context"
+	"html"
 	"io"
 	"maps"
 	"net/http"
@@ -12,6 +13,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/devforth/exception-monitoring/internal/platform/config"
 
 	"github.com/devforth/exception-monitoring/internal/fixtures"
 )
@@ -770,7 +773,7 @@ func TestChatTestBeforeSave(t *testing.T) {
 	id := connectionLink.FindStringSubmatch(server.page("/notifications"))[1]
 	page := server.page("/notifications/" + id)
 
-	if !strings.Contains(page, `hx-post="/notifications/`+id+`/test-chat"`) || !strings.Contains(page, `name="webhook_url" autocomplete="off" data-saved`) {
+	if !strings.Contains(page, `hx-post="/notifications/`+id+`/test-chat"`) || !strings.Contains(page, `name="webhook_url" autocomplete="new-password" data-saved`) {
 		t.Fatalf("edit form:\n%s", page)
 	}
 
@@ -778,5 +781,50 @@ func TestChatTestBeforeSave(t *testing.T) {
 
 	if !strings.Contains(body, "Test message sent") || hook.count() != 2 {
 		t.Errorf("saved connection: %s, %d messages", body, hook.count())
+	}
+}
+
+// Projects and Levels start closed, their headings showing what is chosen;
+// a refused choice opens its section.
+func TestConnectionFormSectionsShowTheirValues(t *testing.T) {
+	server := newTestServer(t, password)
+	server.login()
+
+	page := server.page("/notifications/new")
+	projects := regexp.MustCompile(`data-summary-of="project" data-summary-all="all_projects">([^<]*)</span>`).FindStringSubmatch(page)
+
+	if projects == nil || projects[1] != "All projects" || strings.Contains(page, `<details class="form-section" open>`) {
+		t.Errorf("projects summary: %v", projects)
+	}
+
+	if !regexp.MustCompile(`data-summary-of="level">[^\n]*>error</span>`).MatchString(page) {
+		t.Error("the levels summary does not show the chosen levels")
+	}
+
+	refused := server.post("/notifications", url.Values{"type": {"slack"}, "webhook_url": {"https://hooks.slack.com/x"}, "all_projects": {"on"}}).Body.String()
+
+	if !strings.Contains(refused, `<details class="form-section" open>`) {
+		t.Error("the section with a refused choice stays closed")
+	}
+}
+
+// The browser checks the chat fields with the server's patterns, and does not
+// fill a saved login into the token fields.
+func TestChatFieldsAreCheckedInTheBrowser(t *testing.T) {
+	server := newTestServer(t, password)
+	server.login()
+
+	page := html.UnescapeString(server.page("/notifications/new"))
+
+	for _, want := range []string{
+		`name="chat_id" value="" pattern="` + config.TelegramChatPattern + `" required`,
+		`name="bot_token" autocomplete="new-password" pattern="` + config.TelegramTokenPattern + `" required`,
+		`name="slack_channel" value="" pattern="` + config.SlackChannelPattern + `"`,
+		// No address until app.js sees a valid token.
+		`<a class="info-button disabled" data-telegram-updates aria-disabled="true"`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("missing %s", want)
+		}
 	}
 }

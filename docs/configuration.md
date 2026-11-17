@@ -10,7 +10,7 @@ Everything is set with environment variables (in Docker: `-e`, `env_file` or `en
 |---|---|---|
 | `APP_NAME` | `Exception Monitoring` | Shown in the UI, emails and notifications, and to coding agents, who register the MCP server under it in lowercase with dashes (`Acme Errors` → `acme-errors`). Up to 60 characters. |
 | `PORT` | `8000` | Port to listen on. |
-| `DATA_DIR` | `./data` (`/data` in the image) | Where the SQLite database (`database.db`) lives. Keep it on a volume. |
+| `DATA_DIR` | `./data` (`/data` in the image) | Where the SQLite database (`database.db`) lives, and `secret.key` when `SECRET_KEY` is not set. Keep it on a volume. |
 | `PUBLIC_URL` | | The address users and SDKs reach the server at, e.g. `https://errors.example.com` (a path prefix is kept). Used for links in notifications, the DSNs on the Projects page and the MCP address. Without it, DSNs use the address the UI was opened with and notifications have no links. |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error`. `debug` also logs every request and every rejected envelope. |
 | `LOG_FORMAT` | `auto` | `auto`: readable colored lines in a terminal, logfmt otherwise (e.g. `docker logs`). Or `pretty`, `text`, `json`. `NO_COLOR` turns colors off. |
@@ -45,12 +45,11 @@ The id is part of the DSN (`https://<public_key>@errors.example.com/<id>`) and o
 
 ## Notifications
 
-Where messages go (email addresses, Telegram chats, Slack channels) is set up on the **Notifications** page of the UI. The variables only enable the types.
+Where messages go (email addresses, Telegram chats, Slack channels) is set up on the **Notifications** page of the UI. Telegram and Slack need nothing here: their tokens are entered in the form. Email needs a mail server.
 
 | Variable | Default | |
 |---|---|---|
-| `NOTIFY_CHANNEL_TYPES` | `email,telegram,slack` | Types that can be added; `none` for no notifications. |
-| `SECRET_KEY` | | At least 32 characters (`openssl rand -hex 32`). Encrypts Telegram tokens and Slack webhooks and tokens in the database; required for these two types. Keep it outside the data directory and do not lose it: stored chats stop working without it. |
+| `SECRET_KEY` | generated | At least 32 characters (`openssl rand -hex 32`). Encrypts Telegram tokens and Slack webhooks and tokens in the database. Without it a key is generated at the first start into `DATA_DIR/secret.key`; that protects a leaked database file but not a copy of the whole data directory, so on a server set it and keep it outside. Do not lose or change it: stored chats stop working (enter their tokens again). |
 | `SMTP_HOST` | | Mail server; required for email. |
 | `SMTP_PORT` | `587` | Port 465 uses TLS from the start, others STARTTLS. |
 | `SMTP_USERNAME`, `SMTP_PASSWORD` | | SMTP login. |
@@ -67,11 +66,11 @@ Old data is deleted at startup and every 10 minutes. `0` turns a limit off. Ever
 
 | Variable | Default | |
 |---|---|---|
-| `RETENTION_EVENTS` | `30d` | Delete events received longer ago. |
-| `RETENTION_LOGS` | `14d` | Delete older logs. |
-| `RETENTION_EVENTS_PER_ISSUE` | `100` | Keep only the newest events of each issue; the issue's count still includes all. |
-| `RETENTION_LOGS_PER_MESSAGE` | `50` | Keep the newest logs of a message logged over and over (numbers and IDs in it do not count as a difference). |
-| `RETENTION_ISSUES` | `365d` | Delete issues, with their events, not seen this long. |
+| `RETENTION_EVENTS` | `14d` | Delete events received longer ago. |
+| `RETENTION_LOGS` | `7d` | Delete older logs. |
+| `RETENTION_EVENTS_PER_ISSUE` | `20` | Keep only the newest events of each issue; the issue's count still includes all. |
+| `RETENTION_LOGS_PER_MESSAGE` | `10` | Keep the newest logs of a message logged over and over (numbers and IDs in it do not count as a difference). |
+| `RETENTION_ISSUES` | `90d` | Delete issues, with their events, not seen this long. |
 | `MAX_DATABASE_SIZE` | `2GB` | Above it, delete the oldest events and logs down to 90%. Takes `KB`, `MB`, `GB`. |
 
 Every issue keeps its latest event until the issue itself expires, so each error stays listed with its count and last stack trace.

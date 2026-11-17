@@ -93,7 +93,7 @@ Before anything is stored, values under names like password, token, secret, cook
 
 ## Grouping
 
-Events with the same fingerprint in a project are one issue. The default fingerprint is built from the exception types and the in-app stack frames: file, function and source line, without line numbers, so a deploy that moves code does not open new issues. Messages and errors without a usable stack are grouped by their text, with numbers and IDs ignored ("order 890" and "order 891" match).
+Events with the same fingerprint in a project are one issue. The default fingerprint is built from the exception types and the in-app stack frames: file, function and source line, without line numbers, so a deploy that moves code does not open new issues. Files under `node_modules/` never count as in-app, even when a browser SDK marks them so (a dev server such as Vite serves libraries from the site's own origin), and only the frames after the last async boundary count (Firefox appends the path that scheduled a callback, e.g. `promise callback*queueFlush`), so the same error reached by different clicks stays one issue. Messages and errors without a usable stack are grouped by their text, with numbers and IDs ignored ("order 890" and "order 891" match).
 
 To group differently, set the fingerprint in the SDK:
 

@@ -19,6 +19,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/devforth/exception-monitoring/docs"
+
 	"github.com/devforth/exception-monitoring/internal/api/agentprompt"
 	"github.com/devforth/exception-monitoring/internal/platform/config"
 	"github.com/devforth/exception-monitoring/internal/storage/projects"
@@ -71,6 +73,13 @@ var templateFuncs = template.FuncMap{
 	"statusBadge":  lists.StatusBadge,
 	// label is a badge that is not a link (inside checkboxes): {{template "badge" (label "level" .Name)}}.
 	"label": lists.Label,
+	// The hint partial's text: what docs/configuration.md says of an environment
+	// variable, or docs/ui.md of a field of a settings page. A missing one fails
+	// the page, so tests catch it.
+	"settingHelp": docs.Setting,
+	"fieldHelp":   docs.Field,
+	// sectionHeading is the data of the section-heading partial: a title and its hint text (may be empty).
+	"sectionHeading": func(title, hint string) map[string]string { return map[string]string{"Title": title, "Hint": hint} },
 }
 
 // Templates: layout.html wraps every page, partials/ holds the pieces shared

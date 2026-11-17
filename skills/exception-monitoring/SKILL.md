@@ -29,7 +29,7 @@ Read the page for the task before acting; it has the exact commands and settings
 ## Deploy the server
 
 1. Read deployment.md and configuration.md. Ask where it runs (this machine for a try, or a server with a domain) and whether a reverse proxy with HTTPS already exists.
-2. Use the `compose.yml` from deployment.md and an `.env` next to it with at least `ADMIN_PASSWORD` (12+ characters), `SECRET_KEY` and, on a server, `PUBLIC_URL=https://<domain>` and `TRUSTED_PROXIES`. Let the user choose the admin password or tell them where it is stored; do not print it.
+2. Use the `compose.yml` from deployment.md and an `.env` next to it with at least `ADMIN_PASSWORD` (12+ characters) and, on a server, `SECRET_KEY` (otherwise generated into the data directory), `PUBLIC_URL=https://<domain>` and `TRUSTED_PROXIES`. Let the user choose the admin password or tell them where it is stored; do not print it.
 3. Start it with `docker compose up -d` (or let the user start it if they prefer), then check `curl -fsS <server>/health`.
 4. Tell the user to log in as `admin` and add a project per service on the **Projects** page (or set `PROJECTS`); agents cannot create projects.
 

@@ -59,6 +59,7 @@ Or copy the folder to `~/.claude/skills/` (Claude Code) or `~/.agents/skills/` (
 
 - [Deployment](docs/deployment.md): Docker, reverse proxy and HTTPS, upgrades.
 - [Configuration](docs/configuration.md): every environment variable.
+- [Settings in the web UI](docs/ui.md): the fields of the Projects and Notifications pages.
 - [Connecting apps](docs/sdk.md): SDK setup, levels, logs, grouping.
 - [Coding agents (MCP)](docs/mcp.md): connecting Claude Code, Codex and other clients.
 - [REST API](docs/api.md).

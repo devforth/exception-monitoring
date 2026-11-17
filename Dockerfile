@@ -14,7 +14,9 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
     -o /out/exception-monitoring ./cmd/exception-monitoring
 
 # Data dir owned by the unprivileged runtime user (named volumes inherit this ownership).
-RUN mkdir -p /out/data && chown 65534:65534 /out/data
+# /tmp: SQLite writes temporary files there (VACUUM, building a search index);
+# scratch has none, and SQLite then fails with "disk I/O error".
+RUN mkdir -p /out/data /out/tmp && chown 65534:65534 /out/data && chmod 1777 /out/tmp
 
 
 FROM scratch
@@ -23,6 +25,7 @@ FROM scratch
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=build /out/exception-monitoring /exception-monitoring
 COPY --from=build --chown=65534:65534 /out/data /data
+COPY --from=build /out/tmp /tmp
 
 USER 65534:65534
 ENV PORT=8000 \

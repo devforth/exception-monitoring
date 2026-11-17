@@ -7,12 +7,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 
 	_ "modernc.org/sqlite" // pure-Go SQLite driver, no cgo
 )
 
 type Store struct {
 	DB *sql.DB
+
+	// logSearchReady: every log is in the search index (log_search.go).
+	logSearchReady atomic.Bool
 }
 
 // Open opens (or creates) the database file at path, with its directory,
@@ -35,7 +39,10 @@ func openWithMigrations(ctx context.Context, path string, migrationList []migrat
 		"&_pragma=journal_mode(WAL)" +
 		"&_pragma=busy_timeout(5000)" +
 		"&_pragma=synchronous(NORMAL)" +
-		"&_pragma=foreign_keys(ON)"
+		"&_pragma=foreign_keys(ON)" +
+		// After a burst of writes the WAL file is cut back to 64 MB instead of
+		// keeping its largest size.
+		"&_pragma=journal_size_limit(67108864)"
 
 	db, err := sql.Open("sqlite", connectionString)
 

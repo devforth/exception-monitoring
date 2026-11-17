@@ -199,9 +199,20 @@ func (stacktrace *Stacktrace) NewestFirst() []Frame {
 	return frames
 }
 
-// IsInApp reports whether the frame is the application's own code, not a library.
+// IsInApp reports whether the frame is the application's own code, not a
+// library: as the SDK marked it, except a file of an installed package. A
+// browser SDK marks every frame of the page's own origin in-app, and a dev
+// server (Vite) serves the libraries from there too.
 func (frame Frame) IsInApp() bool {
-	return frame.InApp != nil && *frame.InApp
+	return frame.InApp != nil && *frame.InApp && !IsLibraryPath(frame.Filename) && !IsLibraryPath(frame.AbsPath)
+}
+
+// IsLibraryPath reports whether a frame's file belongs to an installed
+// package (node_modules, also as Vite's /node_modules/.vite/deps/).
+func IsLibraryPath(path string) bool {
+	path = strings.ReplaceAll(path, "\\", "/")
+
+	return strings.Contains(path, "/node_modules/") || strings.HasPrefix(path, "node_modules/")
 }
 
 // SourceLine is one line of code around a frame.

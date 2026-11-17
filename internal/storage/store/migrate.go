@@ -359,6 +359,34 @@ ALTER TABLE oauth_codes ADD COLUMN client_name TEXT NOT NULL DEFAULT '';
 -- count of every page read this index instead of sorting all issues.
 CREATE INDEX issues_by_status_last_seen ON issues (status, last_seen DESC, id DESC);
 `},
+	{22, `
+-- Text search of logs: a trigram index finds the logs that hold every
+-- 3-character piece of the text searched, without reading every log (see
+-- log_search.go). It keeps neither the text (content='') nor positions
+-- (detail=none), so it is about the size of the text; the query checks the
+-- text of each log it finds.
+CREATE VIRTUAL TABLE logs_search USING fts5 (body, content = '', tokenize = 'trigram', detail = none);
+
+-- Filling the index in the background, oldest first: the ids up to last_id
+-- were there when it started, the ones up to done_id are in. stale counts the
+-- logs deleted since: they stay in the index (removing them costs as much as
+-- the delete itself, and space comes back only by rewriting the index), and
+-- once there are more of them than logs the index is filled anew.
+CREATE TABLE logs_search_backfill (
+	last_id INTEGER NOT NULL,
+	done_id INTEGER NOT NULL,
+	stale   INTEGER NOT NULL DEFAULT 0
+);
+INSERT INTO logs_search_backfill (last_id, done_id) SELECT COALESCE(MAX(id), 0), 0 FROM logs;
+
+CREATE TRIGGER logs_search_insert AFTER INSERT ON logs BEGIN
+	INSERT INTO logs_search (rowid, body) VALUES (new.id, new.body);
+END;
+
+CREATE TRIGGER logs_search_stale AFTER DELETE ON logs BEGIN
+	UPDATE logs_search_backfill SET stale = stale + 1;
+END;
+`},
 }
 
 func migrate(ctx context.Context, db *sql.DB, migrationList []migration) error {

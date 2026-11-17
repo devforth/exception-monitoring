@@ -153,11 +153,14 @@ func (service *Connections) sendTest(ctx context.Context, connection store.Conne
 }
 
 var (
-	telegramTokenRe = regexp.MustCompile(`^\d+:[A-Za-z0-9_-]{20,}$`)
-	telegramChatRe  = regexp.MustCompile(`^(-?\d+|@[A-Za-z0-9_]{5,})$`)
-	slackTokenRe    = regexp.MustCompile(`^xoxb-[A-Za-z0-9-]{10,}$`)
-	slackChannelRe  = regexp.MustCompile(`^#?[A-Za-z0-9._-]{1,80}$`)
+	telegramTokenRe = anchored(config.TelegramTokenPattern)
+	telegramChatRe  = anchored(config.TelegramChatPattern)
+	slackTokenRe    = anchored(config.SlackTokenPattern)
+	slackChannelRe  = anchored(config.SlackChannelPattern)
 )
+
+// anchored matches the whole value, as a pattern attribute does.
+func anchored(pattern string) *regexp.Regexp { return regexp.MustCompile(`^(?:` + pattern + `)$`) }
 
 // readConnectionForm applies the rule fields (name, projects, levels,
 // active) to connection and returns the field errors.
