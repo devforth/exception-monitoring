@@ -199,9 +199,6 @@ func isAnonymous(function string) bool {
 
 var (
 	bundleHashRe = regexp.MustCompile(`[.-][0-9a-fA-F]{8,}\b`)
-	uuidRe       = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
-	hexRe        = regexp.MustCompile(`\b(0x)?[0-9a-fA-F]{8,}\b`)
-	numberRe     = regexp.MustCompile(`\d+`)
 )
 
 // normalizeFilename drops what changes between deploys and environments:
@@ -223,15 +220,6 @@ func normalizeFilename(filename string) string {
 	}
 
 	return bundleHashRe.ReplaceAllString(filename, "")
-}
-
-// NormalizeMessage replaces the parts of a message that differ between
-// occurrences of the same problem: UUIDs, hex IDs (8+ chars) and numbers.
-func NormalizeMessage(message string) string {
-	message = uuidRe.ReplaceAllString(message, "<uuid>")
-	message = hexRe.ReplaceAllString(message, "<hex>")
-
-	return numberRe.ReplaceAllString(message, "<n>")
 }
 
 // LogFingerprint groups log lines that are the same message with different

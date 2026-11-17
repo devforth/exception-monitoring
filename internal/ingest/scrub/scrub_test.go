@@ -2,6 +2,7 @@ package scrub
 
 import (
 	"encoding/json"
+	"math/rand"
 	"strings"
 	"testing"
 )
@@ -81,6 +82,38 @@ func TestText(t *testing.T) {
 	for input, want := range testCases {
 		if got := Text(input); got != want {
 			t.Errorf("Text(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+// IsSensitiveKey checks ASCII keys without the regexp: it must agree with it.
+func TestIsSensitiveKeyMatchesTheRegexp(t *testing.T) {
+	keys := []string{
+		"Authorization", "X-Api-Key", "api_key", "api.key", "api-key", "apikey", "API_KEY", "apiKey", "api__key", "privatekey", "private-key",
+		"card_number", "card number", "cardNumber", "tokens", "token", "Tokens", "access_token", "tokens_token", "tokenizer", "max_tokens",
+		"passwd", "user_password", "pwd", "secret", "session_id", "csrf", "xsrf_token", "signature", "dsn", "cvv", "ssn", "cookie",
+		"credentials", "url", "headers", "user_id", "release", "", "a", "authority", "tokenstoken", "toke", "apikeyz", "privatekeyring",
+	}
+	alphabet := []byte("apikeytoknsrwdcuhvbmPIKETOS_-. ")
+	random := rand.New(rand.NewSource(1))
+
+	for range 200000 {
+		key := make([]byte, random.Intn(14))
+
+		for index := range key {
+			key[index] = alphabet[random.Intn(len(alphabet))]
+		}
+
+		keys = append(keys, string(key))
+	}
+
+	for _, key := range keys {
+		if got, want := sensitiveASCIIKey(strings.ToLower(key)), sensitiveKey.MatchString(key); got != want {
+			t.Fatalf("key %q: %v, the regexp says %v", key, got, want)
+		}
+
+		if IsSensitiveKey(key) != sensitiveKey.MatchString(key) {
+			t.Fatalf("IsSensitiveKey(%q) disagrees", key)
 		}
 	}
 }
