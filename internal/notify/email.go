@@ -19,6 +19,8 @@ import (
 	"strings"
 	"time"
 
+	textutil "github.com/devforth/exception-monitoring/internal/platform/text"
+
 	"github.com/devforth/exception-monitoring/internal/ingest/sentry"
 	"github.com/devforth/exception-monitoring/internal/platform/config"
 )
@@ -130,7 +132,7 @@ func (email Email) Send(ctx context.Context, notification Notification) error {
 		breadcrumbs := event.Breadcrumbs[max(0, len(event.Breadcrumbs)-maxEmailBreadcrumbs):]
 
 		for _, breadcrumb := range breadcrumbs {
-			line := breadcrumbLine{Category: breadcrumb.Category, Message: truncate(breadcrumb.Message, breadcrumbLength)}
+			line := breadcrumbLine{Category: breadcrumb.Category, Message: textutil.Shorten(breadcrumb.Message, breadcrumbLength)}
 
 			if !breadcrumb.Timestamp.IsZero() {
 				line.Time = breadcrumb.Timestamp.UTC().Format("15:04:05")
@@ -145,7 +147,7 @@ func (email Email) Send(ctx context.Context, notification Notification) error {
 	// in the body it would bury the error.
 	prompt := agentPrompt(notification)
 
-	subject := fmt.Sprintf("[%s] %s: %s", notification.Project, notification.Kind.label(), truncate(notification.Title, shortTitleLength))
+	subject := fmt.Sprintf("[%s] %s: %s", notification.Project, notification.Kind.label(), textutil.Shorten(notification.Title, shortTitleLength))
 	view.PromptFile = promptFileName(notification)
 	text := email.plainText(notification) + "\nA prompt for a coding agent that reproduces and explains this error is attached (" + view.PromptFile + ").\n"
 

@@ -5,11 +5,10 @@ package tests
 import (
 	"bytes"
 	"context"
-	"path/filepath"
 	"slices"
 	"time"
 
-	"github.com/devforth/exception-monitoring/internal/storage/sqlite"
+	"github.com/devforth/exception-monitoring/internal/storage/storetest"
 
 	"log/slog"
 	"net/http"
@@ -63,20 +62,10 @@ func newTestServer(t *testing.T, adminPassword string) *testServer {
 	return startServer(t, openDatabase(t), "admin", adminPassword)
 }
 
-func openDatabase(t *testing.T) *sqlite.Store {
+func openDatabase(t *testing.T) store.Store {
 	t.Helper()
 
-	database, err := sqlite.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
-
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	t.Cleanup(func() {
-		if err := database.Close(); err != nil {
-			t.Error(err)
-		}
-	})
+	database := storetest.Open(t)
 
 	return database
 }

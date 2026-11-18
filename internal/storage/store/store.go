@@ -2,7 +2,7 @@
 // records (issues, events, logs, users, projects, notifications, agents),
 // their rules (roles, statuses, filters) and the Store interface that reads
 // and writes them. Implementations live in their own packages: sqlite today,
-// kv (Pebble) as it replaces it (docs/storage-plan.md).
+// kvstore (on goleveldb) as it replaces it (docs/storage-plan.md).
 package store
 
 import (

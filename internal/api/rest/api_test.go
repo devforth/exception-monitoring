@@ -11,13 +11,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
 
-	"github.com/devforth/exception-monitoring/internal/storage/sqlite"
+	"github.com/devforth/exception-monitoring/internal/storage/storetest"
 
 	"github.com/devforth/exception-monitoring/internal/api/catalog"
 	"github.com/devforth/exception-monitoring/internal/api/rest"
@@ -40,17 +39,7 @@ type testServer struct {
 
 func newTestServer(t *testing.T, allowedIPs ...string) *testServer {
 	t.Helper()
-	database, err := sqlite.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
-
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	t.Cleanup(func() {
-		if err := database.Close(); err != nil {
-			t.Error(err)
-		}
-	})
+	database := storetest.Open(t)
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	settings := &config.Config{

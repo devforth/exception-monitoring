@@ -22,6 +22,8 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+
+	textutil "github.com/devforth/exception-monitoring/internal/platform/text"
 )
 
 // Filtered replaces a removed value.
@@ -44,7 +46,12 @@ var (
 	knownKeyCount atomic.Int64
 )
 
-const maxKnownKeys = 10000
+// Only keys this short are remembered: real keys are short, and long ones
+// sent on purpose must not fill memory (10000 keys of 64 bytes at most).
+const (
+	maxKnownKeys      = 10000
+	maxKnownKeyLength = 64
+)
 
 // IsSensitiveKey reports whether a value stored under key is a credential.
 func IsSensitiveKey(key string) bool {
@@ -60,7 +67,7 @@ func IsSensitiveKey(key string) bool {
 		sensitive = sensitiveKey.MatchString(key) // Unicode case folding, as before
 	}
 
-	if knownKeyCount.Load() < maxKnownKeys {
+	if len(key) <= maxKnownKeyLength && knownKeyCount.Load() < maxKnownKeys {
 		if _, loaded := knownKeys.LoadOrStore(key, sensitive); !loaded {
 			knownKeyCount.Add(1)
 		}
@@ -128,17 +135,6 @@ func isASCII(text string) bool {
 	}
 
 	return true
-}
-
-// containsFoldASCII reports whether text contains word (lowercase ASCII) in any case.
-func containsFoldASCII(text, word string) bool {
-	for index := 0; index+len(word) <= len(text); index++ {
-		if text[index]|0x20 == word[0] && strings.EqualFold(text[index:index+len(word)], word) {
-			return true
-		}
-	}
-
-	return false
 }
 
 // JSON returns payload with credentials replaced. Input that is not valid
@@ -229,7 +225,7 @@ func Text(text string) string {
 
 	// The regexps run only when their words are there: most strings have none
 	// (non-ASCII text always: the regexp also folds letters such as ſ to s).
-	if !isASCII(text) || containsFoldASCII(text, "bearer") || containsFoldASCII(text, "basic") {
+	if !isASCII(text) || textutil.ContainsFold(text, "bearer") || textutil.ContainsFold(text, "basic") {
 		text = credentialInText.ReplaceAllString(text, "$1 "+Filtered)
 	}
 

@@ -1,10 +1,13 @@
 package tests
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -12,6 +15,7 @@ import (
 
 	"github.com/devforth/exception-monitoring/internal/fixtures"
 	"github.com/devforth/exception-monitoring/internal/platform/config"
+	"github.com/devforth/exception-monitoring/internal/storage/store"
 )
 
 var dsnPattern = regexp.MustCompile(`http://([0-9a-f]{32})@example\.com/(\d+)`)
@@ -91,10 +95,14 @@ func TestProjectLifecycle(t *testing.T) {
 		t.Fatalf("delete: %d", response.Code)
 	}
 
-	var left int
+	projectID, _ := strconv.Atoi(id)
+	ctx := context.Background()
+	issues, _ := database.CountIssues(ctx, store.IssueFilter{ProjectIDs: []int{projectID}})
+	logs, _, _ := database.CountLogs(ctx, store.LogFilter{ProjectIDs: []int{projectID}})
+	events, _ := database.ListEvents(ctx, store.EventFilter{Limit: 1000})
 
-	if err := database.DB.QueryRow(`SELECT (SELECT COUNT(*) FROM events WHERE project_id = ?) + (SELECT COUNT(*) FROM issues WHERE project_id = ?)`, id, id).Scan(&left); err != nil || left != 0 {
-		t.Fatalf("data of the deleted project: %d (%v)", left, err)
+	if issues != 0 || logs != 0 || slices.ContainsFunc(events, func(event store.EventSummary) bool { return event.ProjectID == projectID }) {
+		t.Fatalf("data of the deleted project: %d issues, %d logs, events %v", issues, logs, events)
 	}
 
 	// Its DSN stops working.

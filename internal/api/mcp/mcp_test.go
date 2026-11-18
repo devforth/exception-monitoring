@@ -10,14 +10,13 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/devforth/exception-monitoring/internal/storage/sqlite"
+	"github.com/devforth/exception-monitoring/internal/storage/storetest"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -36,7 +35,7 @@ import (
 type testServer struct {
 	t             *testing.T
 	url           string
-	database      *sqlite.Store
+	database      store.Store
 	authorization *oauth.Server
 	token         string
 	session       *sdk.ClientSession
@@ -45,13 +44,7 @@ type testServer struct {
 func newTestServer(t *testing.T, configure ...func(*config.Config)) *testServer {
 	t.Helper()
 
-	database, err := sqlite.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
-
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	t.Cleanup(func() { _ = database.Close() })
+	database := storetest.Open(t)
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	settings := &config.Config{Projects: fixtures.Projects(), AllowedOrigins: []string{"*"}}

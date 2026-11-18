@@ -5,13 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/devforth/exception-monitoring/internal/storage/sqlite"
+	"github.com/devforth/exception-monitoring/internal/storage/storetest"
 
 	"github.com/devforth/exception-monitoring/internal/ingest/sentry"
 	"github.com/devforth/exception-monitoring/internal/storage/store"
@@ -103,24 +102,14 @@ func (factory *fakeFactory) Channel(connection store.Connection) (Channel, error
 // testSetup is a database with connections and a fake channel for each.
 type testSetup struct {
 	t        *testing.T
-	database *sqlite.Store
+	database store.Store
 	factory  *fakeFactory
 }
 
 func newSetup(t *testing.T) *testSetup {
 	t.Helper()
 
-	database, err := sqlite.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
-
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	t.Cleanup(func() {
-		if err := database.Close(); err != nil {
-			t.Error(err)
-		}
-	})
+	database := storetest.Open(t)
 
 	return &testSetup{t: t, database: database, factory: &fakeFactory{channels: map[int64]Channel{}}}
 }

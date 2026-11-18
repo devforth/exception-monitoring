@@ -34,6 +34,9 @@ type Handler struct {
 	cors     cors
 	limiter  *rateLimiter // nil when rate limiting is disabled
 	now      func() time.Time
+	// pipeline, when set, takes envelopes into its inbox and stores them
+	// later; without it they are processed in the request.
+	pipeline *Pipeline
 }
 
 func New(logger *slog.Logger, settings *config.Config, projects config.ProjectList, sink Sink) *Handler {
@@ -127,12 +130,15 @@ func (handler *Handler) ingest(w http.ResponseWriter, r *http.Request) (map[stri
 
 	// Usually the key is in the request. Behind a tunnel it is only in the
 	// envelope header, so the body has to be parsed before authenticating.
-	var envelope *sentry.Envelope
+	var (
+		envelope *sentry.Envelope
+		body     []byte
+	)
 
 	key := publicKeyFromRequest(r)
 
 	if key == "" {
-		if envelope, err = readEnvelope(w, r); err != nil {
+		if envelope, body, err = readEnvelope(w, r); err != nil {
 			return nil, err
 		}
 
@@ -156,9 +162,13 @@ func (handler *Handler) ingest(w http.ResponseWriter, r *http.Request) (map[stri
 	}
 
 	if envelope == nil {
-		if envelope, err = readEnvelope(w, r); err != nil {
+		if envelope, body, err = readEnvelope(w, r); err != nil {
 			return nil, err
 		}
+	}
+
+	if handler.pipeline != nil {
+		return handler.pipeline.accept(project, envelope, body)
 	}
 
 	return handler.process(r.Context(), project, envelope)
@@ -167,43 +177,10 @@ func (handler *Handler) ingest(w http.ResponseWriter, r *http.Request) (map[stri
 // process parses every item before storing anything, so a malformed item
 // rejects the whole envelope instead of storing half of it.
 func (handler *Handler) process(ctx context.Context, project config.Project, envelope *sentry.Envelope) (map[string]string, error) {
-	received := handler.now()
+	events, logs, err := handler.parseItems(project, envelope, handler.now())
 
-	var (
-		events []*sentry.Event
-		logs   []sentry.Log
-	)
-
-	dropped := map[string]int{}
-
-	for index, item := range envelope.Items {
-		switch item.Header.Type {
-		case sentry.ItemEvent:
-			// Credentials (cookies, Authorization, tokens) are removed before
-			// anything is parsed or stored (package scrub), and so is what
-			// does not help a fix, such as library source (package compact).
-			event, err := sentry.ParseEvent(prepareEvent(item.Payload), envelope.Header.EventID, received)
-
-			if err != nil {
-				return nil, reject(http.StatusBadRequest, "item %d: %v", index+1, err)
-			}
-
-			events = append(events, event)
-		case sentry.ItemLog:
-			batch, err := sentry.ParseLogs(scrub.JSON(item.Payload), received)
-
-			if err != nil {
-				return nil, reject(http.StatusBadRequest, "item %d: %v", index+1, err)
-			}
-
-			logs = append(logs, batch...)
-		default:
-			dropped[item.Header.Type]++
-		}
-	}
-
-	if len(dropped) > 0 {
-		handler.logger.Debug("dropped unsupported items", "project", project.Name, "types", dropped)
+	if err != nil {
+		return nil, err
 	}
 
 	for _, event := range events {
@@ -227,20 +204,64 @@ func (handler *Handler) process(ctx context.Context, project config.Project, env
 	return response, nil
 }
 
-func readEnvelope(w http.ResponseWriter, r *http.Request) (*sentry.Envelope, error) {
+// parseItems parses the events and logs of an envelope; other item types are
+// dropped. Any malformed item fails the whole envelope.
+func (handler *Handler) parseItems(project config.Project, envelope *sentry.Envelope, received time.Time) ([]*sentry.Event, []sentry.Log, error) {
+	var (
+		events []*sentry.Event
+		logs   []sentry.Log
+	)
+
+	dropped := map[string]int{}
+
+	for index, item := range envelope.Items {
+		switch item.Header.Type {
+		case sentry.ItemEvent:
+			// Credentials (cookies, Authorization, tokens) are removed before
+			// anything is parsed or stored (package scrub), and so is what
+			// does not help a fix, such as library source (package compact).
+			event, err := sentry.ParseEvent(prepareEvent(item.Payload), envelope.Header.EventID, received)
+
+			if err != nil {
+				return nil, nil, reject(http.StatusBadRequest, "item %d: %v", index+1, err)
+			}
+
+			events = append(events, event)
+		case sentry.ItemLog:
+			batch, err := sentry.ParseLogs(scrub.JSON(item.Payload), received)
+
+			if err != nil {
+				return nil, nil, reject(http.StatusBadRequest, "item %d: %v", index+1, err)
+			}
+
+			logs = append(logs, batch...)
+		default:
+			dropped[item.Header.Type]++
+		}
+	}
+
+	if len(dropped) > 0 {
+		handler.logger.Debug("dropped unsupported items", "project", project.Name, "types", dropped)
+	}
+
+	return events, logs, nil
+}
+
+// readEnvelope reads the body (decompressed) and splits it into items.
+func readEnvelope(w http.ResponseWriter, r *http.Request) (*sentry.Envelope, []byte, error) {
 	body, err := readBody(w, r)
 
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	envelope, err := sentry.ParseEnvelope(body)
 
 	if err != nil {
-		return nil, reject(http.StatusBadRequest, "%v", err)
+		return nil, nil, reject(http.StatusBadRequest, "%v", err)
 	}
 
-	return envelope, nil
+	return envelope, body, nil
 }
 
 // Errors use Sentry's {"detail": "..."} shape; SDKs log it on failure.

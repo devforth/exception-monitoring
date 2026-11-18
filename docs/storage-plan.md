@@ -52,7 +52,7 @@ A goleveldb database is a flat directory managed by the library. It is not one f
   - write buffer (memtable) 16 MB;
   - bloom filter of 10 bits per key: every new event looks up its `event_id`, which is almost always missing, and that is the case filters help with;
   - table files of 8 MB instead of the default 2 MB, so that 2 GB is about 250 files rather than 1000, under the open-files cache.
-- **Database size:** the sum of the file sizes in the directory, a few hundred files.
+- **Database size:** the sum of the file sizes in the directory of the engine built in, a few hundred files; nothing else counts.
 - **Backup:** never a copy of the directory of a running database. A snapshot is copied into a new directory instead (stage 6).
 
 ## Ingest pipeline
@@ -77,10 +77,10 @@ SDK -> HTTP handler -> inbox (goleveldb) -> 200
 
 goleveldb only knows bytes: no tables, no indexes, no query planner. A thin layer of our own, `internal/storage/kv`, gives records a model-like shape, so that no other code builds a key by hand. It works like a model in an ORM, with indexes declared up front.
 
-**Rule: every model is declared once.** Its key, its indexes and the encoding of its value live in one declaration, and every read, write and delete goes through it. The SQLite layer did not do this: a project's columns were listed separately in the column list, the scan function, `INSERT`, `UPDATE` and the migration, so one new field meant edits in five places. Here a new field or index is one edit in `kv/schema.go`, plus a migration when stored records have to change.
+**Rule: every model is declared once.** Its key, its indexes and the encoding of its value live in one declaration, and every read, write and delete goes through it. The SQLite layer did not do this: a project's columns were listed separately in the column list, the scan function, `INSERT`, `UPDATE` and the migration, so one new field meant edits in five places. Here a new field or index is one edit in `internal/storage/kvstore/schema.go`, plus a migration when stored records have to change.
 
 ```go
-// Declared once, in one file (kv/schema.go): the primary key and every index.
+// Declared once, in one file (kvstore/schema.go): the primary key and every index.
 var Logs = kv.Collection[LogRecord]{
 	Prefix: "log",
 	Key:    func(l LogRecord) kv.Key { return kv.K(l.LevelRank(), l.Seq) },
@@ -96,7 +96,7 @@ batch.Delete(Logs, record) // the record and all its index keys
 logs, err := Logs.By("project", 2, kv.Level("error")).Newest().Limit(20).All(db)
 ```
 
-- **One place for every key.** All collections, their prefixes and indexes are declared in `kv/schema.go`, which is the table under *Data layout* in code. Key parts are encoded by one set of functions:
+- **One place for every key.** All collections, their prefixes and indexes are declared in `internal/storage/kvstore/schema.go`, which is the table under *Data layout* in code. Key parts are encoded by one set of functions:
   - numbers are big-endian, so they sort;
   - text ends with a zero byte, so a prefix never matches a longer value;
   - levels are written as their rank.
@@ -134,7 +134,7 @@ services -> store.Store -> kv: collections, indexes, queries, cleanup   (written
 
 ## Data layout
 
-Keys are byte strings in sorted order: numbers are big-endian so they sort, and levels are written as their rank, lowest first. A record is stored once under its primary key. Indexes are extra keys whose value is the primary key, written in the same batch. Every row of this table is a collection in `kv/schema.go`; nothing else builds keys.
+Keys are byte strings in sorted order: numbers are big-endian so they sort, and levels are written as their rank, lowest first. A record is stored once under its primary key. Indexes are extra keys whose value is the primary key, written in the same batch. Every row of this table is a collection in `internal/storage/kvstore/schema.go`; nothing else builds keys.
 
 | Data | Primary key | Indexes |
 |---|---|---|
@@ -191,9 +191,9 @@ One limit stays: `MAX_DATABASE_SIZE` (default 2 GB).
 |---|---|---|
 | 0. Plan and audit | This plan; `docs/storage-audit.md` | The plan is agreed |
 | 1. Interfaces | `store` keeps the records, their rules and the `Store` interface; the SQL is in `sqlite`. **Done** (taken from `archive/pebble`) | Services compile against interfaces |
-| 2. Ingest and reads | First the collections layer (see *Collections*): the `Engine` interface with the goleveldb adapter, key encoding, collections with indexes, batches, queries, the consistency check, with its own tests. Then, on top of it: inbox, issues, events, logs, time marks, counters; the pipeline; `storetest.Open` runs every test on either store (`STORE=kv`); the rest passes to SQLite until stage 5 | The layer's tests pass; UI and API tests pass on goleveldb |
+| 2. Ingest and reads | First the collections layer (see *Collections*): the `Engine` interface with the goleveldb adapter, key encoding, collections with indexes, batches, queries, the consistency check, with its own tests. Then, on top of it: inbox, issues, events, logs, time marks, counters; the pipeline; `storetest.Open` runs every test on either store (`STORE=kv`); the rest passes to SQLite until stage 5 **Done:** the layer is `internal/storage/kv` (engine, keys, collections, batches with counters and sequence numbers, queries and cursors, the consistency check); the store is `internal/storage/kvstore` on it (`schema.go` declares every collection; the rest of `store.Store` passes to SQLite); the ingest pipeline and the server run on it (`DATA_DIR/leveldb`). First measurements (tmpfs, 50 projects): 50 000 events stored at 2 500/s, logs at ~6 400 lines/s; answers p50 4 ms, max 690 ms; peak memory 300–540 MB, so stage 3 has work to do. | The layer's tests pass; UI and API tests pass on goleveldb |
 | 3. Measurements | Ingest load test (50 × 1000 events, logs), peak memory, latency of answers; tune the settings above; decide the inbox sync policy | The goal is met, or the gap is understood |
-| 4. Cleanup | The cleanup above under ingest on a 2 GB database; the retention settings, UI and docs removed | Cleanup tests pass; the cleanup does not stall ingest |
+| 4. Cleanup | The cleanup above under ingest on a 2 GB database; the retention settings, UI and docs removed. A test runs a burst of writes through the pipeline while the cleanup deletes and compacts: nothing accepted is lost or stored twice, the counters match the stored records, the consistency check passes, and the answers to SDKs stay within the goal | Cleanup tests pass, the burst-with-cleanup test among them; the cleanup does not stall ingest |
 | 5. Small data | Users, sessions, projects, OAuth, notifications, outbox, as collections of the same layer | All tests pass; `modernc.org/sqlite` removed from `go.mod` |
 | 6. Operations | `backup` through a snapshot, docs, image size, `CLAUDE.md` | Ready for the release |
 

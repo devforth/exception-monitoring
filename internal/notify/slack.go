@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	textutil "github.com/devforth/exception-monitoring/internal/platform/text"
 )
 
 // Slack posts to an incoming webhook
@@ -41,7 +43,7 @@ func (slack Slack) Send(ctx context.Context, notification Notification) error {
 
 	lines := []string{
 		fmt.Sprintf("%s *%s* in `%s` · %s", icon, notification.Kind.label(), slackEscape(notification.Project), slackEscape(notification.Level)),
-		"*" + slackLink(notification.IssueURL, truncate(notification.Title, titleLength)) + "*",
+		"*" + slackLink(notification.IssueURL, textutil.Shorten(notification.Title, titleLength)) + "*",
 	}
 
 	if details := notification.details(); details != "" {
@@ -76,14 +78,14 @@ func slackPrompt(notification Notification) string {
 	prompt = strings.ReplaceAll(prompt, "```", "ʼʼʼ")
 	header := promptCaption + "\n"
 
-	return header + "```" + truncate(slackEscape(prompt), maxSlackText-len(header)-6) + "```"
+	return header + "```" + textutil.Shorten(slackEscape(prompt), maxSlackText-len(header)-6) + "```"
 }
 
 func (slack Slack) SendSummary(ctx context.Context, summary Summary) error {
 	lines := []string{":warning: *" + summary.heading() + "*"}
 
 	for _, item := range summary.Items {
-		lines = append(lines, fmt.Sprintf("• `%s` %s", slackEscape(item.Project), slackLink(item.IssueURL, truncate(item.Title, shortTitleLength))))
+		lines = append(lines, fmt.Sprintf("• `%s` %s", slackEscape(item.Project), slackLink(item.IssueURL, textutil.Shorten(item.Title, shortTitleLength))))
 
 		if reference := mcpReference(slack.AppName, item); reference != "" {
 			lines = append(lines, "  `"+reference+"`")

@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/devforth/exception-monitoring/internal/ingest/grouping"
+	"github.com/devforth/exception-monitoring/internal/ingest/sentry"
 	"github.com/devforth/exception-monitoring/internal/storage/store"
 )
 
@@ -352,11 +354,20 @@ func TestStatusHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var fingerprint string
+	// The fingerprint of the issue, from its stored event as ingest computes it.
+	latest, err := database.LatestEvent(ctx, issueID)
 
-	if err := database.DB.QueryRowContext(ctx, `SELECT fingerprint FROM issues WHERE id = ?`, issueID).Scan(&fingerprint); err != nil {
+	if err != nil {
 		t.Fatal(err)
 	}
+
+	parsed, err := sentry.ParseEvent(latest.Payload, latest.EventID, time.Now())
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fingerprint := grouping.Fingerprint(parsed)
 
 	again := store.NewEvent{
 		ProjectID: issue.ProjectID, EventID: "0123456789abcdef0123456789abcdef", Fingerprint: fingerprint,

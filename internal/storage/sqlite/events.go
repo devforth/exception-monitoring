@@ -15,13 +15,6 @@ func formatTime(value time.Time) string {
 	return value.UTC().Format(timeFormat)
 }
 
-// Maximum stored lengths. Titles come from error messages and can be huge
-// (e.g. a whole JSON document in the message).
-const (
-	maxTitleLength   = 500
-	maxCulpritLength = 300
-)
-
 // SaveEvent stores the event and creates or updates its issue in one transaction.
 //
 // first_seen/last_seen use the server's receive time, not the SDK timestamp:
@@ -53,8 +46,7 @@ func (store *Store) SaveEvent(ctx context.Context, event NewEvent) (SaveResult, 
 		return result, fmt.Errorf("check duplicate: %w", err)
 	}
 
-	title := truncate(event.Title, maxTitleLength)
-	culprit := truncate(event.Culprit, maxCulpritLength)
+	title, culprit := event.IssueText()
 	receivedAt := formatTime(event.ReceivedAt)
 
 	var status string
@@ -235,15 +227,4 @@ func trimMessage(ctx context.Context, db interface {
 	}
 
 	return result.RowsAffected()
-}
-
-// truncate cuts text to at most limit characters (not bytes), adding "…".
-func truncate(text string, limit int) string {
-	runes := []rune(text)
-
-	if len(runes) <= limit {
-		return text
-	}
-
-	return string(runes[:limit-1]) + "…"
 }

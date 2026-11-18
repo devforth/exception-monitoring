@@ -13,6 +13,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	textutil "github.com/devforth/exception-monitoring/internal/platform/text"
 )
 
 // Telegram sends messages with a bot (https://core.telegram.org/bots/api#sendmessage).
@@ -38,12 +40,12 @@ func (telegram Telegram) Send(ctx context.Context, notification Notification) er
 
 	lines := []string{
 		fmt.Sprintf("%s <b>%s</b> in <code>%s</code> · %s", icon, notification.Kind.label(), html.EscapeString(notification.Project), html.EscapeString(notification.Level)),
-		"<b>" + telegramLink(notification.IssueURL, truncate(notification.Title, titleLength)) + "</b>",
+		"<b>" + telegramLink(notification.IssueURL, textutil.Shorten(notification.Title, titleLength)) + "</b>",
 	}
 
 	// Capped so the text fits a file caption (1024 characters).
 	if details := notification.details(); details != "" {
-		lines = append(lines, html.EscapeString(truncate(details, detailsLength)))
+		lines = append(lines, html.EscapeString(textutil.Shorten(details, detailsLength)))
 	}
 
 	if reference := mcpReference(telegram.AppName, notification); reference != "" {
@@ -75,7 +77,7 @@ func (telegram Telegram) SendSummary(ctx context.Context, summary Summary) error
 	lines := []string{"⚠️ <b>" + html.EscapeString(summary.heading()) + "</b>"}
 
 	for _, item := range summary.Items {
-		lines = append(lines, fmt.Sprintf("• <code>%s</code> %s", html.EscapeString(item.Project), telegramLink(item.IssueURL, truncate(item.Title, shortTitleLength))))
+		lines = append(lines, fmt.Sprintf("• <code>%s</code> %s", html.EscapeString(item.Project), telegramLink(item.IssueURL, textutil.Shorten(item.Title, shortTitleLength))))
 
 		if reference := mcpReference(telegram.AppName, item); reference != "" {
 			lines = append(lines, "<code>"+html.EscapeString(reference)+"</code>")

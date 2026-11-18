@@ -2,6 +2,8 @@ package store
 
 import (
 	"time"
+
+	"github.com/devforth/exception-monitoring/internal/platform/text"
 )
 
 // Issue statuses.
@@ -33,6 +35,18 @@ type NewEvent struct {
 	// KeepEvents > 0 keeps only the newest KeepEvents events of the issue:
 	// older ones are deleted as this one is saved (RETENTION_EVENTS_PER_ISSUE).
 	KeepEvents int
+}
+
+// An issue keeps at most this much of an event's title and culprit: titles
+// come from error messages and can be huge.
+const (
+	MaxTitleLength   = 500
+	MaxCulpritLength = 300
+)
+
+// IssueText is the title and culprit an issue keeps of event.
+func (event NewEvent) IssueText() (title, culprit string) {
+	return text.Shorten(event.Title, MaxTitleLength), text.Shorten(event.Culprit, MaxCulpritLength)
 }
 
 // SaveResult tells what storing an event changed. Notifications (stage 6) use it.

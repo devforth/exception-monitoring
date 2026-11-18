@@ -27,6 +27,8 @@ import (
 	"github.com/devforth/exception-monitoring/internal/platform/secret"
 	"github.com/devforth/exception-monitoring/internal/server"
 	"github.com/devforth/exception-monitoring/internal/services"
+	"github.com/devforth/exception-monitoring/internal/storage/kv"
+	"github.com/devforth/exception-monitoring/internal/storage/kvstore"
 	"github.com/devforth/exception-monitoring/internal/storage/projects"
 	"github.com/devforth/exception-monitoring/internal/storage/retention"
 	"github.com/devforth/exception-monitoring/internal/storage/store"
@@ -79,14 +81,25 @@ func run() error {
 
 	defer stop()
 
-	database, err := sqlite.Open(ctx, settings.DatabaseFile())
+	relational, err := sqlite.Open(ctx, settings.DatabaseFile())
 
 	if err != nil {
 		return err
 	}
 
+	// Issues, events and logs are in the key-value store, in a directory of
+	// its own (DATA_DIR/leveldb); the rest is still in SQLite until it moves
+	// too (docs/storage-plan.md).
+	database, err := kvstore.Open(filepath.Join(settings.DataDir, kv.EngineName), relational)
+
+	if err != nil {
+		_ = relational.Close()
+
+		return err
+	}
+
 	defer func() {
-		// Closing flushes the WAL into the database file; a failure here is worth knowing about.
+		// Closing flushes both stores; a failure here is worth knowing about.
 		if err := database.Close(); err != nil {
 			logger.Error("close database", "err", err)
 		}
@@ -174,7 +187,7 @@ func run() error {
 	go func() {
 		defer close(retentionDone)
 
-		cleaner := retention.Cleaner{Store: database, Settings: settings.Retention, Projects: registry, Logger: logger}
+		cleaner := retention.Cleaner{Store: relational, Settings: settings.Retention, Projects: registry, Logger: logger}
 		cleaner.Run(retentionCtx)
 	}()
 
@@ -185,22 +198,6 @@ func run() error {
 
 	logRetention(logger, settings.Retention)
 
-	// Logs from before the search index are added to it in the background;
-	// until then a search reads logs as before.
-	indexingCtx, stopIndexing := context.WithCancel(ctx)
-	indexingDone := make(chan struct{})
-
-	go func() {
-		defer close(indexingDone)
-
-		indexLogSearch(indexingCtx, logger, database)
-	}()
-
-	defer func() {
-		stopIndexing()
-		<-indexingDone
-	}()
-
 	// One catalog of requests, served as the REST API and as MCP tools, on
 	// the same services as the UI.
 	endpoints := catalog.New(database, registry, services.New(services.Dependencies{
@@ -209,6 +206,26 @@ func run() error {
 
 	sink := ingest.StoreSink{Store: database, Logger: logger, Notifier: notifier, PublicURL: settings.Notifications.PublicURL,
 		Retention: settings.Retention, Recording: settings.Recording}
+
+	// Envelopes go through the inbox: the handler answers once one is on
+	// disk, the pipeline stores it. It stops after the HTTP server (no new
+	// envelopes) and before the notifier and the database (defers run in
+	// reverse order), storing what it holds.
+	ingestHandler := ingest.New(logger, settings, registry, sink)
+	pipeline := ingest.NewPipeline(ingestHandler, database, sink)
+	pipelineCtx, stopPipeline := context.WithCancel(context.Background())
+	pipelineDone := make(chan struct{})
+
+	go func() {
+		defer close(pipelineDone)
+
+		pipeline.Run(pipelineCtx)
+	}()
+
+	defer func() {
+		stopPipeline()
+		<-pipelineDone
+	}()
 
 	// Bind before logging "started" so a busy port fails here, not after a false start message.
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", settings.Port))
@@ -221,7 +238,7 @@ func run() error {
 		Handler: server.New(server.Options{
 			Logger:         logger,
 			Database:       database,
-			Ingest:         ingest.New(logger, settings, registry, sink),
+			Ingest:         ingestHandler,
 			API:            rest.New(logger, endpoints, settings.Notifications.PublicURL, settings.TrustedProxies),
 			MCP:            mcp.New(logger, database, endpoints, authorization, settings.AppName, version),
 			UI:             webUI,
@@ -404,55 +421,4 @@ func resetPassword(args []string) error {
 	fmt.Printf("Temporary password of %s: %s\nLog in with it and choose a new password.\n", username, password)
 
 	return nil
-}
-
-// Log search indexing: logs per transaction (one took up to 0.3 s on 3.6M
-// logs), and how often a filled index is checked for a refill started by
-// retention (store.RefreshLogSearch).
-const (
-	logSearchBatch = 2000
-	logSearchCheck = time.Minute
-)
-
-// indexLogSearch keeps the log search index filled until ctx ends: it adds
-// the logs it lacks (from before it existed, or after retention emptied it)
-// in small batches with a store.WritePause between them, so ingest is never
-// held up; a failed batch is tried again later.
-func indexLogSearch(ctx context.Context, logger *slog.Logger, database store.Store) {
-	var started time.Time
-
-	for ctx.Err() == nil {
-		pause := store.WritePause
-
-		switch {
-		case database.LogSearchReady(ctx):
-			if !started.IsZero() {
-				logger.Info("logs indexed for search", "took", time.Since(started).Round(time.Second))
-				started = time.Time{}
-			}
-
-			pause = logSearchCheck
-		case started.IsZero():
-			remaining, err := database.LogsToIndex(ctx)
-
-			if err != nil {
-				logger.Warn("count logs to index for search", "err", err)
-			}
-
-			logger.Info("indexing logs for search in the background", "logs", remaining)
-
-			started = time.Now()
-		default:
-			if _, err := database.IndexLogsForSearch(ctx, logSearchBatch); err != nil && ctx.Err() == nil {
-				logger.Warn("index logs for search, will retry", "err", err)
-
-				pause = 10 * time.Second
-			}
-		}
-
-		select {
-		case <-ctx.Done():
-		case <-time.After(pause):
-		}
-	}
 }

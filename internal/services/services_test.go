@@ -5,12 +5,11 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
 
-	"github.com/devforth/exception-monitoring/internal/storage/sqlite"
+	"github.com/devforth/exception-monitoring/internal/storage/storetest"
 
 	"github.com/devforth/exception-monitoring/internal/notify"
 	"github.com/devforth/exception-monitoring/internal/platform/config"
@@ -18,16 +17,10 @@ import (
 	"github.com/devforth/exception-monitoring/internal/storage/store"
 )
 
-func openStore(t *testing.T) *sqlite.Store {
+func openStore(t *testing.T) store.Store {
 	t.Helper()
 
-	database, err := sqlite.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
-
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	t.Cleanup(func() { _ = database.Close() })
+	database := storetest.Open(t)
 
 	if err := database.SeedProject(context.Background(), store.Project{ID: 1, Name: "backend", PublicKey: "0123456789abcdef0123456789abcdef"}, time.Now()); err != nil {
 		t.Fatal(err)
@@ -190,13 +183,7 @@ func TestSelectedEvent(t *testing.T) {
 // Saving an active connection retries its waiting messages now: a save is
 // usually the fix for why they failed.
 func TestSaveRetriesWaitingMessages(t *testing.T) {
-	database, err := sqlite.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
-
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	defer func() { _ = database.Close() }()
+	database := storetest.Open(t)
 
 	ctx := context.Background()
 	destination, _ := database.CreateDestination(ctx, store.Destination{Type: "slack", Secret: "x", Verified: true}, time.Now())

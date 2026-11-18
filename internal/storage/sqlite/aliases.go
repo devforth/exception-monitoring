@@ -12,6 +12,7 @@ const DateLastSeen = domain.DateLastSeen
 const GrantOAuth = domain.GrantOAuth
 const GrantToken = domain.GrantToken
 const MaxIssueBatch = domain.MaxIssueBatch
+const MaxTitleLength = domain.MaxTitleLength
 const MaxVerifyAttempts = domain.MaxVerifyAttempts
 const OutboxFailed = domain.OutboxFailed
 const OutboxPending = domain.OutboxPending

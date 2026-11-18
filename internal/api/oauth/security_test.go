@@ -9,12 +9,11 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"net/url"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/devforth/exception-monitoring/internal/storage/sqlite"
+	"github.com/devforth/exception-monitoring/internal/storage/storetest"
 
 	"github.com/devforth/exception-monitoring/internal/server/access"
 	"github.com/devforth/exception-monitoring/internal/storage/store"
@@ -25,17 +24,7 @@ const testUserID = 1
 
 func testAuthorization(t *testing.T) (*Server, http.Handler) {
 	t.Helper()
-	database, err := sqlite.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
-
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	t.Cleanup(func() {
-		if err := database.Close(); err != nil {
-			t.Error(err)
-		}
-	})
+	database := storetest.Open(t)
 
 	// The user agents act for (users are created by the UI).
 	if _, err := database.CreateUser(context.Background(), store.User{Username: "admin", Role: store.RoleSuperadmin, CreatedAt: time.Now()}, "x"); err != nil {

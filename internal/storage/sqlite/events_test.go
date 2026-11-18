@@ -213,7 +213,7 @@ func TestLongTitleIsTruncated(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if runes := []rune(title); len(runes) != maxTitleLength || runes[len(runes)-1] != '…' {
+	if runes := []rune(title); len(runes) != MaxTitleLength || runes[len(runes)-1] != '…' {
 		t.Fatalf("title length = %d", len(runes))
 	}
 }

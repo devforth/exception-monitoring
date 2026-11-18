@@ -6,13 +6,12 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/devforth/exception-monitoring/internal/storage/sqlite"
+	"github.com/devforth/exception-monitoring/internal/storage/storetest"
 
 	"github.com/devforth/exception-monitoring/internal/fixtures"
 	"github.com/devforth/exception-monitoring/internal/ingest/sentry"
@@ -23,17 +22,7 @@ import (
 
 // Replays every recorded SDK request into a real database, twice.
 func TestFixturesEndToEnd(t *testing.T) {
-	database, err := sqlite.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
-
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	defer func() {
-		if err := database.Close(); err != nil {
-			t.Error(err)
-		}
-	}()
+	database := storetest.Open(t)
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	handler := New(logger, testSettings(), fixtures.Projects(), StoreSink{Store: database, Logger: logger})
@@ -59,44 +48,36 @@ func TestFixturesEndToEnd(t *testing.T) {
 		}
 	}
 
-	count := func(query string) int {
-		t.Helper()
-
-		var value int
-
-		if err := database.DB.QueryRow(query).Scan(&value); err != nil {
-			t.Fatal(err)
-		}
-
-		return value
-	}
-
-	if events := count(`SELECT COUNT(*) FROM events`); events != eventFixtures {
+	if events := countEvents(t, database, nil); events != eventFixtures {
 		t.Fatalf("events = %d, want %d (duplicates must be ignored)", events, eventFixtures)
 	}
 
-	if issues := count(`SELECT COUNT(*) FROM issues`); issues != eventFixtures {
+	if issues := countIssues(t, database, store.IssueFilter{}, nil); issues != eventFixtures {
 		// Every event fixture is a different error, so each is its own issue.
 		t.Fatalf("issues = %d, want %d", issues, eventFixtures)
 	}
 
-	if frontend := count(`SELECT COUNT(*) FROM issues WHERE project_id = 2`); frontend != 4 {
+	if frontend := countIssues(t, database, store.IssueFilter{ProjectIDs: []int{2}}, nil); frontend != 4 {
 		t.Fatalf("frontend issues = %d, want 4", frontend)
 	}
 
-	if mismatched := count(`SELECT COUNT(*) FROM issues WHERE event_count != (SELECT COUNT(*) FROM events WHERE issue_id = issues.id)`); mismatched != 0 {
+	mismatched := countIssues(t, database, store.IssueFilter{}, func(issue store.Issue) bool {
+		return issue.EventCount != countEvents(t, database, func(event store.EventSummary) bool { return event.IssueID == issue.ID })
+	})
+
+	if mismatched != 0 {
 		t.Fatalf("%d issues have event_count out of sync", mismatched)
 	}
 	// Logs have no ID, so a retried batch is stored again: both passes count.
-	if logs := count(`SELECT COUNT(*) FROM logs`); logs == 0 || logs%2 != 0 {
+	if logs := countLogs(t, database, store.LogFilter{}); logs == 0 || logs%2 != 0 {
 		t.Fatalf("logs = %d", logs)
 	}
 
-	if linked := count(`SELECT COUNT(*) FROM events WHERE trace_id != ''`); linked != eventFixtures {
+	if linked := countEvents(t, database, func(event store.EventSummary) bool { return event.TraceID != "" }); linked != eventFixtures {
 		t.Fatalf("events with trace_id = %d, want all %d", linked, eventFixtures)
 	}
 
-	if culprits := count(`SELECT COUNT(*) FROM issues WHERE culprit = ''`); culprits != 0 {
+	if culprits := countIssues(t, database, store.IssueFilter{}, func(issue store.Issue) bool { return issue.Culprit == "" }); culprits != 0 {
 		t.Fatalf("%d issues without a culprit", culprits)
 	}
 }
@@ -111,17 +92,7 @@ func (notifier *recordingNotifier) Notify(notification notify.Notification) {
 
 // New issues and regressions are notified; repeats of a known issue are not.
 func TestStoreSinkNotifies(t *testing.T) {
-	database, err := sqlite.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
-
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	defer func() {
-		if err := database.Close(); err != nil {
-			t.Error(err)
-		}
-	}()
+	database := storetest.Open(t)
 
 	notifier := &recordingNotifier{}
 	sink := StoreSink{Store: database, Logger: slog.New(slog.DiscardHandler), Notifier: notifier, PublicURL: "https://errors.example.com"}
@@ -169,13 +140,7 @@ func TestStoreSinkNotifies(t *testing.T) {
 // A message logged in a loop keeps its newest RETENTION_LOGS_PER_MESSAGE
 // copies; a project can set its own number.
 func TestStoreSinkLimitsRepeatedLogs(t *testing.T) {
-	database, err := sqlite.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
-
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	defer func() { _ = database.Close() }()
+	database := storetest.Open(t)
 
 	sink := StoreSink{Store: database, Logger: slog.New(slog.DiscardHandler), Retention: config.Retention{LogsPerMessage: 50}}
 	three := 3
@@ -196,10 +161,8 @@ func TestStoreSinkLimitsRepeatedLogs(t *testing.T) {
 	}
 
 	for projectID, want := range map[int]int{1: 50, 2: 3} {
-		var count int
-
-		if err := database.DB.QueryRow(`SELECT COUNT(*) FROM logs WHERE project_id = ?`, projectID).Scan(&count); err != nil || count != want {
-			t.Errorf("project %d: %d logs (%v), want %d", projectID, count, err, want)
+		if count := countLogs(t, database, store.LogFilter{ProjectIDs: []int{projectID}}); count != want {
+			t.Errorf("project %d: %d logs, want %d", projectID, count, want)
 		}
 	}
 }
@@ -207,13 +170,7 @@ func TestStoreSinkLimitsRepeatedLogs(t *testing.T) {
 // Events and logs of levels a project does not record are dropped: not
 // stored and no notification.
 func TestStoreSinkRecordsChosenLevels(t *testing.T) {
-	database, err := sqlite.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
-
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	defer func() { _ = database.Close() }()
+	database := storetest.Open(t)
 
 	notifier := &recordingNotifier{}
 	sink := StoreSink{Store: database, Logger: slog.New(slog.DiscardHandler), Notifier: notifier,
@@ -237,18 +194,8 @@ func TestStoreSinkRecordsChosenLevels(t *testing.T) {
 		}
 	}
 
-	count := func(query string, args ...any) int {
-		var value int
-
-		if err := database.DB.QueryRow(query, args...).Scan(&value); err != nil {
-			t.Fatal(err)
-		}
-
-		return value
-	}
-
 	// error, fatal and an event without a level (an error) of each project.
-	if events := count(`SELECT COUNT(*) FROM events`); events != 6 {
+	if events := countEvents(t, database, nil); events != 6 {
 		t.Errorf("%d events stored, want 6", events)
 	}
 
@@ -256,11 +203,66 @@ func TestStoreSinkRecordsChosenLevels(t *testing.T) {
 		t.Errorf("%d notifications, want 6: a dropped event must not notify", notified)
 	}
 
-	if logs := count(`SELECT COUNT(*) FROM logs WHERE project_id = 1`); logs != 3 {
+	if logs := countLogs(t, database, store.LogFilter{ProjectIDs: []int{1}}); logs != 3 {
 		t.Errorf("backend: %d logs, want every level", logs)
 	}
 
-	if logs := count(`SELECT COUNT(*) FROM logs WHERE project_id = 2 AND level = 'warn'`); logs != 1 || count(`SELECT COUNT(*) FROM logs WHERE project_id = 2`) != 1 {
+	if logs := countLogs(t, database, store.LogFilter{ProjectIDs: []int{2}, Levels: []string{"warn"}}); logs != 1 || countLogs(t, database, store.LogFilter{ProjectIDs: []int{2}}) != 1 {
 		t.Error("frontend records only warn logs")
 	}
+}
+
+// Counts through the store, so they hold for every implementation.
+
+func countEvents(t *testing.T, database store.Store, keep func(store.EventSummary) bool) int {
+	t.Helper()
+
+	events, err := database.ListEvents(context.Background(), store.EventFilter{Limit: 1 << 20})
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	count := 0
+
+	for _, event := range events {
+		if keep == nil || keep(event) {
+			count++
+		}
+	}
+
+	return count
+}
+
+func countIssues(t *testing.T, database store.Store, filter store.IssueFilter, keep func(store.Issue) bool) int {
+	t.Helper()
+
+	filter.Limit = 1 << 20
+	issues, err := database.ListIssues(context.Background(), filter)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	count := 0
+
+	for _, issue := range issues {
+		if keep == nil || keep(issue) {
+			count++
+		}
+	}
+
+	return count
+}
+
+func countLogs(t *testing.T, database store.Store, filter store.LogFilter) int {
+	t.Helper()
+
+	count, _, err := database.CountLogs(context.Background(), filter)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return count
 }

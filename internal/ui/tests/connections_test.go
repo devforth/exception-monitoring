@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/devforth/exception-monitoring/internal/platform/config"
+	"github.com/devforth/exception-monitoring/internal/storage/storetest"
 
 	"github.com/devforth/exception-monitoring/internal/fixtures"
 )
@@ -96,7 +97,7 @@ func TestSlackConnection(t *testing.T) {
 	// The webhook URL is stored encrypted, in the destination.
 	var stored string
 
-	if err := database.DB.QueryRow(`SELECT secret FROM notification_destinations WHERE type = 'slack'`).Scan(&stored); err != nil {
+	if err := storetest.SQL(database).QueryRow(`SELECT secret FROM notification_destinations WHERE type = 'slack'`).Scan(&stored); err != nil {
 		t.Fatal(err)
 	}
 
@@ -250,7 +251,7 @@ func TestEmailStep(t *testing.T) {
 
 	var stored string
 
-	if err := database.DB.QueryRow(`SELECT address FROM notification_destinations WHERE id = ?`, destinationID).Scan(&stored); err != nil || stored != "ops@example.com" {
+	if err := storetest.SQL(database).QueryRow(`SELECT address FROM notification_destinations WHERE id = ?`, destinationID).Scan(&stored); err != nil || stored != "ops@example.com" {
 		t.Fatalf("stored address %q (%v), want lowercase", stored, err)
 	}
 
@@ -301,7 +302,7 @@ func TestEmailStep(t *testing.T) {
 
 		var hidden bool
 
-		if err := database.DB.QueryRow(`SELECT hide_issue_link FROM notification_connections WHERE id = ?`, id).Scan(&hidden); err != nil || hidden != (include == "") {
+		if err := storetest.SQL(database).QueryRow(`SELECT hide_issue_link FROM notification_connections WHERE id = ?`, id).Scan(&hidden); err != nil || hidden != (include == "") {
 			t.Fatalf("saved link option: hidden=%v, err=%v", hidden, err)
 		}
 
@@ -364,7 +365,7 @@ func TestConfirmExistingConnection(t *testing.T) {
 	server := startServer(t, database, "admin", password)
 	server.login()
 
-	_, err := database.DB.Exec(`
+	_, err := storetest.SQL(database).Exec(`
 		INSERT INTO notification_destinations (id, type, address, secret, verified, created_at, updated_at) VALUES (7, 'email', 'old@example.com', '', 0, 'x', 'x');
 		INSERT INTO notification_connections (id, name, destination_id, all_projects, levels, active, created_at, updated_at) VALUES (3, 'Old', 7, 1, 'error', 0, 'x', 'x');`)
 
@@ -384,7 +385,7 @@ func TestConfirmExistingConnection(t *testing.T) {
 
 	var active bool
 
-	if err := database.DB.QueryRow(`SELECT active FROM notification_connections WHERE id = 3`).Scan(&active); err != nil || active {
+	if err := storetest.SQL(database).QueryRow(`SELECT active FROM notification_connections WHERE id = 3`).Scan(&active); err != nil || active {
 		t.Fatalf("unconfirmed connection became active: %v, %v", active, err)
 	}
 
@@ -512,7 +513,7 @@ func TestConnectionDefaultNames(t *testing.T) {
 
 	var names []string
 
-	rows, err := database.DB.Query(`SELECT name FROM notification_connections ORDER BY id`)
+	rows, err := storetest.SQL(database).Query(`SELECT name FROM notification_connections ORDER BY id`)
 
 	if err != nil {
 		t.Fatal(err)
@@ -614,7 +615,7 @@ func TestIssueLinkDefaults(t *testing.T) {
 	}
 
 	hidden := map[string]bool{}
-	rows, err := database.DB.Query(`SELECT name, hide_issue_link FROM notification_connections`)
+	rows, err := storetest.SQL(database).Query(`SELECT name, hide_issue_link FROM notification_connections`)
 
 	if err != nil {
 		t.Fatal(err)

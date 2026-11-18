@@ -82,16 +82,6 @@ const (
 	breadcrumbLength = 300
 )
 
-func truncate(text string, limit int) string {
-	runes := []rune(text)
-
-	if len(runes) <= limit {
-		return text
-	}
-
-	return string(runes[:limit-1]) + "…"
-}
-
 // Description is what the delivery log shows of an outbox message.
 type Description struct {
 	Label        string // "New issue", "Regression", "Test message" or "Summary"

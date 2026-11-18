@@ -46,21 +46,21 @@ func (sink StoreSink) now() time.Time {
 	return time.Now()
 }
 
-func (sink StoreSink) StoreEvent(ctx context.Context, project config.Project, event *sentry.Event) error {
+// eventRecord maps an event to what is stored, or reports false when its
+// level is not recorded for the project.
+func (sink StoreSink) eventRecord(project config.Project, event *sentry.Event) (store.NewEvent, bool) {
 	// Stored under its canonical name: filters and notifications know only those.
 	event.Level = config.EventLevel(event.Level)
 
 	if !config.Records(sink.Recording.EventLevelsFor(project.EventLevels), event.Level) {
 		sink.Logger.Debug("event of a level not recorded dropped", "project", project.Name, "level", event.Level, "event_id", event.EventID)
 
-		return nil
+		return store.NewEvent{}, false
 	}
 
 	trace := event.Trace()
 
-	receivedAt := sink.now()
-
-	result, err := sink.Store.SaveEvent(ctx, store.NewEvent{
+	return store.NewEvent{
 		ProjectID:    project.ID,
 		EventID:      event.EventID,
 		Fingerprint:  grouping.Fingerprint(event),
@@ -73,15 +73,33 @@ func (sink StoreSink) StoreEvent(ctx context.Context, project config.Project, ev
 		SpanID:       trace.SpanID,
 		ParentSpanID: trace.ParentSpanID,
 		Timestamp:    event.Timestamp.Time,
-		ReceivedAt:   receivedAt,
+		ReceivedAt:   sink.now(),
 		Payload:      event.Raw,
 		KeepEvents:   sink.Retention.For(project.Retention).EventsPerIssue,
-	})
+	}, true
+}
+
+func (sink StoreSink) StoreEvent(ctx context.Context, project config.Project, event *sentry.Event) error {
+	record, ok := sink.eventRecord(project, event)
+
+	if !ok {
+		return nil
+	}
+
+	result, err := sink.Store.SaveEvent(ctx, record)
 
 	if err != nil {
 		return err
 	}
 
+	sink.report(project, event, result, record.ReceivedAt)
+
+	return nil
+}
+
+// report logs what storing an event changed and notifies of new and
+// regressed issues; the in-request path and the pipeline share it.
+func (sink StoreSink) report(project config.Project, event *sentry.Event, result store.SaveResult, receivedAt time.Time) {
 	attributes := []any{"project", project.Name, "issue_id", result.IssueID, "event_id", event.EventID, "title", event.Title()}
 
 	switch {
@@ -96,8 +114,6 @@ func (sink StoreSink) StoreEvent(ctx context.Context, project config.Project, ev
 	default:
 		sink.Logger.Debug("event stored", attributes...)
 	}
-
-	return nil
 }
 
 func (sink StoreSink) notify(kind notify.Kind, project config.Project, issueID int64, event *sentry.Event, receivedAt time.Time) {
@@ -128,7 +144,9 @@ func (sink StoreSink) notify(kind notify.Kind, project config.Project, issueID i
 	})
 }
 
-func (sink StoreSink) StoreLogs(ctx context.Context, project config.Project, logs []sentry.Log) error {
+// logRecords maps logs to what is stored, without the levels not recorded
+// for the project.
+func (sink StoreSink) logRecords(project config.Project, logs []sentry.Log) ([]store.NewLog, error) {
 	records := make([]store.NewLog, 0, len(logs))
 	levels := sink.Recording.LogLevelsFor(project.LogLevels)
 
@@ -142,7 +160,7 @@ func (sink StoreSink) StoreLogs(ctx context.Context, project config.Project, log
 		attributes, err := json.Marshal(record.Attributes)
 
 		if err != nil {
-			return fmt.Errorf("log attributes: %w", err)
+			return nil, fmt.Errorf("log attributes: %w", err)
 		}
 
 		records = append(records, store.NewLog{
@@ -158,8 +176,14 @@ func (sink StoreSink) StoreLogs(ctx context.Context, project config.Project, log
 		})
 	}
 
-	if len(records) == 0 {
-		return nil
+	return records, nil
+}
+
+func (sink StoreSink) StoreLogs(ctx context.Context, project config.Project, logs []sentry.Log) error {
+	records, err := sink.logRecords(project, logs)
+
+	if err != nil || len(records) == 0 {
+		return err
 	}
 
 	keep := sink.Retention.For(project.Retention).LogsPerMessage
