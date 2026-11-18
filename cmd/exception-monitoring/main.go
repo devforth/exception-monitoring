@@ -28,8 +28,7 @@ import (
 	"github.com/devforth/exception-monitoring/internal/platform/secret"
 	"github.com/devforth/exception-monitoring/internal/server"
 	"github.com/devforth/exception-monitoring/internal/services"
-	"github.com/devforth/exception-monitoring/internal/storage/kv"
-	"github.com/devforth/exception-monitoring/internal/storage/kvstore"
+	"github.com/devforth/exception-monitoring/internal/storage/database"
 	"github.com/devforth/exception-monitoring/internal/storage/projects"
 	"github.com/devforth/exception-monitoring/internal/storage/retention"
 	"github.com/devforth/exception-monitoring/internal/storage/store"
@@ -101,7 +100,7 @@ func run() error {
 	// Issues, events and logs are in the key-value store, in a directory of
 	// its own (DATA_DIR/leveldb); the rest is still in SQLite until it moves
 	// too (docs/storage-plan.md).
-	database, err := kvstore.Open(filepath.Join(settings.DataDir, kv.EngineName), relational)
+	database, err := database.Open(settings.DataDir, relational)
 
 	if err != nil {
 		_ = relational.Close()

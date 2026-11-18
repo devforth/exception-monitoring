@@ -10,11 +10,11 @@ import (
 	"testing"
 )
 
-// The libraries of stores an adapter may wrap, and the one file that may
-// import each. Anything else importing one would tie the code to that store
+// The libraries of stores an adapter may wrap, and the one adapter package
+// that may import each. Anything else importing one would tie the code to that store
 // and pull it into every build.
 var adapters = map[string]string{
-	"github.com/syndtr/goleveldb": "internal/storage/kv/goleveldb.go",
+	"github.com/syndtr/goleveldb": "internal/storage/kv/leveldb/",
 }
 
 // Store libraries the project does not use at all; none may come back.
@@ -54,7 +54,7 @@ func TestOnlyAdaptersImportStores(t *testing.T) {
 			importPath := strings.Trim(imported.Path.Value, `"`)
 
 			for library, adapter := range adapters {
-				if strings.HasPrefix(importPath, library) && filepath.ToSlash(relative) != adapter {
+				if strings.HasPrefix(importPath, library) && !strings.HasPrefix(filepath.ToSlash(relative), adapter) {
 					t.Errorf("%s imports %s; only %s may", relative, importPath, adapter)
 				}
 			}

@@ -1,15 +1,16 @@
-// Package kvstore is the storage of issues, events, logs and the ingest
+// Package database is the storage of issues, events, logs and the ingest
 // inbox on the key-value layer (internal/storage/kv; docs/storage-plan.md).
 // Its records and their keys are declared in schema.go. Until every part of
 // the storage moves here, the methods not written yet are those of the
 // store.Store it is given (users, projects, notifications, agents and
 // retention); it does not know which store that is.
-package kvstore
+package database
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -54,10 +55,10 @@ type Store struct {
 
 var _ model.Store = (*Store)(nil)
 
-// Open opens (or creates) the database in dir; rest serves the parts not
-// written here yet.
-func Open(dir string, rest model.Store) (*Store, error) {
-	engine, err := kv.Open(dir)
+// Open opens (or creates) the database in the directory of its engine in
+// dataDir (DATA_DIR/leveldb); rest serves the parts not written here yet.
+func Open(dataDir string, rest model.Store) (*Store, error) {
+	engine, err := openEngine(filepath.Join(dataDir, engineName))
 
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
@@ -67,7 +68,7 @@ func Open(dir string, rest model.Store) (*Store, error) {
 }
 
 // OpenMemory opens a store kept in memory, for tests.
-func OpenMemory(rest model.Store) (*Store, error) { return open(kv.OpenMemory(), rest) }
+func OpenMemory(rest model.Store) (*Store, error) { return open(openMemoryEngine(), rest) }
 
 func open(engine kv.Engine, rest model.Store) (*Store, error) {
 	schema := kv.NewSchema()

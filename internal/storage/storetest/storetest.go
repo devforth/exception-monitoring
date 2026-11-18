@@ -1,5 +1,5 @@
 // Package storetest opens a store for tests: SQLite, or with STORE=kv the
-// key-value store for the parts written on it and SQLite for the rest, so
+// database package for the parts written on it and SQLite for the rest, so
 // the same tests check both while the storage moves (docs/storage-plan.md).
 package storetest
 
@@ -10,8 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/devforth/exception-monitoring/internal/storage/kv"
-	"github.com/devforth/exception-monitoring/internal/storage/kvstore"
+	"github.com/devforth/exception-monitoring/internal/storage/database"
 	"github.com/devforth/exception-monitoring/internal/storage/sqlite"
 	"github.com/devforth/exception-monitoring/internal/storage/store"
 )
@@ -33,26 +32,26 @@ func Open(t testing.TB) store.Store {
 		return relational
 	}
 
-	database, err := kvstore.Open(filepath.Join(dir, kv.EngineName), relational)
+	opened, err := database.Open(dir, relational)
 
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	t.Cleanup(func() { _ = database.Close() })
+	t.Cleanup(func() { _ = opened.Close() })
 
-	return database
+	return opened
 }
 
-// KV reports whether tests run on the key-value store (STORE=kv).
+// KV reports whether tests run on the database package (STORE=kv).
 func KV() bool { return os.Getenv("STORE") == "kv" }
 
 // SQL is the SQLite database under a store (the whole store, or the parts
-// the key-value store has not taken yet), for tests that read its tables.
-func SQL(database store.Store) *sql.DB {
-	if kvStore, ok := database.(*kvstore.Store); ok {
-		database = kvStore.Store
+// the database package has not taken yet), for tests that read its tables.
+func SQL(opened store.Store) *sql.DB {
+	if wrapped, ok := opened.(*database.Store); ok {
+		opened = wrapped.Store
 	}
 
-	return database.(*sqlite.Store).DB
+	return opened.(*sqlite.Store).DB
 }

@@ -45,6 +45,9 @@ func (batch *Batch) Count(counter Key, delta int64) {
 	}
 }
 
+// Native is the engine's own batch, for the engine that made it (Write).
+func (batch *Batch) Native() WriteBatch { return batch.native }
+
 // Len is the number of writes.
 func (batch *Batch) Len() int { return batch.native.Len() }
 

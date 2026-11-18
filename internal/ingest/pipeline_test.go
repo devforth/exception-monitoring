@@ -27,7 +27,7 @@ import (
 	"github.com/devforth/exception-monitoring/internal/ingest/sentry"
 	"github.com/devforth/exception-monitoring/internal/notify"
 	"github.com/devforth/exception-monitoring/internal/platform/config"
-	"github.com/devforth/exception-monitoring/internal/storage/kvstore"
+	"github.com/devforth/exception-monitoring/internal/storage/database"
 	"github.com/devforth/exception-monitoring/internal/storage/store"
 )
 
@@ -74,7 +74,7 @@ func benchProjects(count int) config.Projects {
 }
 
 func TestPipelineStoresEnvelopes(t *testing.T) {
-	database, err := kvstore.Open(t.TempDir(), nil)
+	database, err := database.Open(t.TempDir(), nil)
 
 	if err != nil {
 		t.Fatal(err)
@@ -420,7 +420,7 @@ func TestIngestLoad(t *testing.T) {
 			t.Cleanup(func() { _ = os.RemoveAll(dir) })
 		}
 
-		database, err := kvstore.Open(dir, nil)
+		database, err := database.Open(dir, nil)
 
 		if err != nil {
 			t.Fatal(err)

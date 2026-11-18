@@ -1,9 +1,10 @@
-package kv
+// Package leveldb is the adapter of goleveldb to kv.Engine, and the only
+// code that imports goleveldb (kv/adapters_test.go checks it).
+package leveldb
 
 import (
 	"errors"
 	"io/fs"
-	"os"
 	"path/filepath"
 
 	"github.com/syndtr/goleveldb/leveldb"
@@ -12,16 +13,17 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/syndtr/goleveldb/leveldb/storage"
 	"github.com/syndtr/goleveldb/leveldb/util"
+
+	"github.com/devforth/exception-monitoring/internal/storage/kv"
 )
 
-// EngineName names the store this binary is built with; the database lives
-// in DATA_DIR/<EngineName>.
-const EngineName = "leveldb"
+// Name names the store; its data lives in DATA_DIR/<Name>.
+const Name = "leveldb"
 
 // options keep the files readable by LevelDB C++ too: Snappy only (its zstd
 // is unknown to goleveldb) and the default comparator.
 func options() *opt.Options {
-	o := &opt.Options{
+	return &opt.Options{
 		BlockCacheCapacity: 32 << 20,
 		WriteBuffer:        16 << 20,
 		// 8 MB tables: about 250 files for 2 GB instead of 1000.
@@ -40,20 +42,10 @@ func options() *opt.Options {
 		WriteL0PauseTrigger:    32,
 		DisableSeeksCompaction: true,
 	}
-
-	if os.Getenv("KV_NOPOOL") != "" {
-		o.DisableBufferPool = true
-	}
-
-	if os.Getenv("KV_WB8") != "" {
-		o.WriteBuffer = 8 << 20
-	}
-
-	return o
 }
 
 // Open opens (or creates) the database in dir.
-func Open(dir string) (Engine, error) {
+func Open(dir string) (kv.Engine, error) {
 	db, err := leveldb.OpenFile(dir, options())
 
 	if err != nil {
@@ -64,7 +56,7 @@ func Open(dir string) (Engine, error) {
 }
 
 // OpenMemory opens a database kept in memory, for tests.
-func OpenMemory() Engine {
+func OpenMemory() kv.Engine {
 	db, err := leveldb.Open(storage.NewMemStorage(), options())
 
 	if err != nil {
@@ -86,13 +78,13 @@ func (reader levelReader) Get(key []byte) ([]byte, error) {
 	value, err := reader.db.Get(key, nil)
 
 	if errors.Is(err, leveldb.ErrNotFound) {
-		return nil, ErrNotFound
+		return nil, kv.ErrNotFound
 	}
 
 	return value, err
 }
 
-func (reader levelReader) Iterate(lower, upper []byte) Iterator {
+func (reader levelReader) Iterate(lower, upper []byte) kv.Iterator {
 	return levelIterator{reader.db.NewIterator(&util.Range{Start: lower, Limit: upper}, nil)}
 }
 
@@ -110,17 +102,17 @@ type levelEngine struct {
 	dir string // empty in memory
 }
 
-func (engine *levelEngine) NewWriteBatch() WriteBatch { return new(leveldb.Batch) }
+func (engine *levelEngine) NewWriteBatch() kv.WriteBatch { return new(leveldb.Batch) }
 
-func (engine *levelEngine) Write(batch *Batch, sync bool) error {
+func (engine *levelEngine) Write(batch *kv.Batch, sync bool) error {
 	if batch.Len() == 0 {
 		return nil
 	}
 
-	return engine.db.Write(batch.native.(*leveldb.Batch), &opt.WriteOptions{Sync: sync})
+	return engine.db.Write(batch.Native().(*leveldb.Batch), &opt.WriteOptions{Sync: sync})
 }
 
-func (engine *levelEngine) Snapshot() (Snapshot, error) {
+func (engine *levelEngine) Snapshot() (kv.Snapshot, error) {
 	snapshot, err := engine.db.GetSnapshot()
 
 	if err != nil {

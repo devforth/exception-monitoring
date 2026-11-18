@@ -1,4 +1,4 @@
-package kvstore
+package database
 
 import (
 	"bytes"
@@ -154,7 +154,7 @@ func encodeInbox(entry InboxEntry) ([]byte, error) {
 	return append(value, entry.Body...), nil
 }
 
-var errShortRecord = errors.New("kvstore: record too short")
+var errShortRecord = errors.New("database: record too short")
 
 func decodeInbox(value []byte) (InboxEntry, error) {
 	if len(value) < inboxHeader {

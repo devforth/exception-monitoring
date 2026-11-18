@@ -3,18 +3,17 @@ package kv
 import "errors"
 
 // Engine is the ordered key-value store under the layer. Any store that
-// keeps keys sorted can implement it; goleveldb is the one built
-// (goleveldb.go).
+// keeps keys sorted can implement it; goleveldb is the one built (package
+// kv/leveldb).
 //
-// An adapter is one file that alone imports its store's library and
-// defines EngineName, Open and OpenMemory. Another store is added as such a
-// file under a build tag (//go:build kv_<name>), with goleveldb.go taking
-// the opposite tag (//go:build !kv_<name>): a binary carries one adapter,
-// so the default build has no other store or driver, and nothing above
-// this package changes. Each store keeps its data in its own directory,
-// DATA_DIR/<EngineName>, so switching starts empty and never touches the
-// data of another. adapters_test.go checks that no other file imports a
-// store's library.
+// An adapter is a package under kv/ that alone imports its store's library
+// and implements Engine; package enginetest is the test it must pass. The
+// database package picks the adapter with a build tag (one file per adapter,
+// //go:build kv_<name>, the default taking the opposite tag): a binary
+// carries one adapter, so the default build has no other store or driver.
+// Each store keeps its data in its own directory, DATA_DIR/<name>, so
+// switching starts empty and never touches the data of another.
+// adapters_test.go checks that no other code imports a store's library.
 type Engine interface {
 	Reader
 	// NewWriteBatch starts a batch of the engine's own kind (NewBatch).

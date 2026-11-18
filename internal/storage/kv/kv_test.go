@@ -52,7 +52,7 @@ func openStore(t *testing.T, engine Engine) testStore {
 func newStore(t *testing.T) testStore {
 	t.Helper()
 
-	store := openStore(t, OpenMemory())
+	store := openStore(t, newMemoryEngine())
 	t.Cleanup(func() { _ = store.db.Close() })
 
 	return store
@@ -336,16 +336,14 @@ func TestCheckFindsProblems(t *testing.T) {
 }
 
 // Sequence numbers keep growing across a restart, also after a crash
-// (numbers handed out but never stored are skipped), and counters survive.
+// (numbers handed out but never stored are skipped), and counters survive:
+// a second DB opened on the same engine reads only what was stored.
 func TestRestart(t *testing.T) {
-	dir := t.TempDir()
-	engine, err := Open(dir)
-
-	if err != nil {
-		t.Fatal(err)
-	}
-
+	engine := newMemoryEngine()
 	store := openStore(t, engine)
+
+	var err error
+
 	store.insert(t, item{ID: 1, Level: 1})
 
 	var last uint64
@@ -361,14 +359,7 @@ func TestRestart(t *testing.T) {
 	}
 
 	counted := store.db.Counter(K(Text("item"), U8(1)))
-	_ = store.db.Close()
-
-	if engine, err = Open(dir); err != nil {
-		t.Fatal(err)
-	}
-
 	store = openStore(t, engine)
-	t.Cleanup(func() { _ = store.db.Close() })
 
 	if next, err := store.db.Next(); err != nil || next <= last {
 		t.Errorf("after a restart: %d, before %d (%v)", next, last, err)

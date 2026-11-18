@@ -11,7 +11,7 @@ import (
 
 	"github.com/devforth/exception-monitoring/internal/ingest/sentry"
 	"github.com/devforth/exception-monitoring/internal/platform/config"
-	"github.com/devforth/exception-monitoring/internal/storage/kvstore"
+	"github.com/devforth/exception-monitoring/internal/storage/database"
 	"github.com/devforth/exception-monitoring/internal/storage/store"
 )
 
@@ -23,7 +23,7 @@ import (
 // notifies of new and regressed issues.
 type Pipeline struct {
 	handler *Handler
-	store   *kvstore.Store
+	store   *database.Store
 	sink    StoreSink // maps parsed events and logs to records and reports them (its Store is unused)
 	logger  *slog.Logger
 
@@ -44,7 +44,7 @@ type Pipeline struct {
 
 	// fresh hands accepted envelopes to the dispatcher straight from the
 	// request; when it is full, missed asks for a rescan of the inbox.
-	fresh  chan kvstore.InboxEntry
+	fresh  chan database.InboxEntry
 	missed atomic.Bool
 	wake   chan struct{}
 
@@ -57,18 +57,18 @@ type Pipeline struct {
 // processed is an inbox entry after parsing: what to store, and the parsed
 // events (in the order of Envelope.Events) to report once stored.
 type processed struct {
-	kvstore.Envelope
+	database.Envelope
 	project config.Project
 	events  []*sentry.Event
 }
 
 // NewPipeline makes handler take envelopes into the inbox of database;
 // sink maps and reports what is stored (its Store is not used).
-func NewPipeline(handler *Handler, database *kvstore.Store, sink StoreSink) *Pipeline {
+func NewPipeline(handler *Handler, db *database.Store, sink StoreSink) *Pipeline {
 	pipeline := &Pipeline{
-		handler: handler, store: database, sink: sink, logger: handler.logger,
+		handler: handler, store: db, sink: sink, logger: handler.logger,
 		MaxInboxBytes: 1 << 30, BatchSize: 512, BatchBytes: 4 << 20, BatchWait: 5 * time.Millisecond, Rescan: 10 * time.Second,
-		fresh: make(chan kvstore.InboxEntry, 4*runtime.GOMAXPROCS(0)), wake: make(chan struct{}, 1),
+		fresh: make(chan database.InboxEntry, 4*runtime.GOMAXPROCS(0)), wake: make(chan struct{}, 1),
 	}
 	handler.pipeline = pipeline
 
@@ -121,7 +121,7 @@ func (pipeline *Pipeline) Run(ctx context.Context) {
 
 	// Small queues between the stages: envelopes wait in the inbox (on disk),
 	// not in memory, and parsed ones do not pile up while the writer writes.
-	entries := make(chan kvstore.InboxEntry, workers*2)
+	entries := make(chan database.InboxEntry, workers*2)
 	results := make(chan processed, workers*4)
 
 	var processors sync.WaitGroup
@@ -156,7 +156,7 @@ func (pipeline *Pipeline) Run(ctx context.Context) {
 // dispatch hands entries to the processors: those accepted while it runs,
 // as they come, and the inbox's at the start (left by a stop or a crash),
 // after a full queue and every Rescan, read again from the disk.
-func (pipeline *Pipeline) dispatch(ctx context.Context, entries chan<- kvstore.InboxEntry) {
+func (pipeline *Pipeline) dispatch(ctx context.Context, entries chan<- database.InboxEntry) {
 	rescan := time.NewTicker(pipeline.Rescan)
 
 	defer rescan.Stop()
@@ -188,7 +188,7 @@ func (pipeline *Pipeline) dispatch(ctx context.Context, entries chan<- kvstore.I
 
 // hand gives an entry to the processors unless it is already with them;
 // false when ctx ended.
-func (pipeline *Pipeline) hand(ctx context.Context, entries chan<- kvstore.InboxEntry, entry kvstore.InboxEntry) bool {
+func (pipeline *Pipeline) hand(ctx context.Context, entries chan<- database.InboxEntry, entry database.InboxEntry) bool {
 	if _, busy := pipeline.inFlight.LoadOrStore(entry.Sequence, true); busy {
 		return true
 	}
@@ -204,7 +204,7 @@ func (pipeline *Pipeline) hand(ctx context.Context, entries chan<- kvstore.Inbox
 // handInbox hands every entry of the inbox not with the processors yet. An
 // entry read just before the writer stored it would be stored twice, so each
 // is checked to be still waiting; false when ctx ended.
-func (pipeline *Pipeline) handInbox(ctx context.Context, entries chan<- kvstore.InboxEntry) bool {
+func (pipeline *Pipeline) handInbox(ctx context.Context, entries chan<- database.InboxEntry) bool {
 	inFlight := func(sequence uint64) bool {
 		_, busy := pipeline.inFlight.Load(sequence)
 
@@ -241,8 +241,8 @@ func (pipeline *Pipeline) handInbox(ctx context.Context, entries chan<- kvstore.
 }
 
 // process parses one envelope; a malformed one stores nothing and leaves the inbox.
-func (pipeline *Pipeline) process(entry kvstore.InboxEntry) processed {
-	result := processed{Envelope: kvstore.Envelope{Sequence: entry.Sequence, InboxSize: entry.Size}}
+func (pipeline *Pipeline) process(entry database.InboxEntry) processed {
+	result := processed{Envelope: database.Envelope{Sequence: entry.Sequence, InboxSize: entry.Size}}
 	project, ok := pipeline.handler.projects.List().ByID(entry.ProjectID)
 
 	if !ok {
@@ -334,7 +334,7 @@ func (pipeline *Pipeline) write(ctx context.Context, results <-chan processed) {
 // storeBatch writes a batch, retrying every second until it is stored or
 // the server stops (then the batch stays in the inbox for the next start).
 func (pipeline *Pipeline) storeBatch(ctx context.Context, batch []processed) ([][]store.SaveResult, bool) {
-	envelopes := make([]kvstore.Envelope, len(batch))
+	envelopes := make([]database.Envelope, len(batch))
 
 	for index, entry := range batch {
 		envelopes[index] = entry.Envelope
