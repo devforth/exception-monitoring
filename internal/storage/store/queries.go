@@ -37,6 +37,9 @@ type EventSummary struct {
 	TraceID      string    `json:"trace_id"`
 	SpanID       string    `json:"span_id"`
 	ParentSpanID string    `json:"parent_span_id"`
+	// Thinned: the cleanup kept only the exception, message and the basics of
+	// this old event to save space.
+	Thinned bool `json:"thinned,omitempty"`
 }
 
 // Event is a stored event with the full JSON the SDK sent.

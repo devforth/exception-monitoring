@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"slices"
 	"testing"
-	"time"
 
 	"github.com/devforth/exception-monitoring/internal/platform/config"
 	"github.com/devforth/exception-monitoring/internal/services"
@@ -113,7 +112,6 @@ func TestNewConnectionDefaults(t *testing.T) {
 
 func testProjects() Projects {
 	return Projects{
-		Retention: config.Retention{Events: 30 * 24 * time.Hour, Logs: 7 * 24 * time.Hour, Issues: 365 * 24 * time.Hour, EventsPerIssue: 100, LogsPerMessage: 50},
 		Recording: config.Recording{EventLevels: []string{"error", "fatal"}},
 		FromEnv:   func(projectID int) bool { return projectID == 1 },
 		Color:     func(project store.Project) string { return config.DefaultProjectColor(project.ID) },
@@ -122,22 +120,11 @@ func testProjects() Projects {
 
 func TestProjectForm(t *testing.T) {
 	presenter := testProjects()
-	events, perIssue, none := 72*time.Hour, 0, []string{}
-	view := presenter.Form(store.Project{
-		ID: 2, Name: "api", EventLevels: &[]string{"warning"}, LogLevels: &none,
-		RetentionEvents: &events, RetentionEventsPerIssue: &perIssue,
-	})
+	none := []string{}
+	view := presenter.Form(store.Project{ID: 2, Name: "api", EventLevels: &[]string{"warning"}, LogLevels: &none})
 
 	if view.New || view.FromEnv || view.Color != config.DefaultProjectColor(2) {
 		t.Errorf("view = %+v", view)
-	}
-
-	if view.Events != "3d" || view.EventsPerIssue != "0" || view.Logs != "" {
-		t.Errorf("fields = events %q, per issue %q, logs %q; want the own values and empty for the defaults", view.Events, view.EventsPerIssue, view.Logs)
-	}
-
-	if view.DefaultEvents != "30d" || view.DefaultEventsPerIssue != "100" || view.DefaultLogsPerMessage != "50" {
-		t.Errorf("placeholders = %q, %q, %q", view.DefaultEvents, view.DefaultEventsPerIssue, view.DefaultLogsPerMessage)
 	}
 
 	if want := lists.Options(lists.EventLevels, []string{"warning"}); fmt.Sprint(view.EventLevels) != fmt.Sprint(want) {
@@ -169,19 +156,18 @@ func TestProjectForm(t *testing.T) {
 		}
 	}
 
-	override := config.RetentionOverride{Events: &events, EventsPerIssue: &perIssue}
-	info := presenter.Info(config.Project{ID: 1, Name: "backend", Retention: override}, "dsn", 4)
+	info := presenter.Info(config.Project{ID: 1, Name: "backend"}, "dsn", 4)
 
-	if !info.FromEnv || info.Retention != "events 3 days, all events per issue" || info.UnresolvedIssues != 4 {
+	if !info.FromEnv || info.UnresolvedIssues != 4 {
 		t.Errorf("info = %+v", info)
 	}
 }
 
 func TestStorage(t *testing.T) {
-	storage := Storage(1500, config.Retention{MaxDatabaseBytes: 1000, Events: 24 * time.Hour})
+	storage := Storage(1500, config.Retention{MaxDatabaseBytes: 1000})
 
-	if storage.Percent != 100 || storage.Limit == "" || storage.Events != "1 day" || storage.Logs != "forever" || storage.EventsPerIssue != "all" {
-		t.Errorf("storage = %+v, want the percent capped at 100 and the settings in words", storage)
+	if storage.Percent != 100 || storage.Limit == "" || storage.CleanupStop != config.CleanupStopPercent {
+		t.Errorf("storage = %+v, want the percent capped at 100", storage)
 	}
 
 	if unlimited := Storage(1500, config.Retention{}); unlimited.Limit != "" || unlimited.Percent != 0 {

@@ -9,7 +9,7 @@
 
 <form class="connection-form project-form" method="post" action="{{if .New}}/projects{{else}}/projects/{{.ID}}{{end}}">
   {{if .FromEnv}}
-  <p class="muted">Name and key are set in <code>PROJECTS</code>; change them there. Retention can be set here.</p>
+  <p class="muted">Name and key are set in <code>PROJECTS</code>; change them there.</p>
   {{end}}
 
   {{/* The color sits next to the name: it marks the project in lists and emails. */}}
@@ -55,37 +55,6 @@
       <span class="muted small">Logs {{template "hint" (fieldHelp "Projects" "Logs")}}</span>
       {{range .LogLevels}}<label class="option"><input type="checkbox" name="log_level" value="{{.Name}}" {{if .Selected}}checked{{end}}> {{template "badge" (label "level" .Name)}}</label>{{end}}
     </div>
-    </fieldset>
-  </details>
-
-  <details class="form-section" {{if .RetentionInvalid}}open{{end}}>
-    <summary>
-      {{template "section-heading" (sectionHeading "Retention" "")}}
-      <span class="section-values small">{{range $index, $setting := .RetentionSummary}}{{if $index}} · {{end}}<span data-summary-field="{{.Field}}" data-summary-label="{{.Label}}" data-summary-zero="{{.Zero}}"{{if .Default}} class="muted" title="Default"{{end}}>{{.Label}} {{.Value}}</span>{{end}}</span>
-    </summary>
-    <fieldset>
-    <p class="muted small">Leave a field empty to use the default (shown in grey). Periods take days or hours: 30d, 12h; 0 turns a limit off.</p>
-    <label><span>Keep events {{template "hint" (settingHelp "RETENTION_EVENTS")}}</span>
-      <input name="retention_events" value="{{.Events}}" placeholder="{{.DefaultEvents}}">
-    </label>
-    {{with index .Errors "retention_events"}}<p class="field-error">{{.}}</p>{{end}}
-    <label><span>Keep logs {{template "hint" (settingHelp "RETENTION_LOGS")}}</span>
-      <input name="retention_logs" value="{{.Logs}}" placeholder="{{.DefaultLogs}}">
-    </label>
-    {{with index .Errors "retention_logs"}}<p class="field-error">{{.}}</p>{{end}}
-    <label><span>Logs per repeated message {{template "hint" (settingHelp "RETENTION_LOGS_PER_MESSAGE")}}</span>
-      <input name="retention_logs_per_message" value="{{.LogsPerMessage}}" inputmode="numeric" placeholder="{{.DefaultLogsPerMessage}}">
-    </label>
-    {{with index .Errors "retention_logs_per_message"}}<p class="field-error">{{.}}</p>{{end}}
-    <label><span>Events per issue {{template "hint" (settingHelp "RETENTION_EVENTS_PER_ISSUE")}}</span>
-      <input name="retention_events_per_issue" value="{{.EventsPerIssue}}" inputmode="numeric" placeholder="{{.DefaultEventsPerIssue}}">
-    </label>
-    {{with index .Errors "retention_events_per_issue"}}<p class="field-error">{{.}}</p>{{end}}
-    <label><span>Delete issues not seen for {{template "hint" (settingHelp "RETENTION_ISSUES")}}</span>
-      <input name="retention_issues" value="{{.Issues}}" placeholder="{{.DefaultIssues}}">
-    </label>
-    {{with index .Errors "retention_issues"}}<p class="field-error">{{.}}</p>{{end}}
-    <p class="muted small">Every issue keeps its latest event until it is deleted.</p>
     </fieldset>
   </details>
 

@@ -63,7 +63,7 @@ An agent acts as the user who connected it and is offered only the tools of that
 | `get_account`, `update_account_name` | all | Who the agent acts for; change the display name. |
 | `list_agents`, `disconnect_agent` | all | Connected agents and personal tokens (admins: also of users they manage). |
 | `delete_issue` | admin | Delete an issue with its events. |
-| `get_project`, `create_project`, `update_project`, `delete_project` | admin | Project settings: name, color, recorded levels, retention. |
+| `get_project`, `create_project`, `update_project`, `delete_project` | admin | Project settings: name, color, recorded levels. |
 | `list_users`, `create_user`, `update_user`, `reset_user_password`, `delete_user` | admin | Users and roles; a new or reset password is temporary and returned once. |
 | `list_connections`, `create_connection`, `update_connection`, `send_test_message`, `retry_connection`, `delete_connection`, `list_deliveries` | admin | Notification connections and the delivery log. |
 | `start_email_verification`, `confirm_email` | admin | Confirm an email address with the code its owner received. |

@@ -104,10 +104,6 @@ func (registry *Registry) Reload(ctx context.Context) error {
 		list = append(list, config.Project{
 			ID: project.ID, Name: project.Name, PublicKey: project.PublicKey, Color: color,
 			EventLevels: project.EventLevels, LogLevels: project.LogLevels,
-			Retention: config.RetentionOverride{
-				Events: project.RetentionEvents, Logs: project.RetentionLogs, Issues: project.RetentionIssues,
-				EventsPerIssue: project.RetentionEventsPerIssue, LogsPerMessage: project.RetentionLogsPerMessage,
-			},
 		})
 	}
 

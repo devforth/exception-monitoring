@@ -4,7 +4,6 @@ import (
 	"net/url"
 	"slices"
 	"testing"
-	"time"
 
 	"github.com/devforth/exception-monitoring/internal/platform/config"
 	"github.com/devforth/exception-monitoring/internal/storage/store"
@@ -42,30 +41,11 @@ func TestProjectFormLevels(t *testing.T) {
 func TestProjectFormValidation(t *testing.T) {
 	project := store.Project{Name: "backend", Color: "#123456"}
 	problems := readProjectForm(url.Values{
-		"name": {"Not Valid"}, "retention_events": {"30d"}, "retention_logs": {"soon"}, "retention_issues": {""},
-		"retention_events_per_issue": {"-1"}, "retention_logs_per_message": {"0"}, "color": {"#2563EB"},
+		"name": {"Not Valid"}, "color": {"#2563EB"},
 	}, &project, false, config.Recording{}, "#2563eb")
-
-	for _, field := range []string{"retention_logs", "retention_events_per_issue"} {
-		if problems[field] == "" {
-			t.Errorf("%s accepted, want an error", field)
-		}
-	}
 
 	if _, ok := problems["name"]; ok || project.Name != "backend" {
 		t.Errorf("name of a project from env read from the form: %q, %v", project.Name, problems)
-	}
-
-	if project.RetentionEvents == nil || *project.RetentionEvents != 30*24*time.Hour {
-		t.Errorf("retention_events = %v, want 30 days", project.RetentionEvents)
-	}
-
-	if project.RetentionIssues != nil {
-		t.Errorf("empty retention_issues = %v, want nil (the default)", *project.RetentionIssues)
-	}
-
-	if project.RetentionLogsPerMessage == nil || *project.RetentionLogsPerMessage != 0 {
-		t.Errorf("retention_logs_per_message = %v, want 0 (keep all)", project.RetentionLogsPerMessage)
 	}
 
 	// The palette color is stored as "" so the project keeps following the palette.

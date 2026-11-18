@@ -15,59 +15,48 @@ import (
 	"github.com/devforth/exception-monitoring/internal/storage/store"
 )
 
-// Pipeline stores envelopes through an inbox (see docs/storage-plan.md):
-// the HTTP handler appends an envelope to the inbox and answers; processors,
-// one per core, parse and scrub envelopes in parallel; one writer stores
-// their results in batches, each together with the deletion of its inbox
-// entries, so a crash neither loses nor repeats an envelope, and then
-// notifies of new and regressed issues.
+// Pipeline stores envelopes through the inbox: processors parse them, one writer stores them (docs/storage-plan.md).
 type Pipeline struct {
 	handler *Handler
 	store   *database.Store
 	sink    StoreSink // maps parsed events and logs to records and reports them (its Store is unused)
 	logger  *slog.Logger
 
-	// MaxInboxBytes: beyond it new envelopes get 429 until the writer catches up.
+	// MaxInboxBytes: beyond it new envelopes get 429.
 	MaxInboxBytes int64
 	// Workers parse envelopes; 0 means one per core.
 	Workers int
-	// BatchSize, BatchBytes and BatchWait bound one write: the writer
-	// commits after BatchSize envelopes or BatchBytes of them as received,
-	// or once no more arrive within BatchWait. The bytes keep a batch of
-	// large envelopes (many logs each) from holding much memory.
+	// BatchSize, BatchBytes and BatchWait bound one write.
 	BatchSize  int
 	BatchBytes int
 	BatchWait  time.Duration
-	// Rescan is how often the inbox is read again for entries that did not
-	// reach the processors directly (a full queue).
+	// LogsPerMessage caps the copies of a repeated log message (0: none).
+	LogsPerMessage int
+	// Rescan is how often the inbox is read again for entries missed.
 	Rescan time.Duration
 
-	// fresh hands accepted envelopes to the dispatcher straight from the
-	// request; when it is full, missed asks for a rescan of the inbox.
+	// fresh takes envelopes straight from requests; when full, missed asks for a rescan.
 	fresh  chan database.InboxEntry
 	missed atomic.Bool
 	wake   chan struct{}
 
 	stored atomic.Int64 // envelopes stored since start
-	// inFlight holds the sequence numbers handed to processors and not yet
-	// stored, so an entry is never handed out twice.
+	// inFlight holds entries handed out and not stored yet.
 	inFlight sync.Map
 }
 
-// processed is an inbox entry after parsing: what to store, and the parsed
-// events (in the order of Envelope.Events) to report once stored.
+// processed is a parsed entry; events match Envelope.Events in order.
 type processed struct {
 	database.Envelope
 	project config.Project
 	events  []*sentry.Event
 }
 
-// NewPipeline makes handler take envelopes into the inbox of database;
-// sink maps and reports what is stored (its Store is not used).
+// NewPipeline makes handler write to the inbox; sink maps and reports (its Store is unused).
 func NewPipeline(handler *Handler, db *database.Store, sink StoreSink) *Pipeline {
 	pipeline := &Pipeline{
 		handler: handler, store: db, sink: sink, logger: handler.logger,
-		MaxInboxBytes: 1 << 30, BatchSize: 512, BatchBytes: 4 << 20, BatchWait: 5 * time.Millisecond, Rescan: 10 * time.Second,
+		MaxInboxBytes: 1 << 30, LogsPerMessage: config.LogsPerMessage, BatchSize: 512, BatchBytes: 4 << 20, BatchWait: 5 * time.Millisecond, Rescan: 10 * time.Second,
 		fresh: make(chan database.InboxEntry, 4*runtime.GOMAXPROCS(0)), wake: make(chan struct{}, 1),
 	}
 	handler.pipeline = pipeline
@@ -75,10 +64,8 @@ func NewPipeline(handler *Handler, db *database.Store, sink StoreSink) *Pipeline
 	return pipeline
 }
 
-// Stored is how many envelopes were stored since the start.
 func (pipeline *Pipeline) Stored() int64 { return pipeline.stored.Load() }
 
-// accept appends an authenticated envelope to the inbox and hands it on.
 func (pipeline *Pipeline) accept(project config.Project, envelope *sentry.Envelope, body []byte) (map[string]string, error) {
 	if pipeline.store.InboxBytes() > pipeline.MaxInboxBytes {
 		return nil, &requestError{status: http.StatusTooManyRequests, message: "server busy", retryAfter: "10"}
@@ -93,7 +80,6 @@ func (pipeline *Pipeline) accept(project config.Project, envelope *sentry.Envelo
 	select {
 	case pipeline.fresh <- entry:
 	default:
-		// The processors are behind: the entry waits in the inbox.
 		pipeline.missed.Store(true)
 
 		select {
@@ -111,7 +97,6 @@ func (pipeline *Pipeline) accept(project config.Project, envelope *sentry.Envelo
 	return response, nil
 }
 
-// Run processes the inbox until ctx ends.
 func (pipeline *Pipeline) Run(ctx context.Context) {
 	workers := pipeline.Workers
 
@@ -119,8 +104,7 @@ func (pipeline *Pipeline) Run(ctx context.Context) {
 		workers = runtime.GOMAXPROCS(0)
 	}
 
-	// Small queues between the stages: envelopes wait in the inbox (on disk),
-	// not in memory, and parsed ones do not pile up while the writer writes.
+	// Small queues: envelopes wait in the inbox on disk, not in memory.
 	entries := make(chan database.InboxEntry, workers*2)
 	results := make(chan processed, workers*4)
 
@@ -153,9 +137,7 @@ func (pipeline *Pipeline) Run(ctx context.Context) {
 	<-writerDone
 }
 
-// dispatch hands entries to the processors: those accepted while it runs,
-// as they come, and the inbox's at the start (left by a stop or a crash),
-// after a full queue and every Rescan, read again from the disk.
+// dispatch hands fresh entries, and the inbox's at start, after a full queue and every Rescan.
 func (pipeline *Pipeline) dispatch(ctx context.Context, entries chan<- database.InboxEntry) {
 	rescan := time.NewTicker(pipeline.Rescan)
 
@@ -186,8 +168,6 @@ func (pipeline *Pipeline) dispatch(ctx context.Context, entries chan<- database.
 	}
 }
 
-// hand gives an entry to the processors unless it is already with them;
-// false when ctx ended.
 func (pipeline *Pipeline) hand(ctx context.Context, entries chan<- database.InboxEntry, entry database.InboxEntry) bool {
 	if _, busy := pipeline.inFlight.LoadOrStore(entry.Sequence, true); busy {
 		return true
@@ -201,9 +181,7 @@ func (pipeline *Pipeline) hand(ctx context.Context, entries chan<- database.Inbo
 	}
 }
 
-// handInbox hands every entry of the inbox not with the processors yet. An
-// entry read just before the writer stored it would be stored twice, so each
-// is checked to be still waiting; false when ctx ended.
+// handInbox checks each entry is still waiting, so none is stored twice.
 func (pipeline *Pipeline) handInbox(ctx context.Context, entries chan<- database.InboxEntry) bool {
 	inFlight := func(sequence uint64) bool {
 		_, busy := pipeline.inFlight.Load(sequence)
@@ -240,7 +218,7 @@ func (pipeline *Pipeline) handInbox(ctx context.Context, entries chan<- database
 	return false
 }
 
-// process parses one envelope; a malformed one stores nothing and leaves the inbox.
+// process parses an envelope; a malformed one only leaves the inbox.
 func (pipeline *Pipeline) process(entry database.InboxEntry) processed {
 	result := processed{Envelope: database.Envelope{Sequence: entry.Sequence, InboxSize: entry.Size}}
 	project, ok := pipeline.handler.projects.List().ByID(entry.ProjectID)
@@ -280,14 +258,12 @@ func (pipeline *Pipeline) process(entry database.InboxEntry) processed {
 		pipeline.logger.Debug("logs dropped", "project", project.Name, "err", err)
 	}
 
-	result.LogsPerMessage = pipeline.sink.Retention.For(project.Retention).LogsPerMessage
+	result.LogsPerMessage = pipeline.LogsPerMessage
 
 	return result
 }
 
-// write commits results in batches until results is closed, then reports
-// each stored event. A failed batch is retried until the server stops: its
-// entries are still in the inbox, so the next start stores them.
+// write commits results in batches and reports the stored events.
 func (pipeline *Pipeline) write(ctx context.Context, results <-chan processed) {
 	for first := range results {
 		batch := []processed{first}
@@ -331,8 +307,7 @@ func (pipeline *Pipeline) write(ctx context.Context, results <-chan processed) {
 	}
 }
 
-// storeBatch writes a batch, retrying every second until it is stored or
-// the server stops (then the batch stays in the inbox for the next start).
+// storeBatch retries every second; on shutdown the batch stays in the inbox.
 func (pipeline *Pipeline) storeBatch(ctx context.Context, batch []processed) ([][]store.SaveResult, bool) {
 	envelopes := make([]database.Envelope, len(batch))
 

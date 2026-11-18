@@ -1,9 +1,5 @@
-// Package database is the storage of issues, events, logs and the ingest
-// inbox on the key-value layer (internal/storage/kv; docs/storage-plan.md).
-// Its records and their keys are declared in schema.go. Until every part of
-// the storage moves here, the methods not written yet are those of the
-// store.Store it is given (users, projects, notifications, agents and
-// retention); it does not know which store that is.
+// Package database stores issues, events, logs and the ingest inbox on the
+// kv layer; everything else passes to the store.Store it is given.
 package database
 
 import (
@@ -21,31 +17,29 @@ import (
 	model "github.com/devforth/exception-monitoring/internal/storage/store"
 )
 
-// Store is the database. Issues are also kept in memory (issues.go), and so
-// are the time marks (marks.go).
+// Store is the database; issues and time marks are also kept in memory.
 type Store struct {
 	model.Store
 
 	db *kv.DB
 	collections
 
-	// inboxBytes is the size of the entries waiting in the inbox.
 	inboxBytes atomic.Int64
 
-	// table is every issue, in memory (issues.go); guarded by issuesMutex.
+	// table holds every issue; guarded by issuesMutex.
 	issuesMutex sync.RWMutex
 	table       *issueTable
 
 	marksMutex sync.RWMutex
 	marks      []timeMark
 
-	// messageStart is, per repeated log message, the sequence number of
-	// its oldest copy still stored: the trim walks from there instead of
-	// over the deleted copies before it. Used only inside updates, which
-	// run one at a time.
+	// messageStart is the oldest stored sequence per log message; used only inside updates.
 	messageStart map[string]uint64
 
-	// now is the clock: time.Now, or a test's.
+	// checkedAt is Written at the last wake.
+	cleanupWake chan struct{}
+	checkedAt   atomic.Int64
+
 	now func() time.Time
 
 	closeOnce sync.Once
@@ -55,8 +49,7 @@ type Store struct {
 
 var _ model.Store = (*Store)(nil)
 
-// Open opens (or creates) the database in the directory of its engine in
-// dataDir (DATA_DIR/leveldb); rest serves the parts not written here yet.
+// Open opens the database in dataDir; rest serves the parts not stored here.
 func Open(dataDir string, rest model.Store) (*Store, error) {
 	engine, err := openEngine(filepath.Join(dataDir, engineName))
 
@@ -72,7 +65,8 @@ func OpenMemory(rest model.Store) (*Store, error) { return open(openMemoryEngine
 
 func open(engine kv.Engine, rest model.Store) (*Store, error) {
 	schema := kv.NewSchema()
-	database := &Store{Store: rest, collections: defineCollections(schema), now: time.Now, messageStart: map[string]uint64{}}
+	database := &Store{Store: rest, collections: defineCollections(schema), now: time.Now, messageStart: map[string]uint64{},
+		cleanupWake: make(chan struct{}, 1)}
 	db, err := kv.OpenDB(engine, schema)
 
 	if err == nil {
@@ -89,8 +83,7 @@ func open(engine kv.Engine, rest model.Store) (*Store, error) {
 	return database, nil
 }
 
-// Close closes the database and the store of the other parts; calling it
-// again returns the first result.
+// Close closes the database and rest; calling it again returns the first result.
 func (database *Store) Close() error {
 	database.closeOnce.Do(func() {
 		database.closed.Store(true)
@@ -106,20 +99,17 @@ func (database *Store) Close() error {
 
 func (database *Store) Ping(context.Context) error { return nil }
 
-// DatabaseSize is what this store's engine takes on disk.
+// DatabaseSize returns the engine's size on disk.
 func (database *Store) DatabaseSize(context.Context) (int64, error) { return database.db.Size() }
 
 // SetClock replaces the store's clock (tests).
 func (database *Store) SetClock(now func() time.Time) { database.now = now }
 
-// levelRank is a level's place in config.LogLevels, lowest first: keys
-// lead with it, so lower levels sort first and the cleanup cuts them first.
-// Event levels count as their log name (warning is warn).
+// levelRank returns a level's place in config.LogLevels, so lower levels sort first.
 func levelRank(level string) byte {
 	return byte(slices.Index(config.LogLevels, config.LogLevel(level)))
 }
 
-// allRanks are the ranks a list of every level merges.
 var allRanks = func() []byte {
 	ranks := make([]byte, len(config.LogLevels))
 
@@ -132,7 +122,7 @@ var allRanks = func() []byte {
 
 const day = 24 * time.Hour
 
-// dayOf is the number of days since 1970-01-01 (UTC).
+// dayOf returns the number of days since 1970-01-01 (UTC).
 func dayOf(at time.Time) int32 { return int32(at.UTC().Unix() / int64(day/time.Second)) }
 
 func dayStart(number int32) time.Time {

@@ -56,7 +56,6 @@ type OutboxMessage = domain.OutboxMessage
 type OutboxRecord = domain.OutboxRecord
 type PasswordChange = domain.PasswordChange
 type Project = domain.Project
-type ProjectScope = domain.ProjectScope
 type SaveResult = domain.SaveResult
 type StatusChange = domain.StatusChange
 type User = domain.User

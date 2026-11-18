@@ -6,9 +6,26 @@ import (
 	"fmt"
 )
 
-// Check verifies a collection against its declaration: every record has
-// all its index keys, pointing to it, and every index key points to a
-// record that has it. It reads everything, for tests and diagnostics.
+// Counted adds up the stored record sizes per counter; Counters should hold the same.
+func (collection *Collection[T]) Counted(reader Reader) (map[string]int64, error) {
+	counted := map[string]int64{}
+
+	if collection.definition.Counter == nil {
+		return counted, nil
+	}
+
+	err := collection.Primary().Each(reader, func(entry Entry[T]) (bool, error) {
+		key := collection.primaryKey(entry.Key)
+		size := recordSize(len(key), entry.Size, collection.indexKeys(entry.Record))
+		counted[string(collection.definition.Counter(entry.Record))] += int64(size)
+
+		return true, nil
+	})
+
+	return counted, err
+}
+
+// Check verifies that records and index keys point to each other.
 func (collection *Collection[T]) Check(reader Reader) ([]string, error) {
 	var problems []string
 

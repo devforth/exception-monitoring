@@ -5,11 +5,10 @@ import (
 	"errors"
 	"maps"
 	"sync"
+	"sync/atomic"
 )
 
-// DB is an engine with the parts every store needs on top: one writer for
-// the batches that keep counters, the counters themselves (also kept in
-// memory), and sequence numbers that never repeat.
+// DB is an engine with one writer, counters and sequence numbers on top.
 type DB struct {
 	Engine
 
@@ -21,17 +20,17 @@ type DB struct {
 	countersMutex sync.RWMutex
 	counters      map[string]int64
 
+	written atomic.Int64
+
 	sequenceMutex sync.Mutex
 	next          uint64 // the next sequence number
-	reserved      uint64 // numbers below it may be handed out; stored
+	reserved      uint64 // stored; numbers below it may be handed out
 }
 
-// sequenceBlock numbers are reserved at a time: the stored reservation is
-// written once per block, and after a crash the next start skips what was
-// reserved, so a number is never handed out twice.
+// sequenceBlock numbers are reserved at a time; after a crash the rest of the block is skipped.
 const sequenceBlock = 10_000
 
-// OpenDB puts the parts on engine; schema gets the prefixes they use.
+// OpenDB opens a DB on engine and reserves its prefixes in schema.
 func OpenDB(engine Engine, schema *Schema) (*DB, error) {
 	meta := schema.Reserve("meta")
 	db := &DB{
@@ -65,8 +64,7 @@ func OpenDB(engine Engine, schema *Schema) (*DB, error) {
 	return db, nil
 }
 
-// Next hands out a sequence number: each is larger than the ones before,
-// also across restarts.
+// Next returns a sequence number larger than any before, also across restarts.
 func (db *DB) Next() (uint64, error) {
 	db.sequenceMutex.Lock()
 	defer db.sequenceMutex.Unlock()
@@ -89,7 +87,7 @@ func (db *DB) Next() (uint64, error) {
 	return number, nil
 }
 
-// Peek is the number Next would hand out now, without taking it.
+// Peek returns the number Next would return, without taking it.
 func (db *DB) Peek() uint64 {
 	db.sequenceMutex.Lock()
 	defer db.sequenceMutex.Unlock()
@@ -97,8 +95,8 @@ func (db *DB) Peek() uint64 {
 	return db.next
 }
 
-// Update runs change on a new batch and writes it with its counters, one
-// Update at a time. Nothing is written when change fails.
+// Update runs change on a new batch and writes it with its counters, one at a time.
+// Nothing is written when change fails.
 func (db *DB) Update(sync bool, change func(batch *Batch) error) error {
 	db.writeMutex.Lock()
 	defer db.writeMutex.Unlock()
@@ -134,6 +132,10 @@ func (db *DB) Update(sync bool, change func(batch *Batch) error) error {
 		return err
 	}
 
+	for _, delta := range batch.counts {
+		db.written.Add(max(delta, 0))
+	}
+
 	db.countersMutex.Lock()
 
 	for counter, total := range totals {
@@ -146,10 +148,17 @@ func (db *DB) Update(sync bool, change func(batch *Batch) error) error {
 
 	db.countersMutex.Unlock()
 
+	for _, apply := range batch.after {
+		apply()
+	}
+
 	return nil
 }
 
-// Counter is the value of a counter.
+// Written returns the bytes updates have added to counters since the DB was opened.
+func (db *DB) Written() int64 { return db.written.Load() }
+
+// Counter returns the value of a counter.
 func (db *DB) Counter(counter Key) int64 {
 	db.countersMutex.RLock()
 
@@ -158,7 +167,7 @@ func (db *DB) Counter(counter Key) int64 {
 	return db.counters[string(counter)]
 }
 
-// Counters is a copy of every counter, by key.
+// Counters returns a copy of every counter.
 func (db *DB) Counters() map[string]int64 {
 	db.countersMutex.RLock()
 
@@ -167,8 +176,7 @@ func (db *DB) Counters() map[string]int64 {
 	return maps.Clone(db.counters)
 }
 
-// View runs read on a snapshot, so the records it reads through indexes
-// are of one moment.
+// View runs read on a snapshot.
 func (db *DB) View(read func(reader Reader) error) error {
 	snapshot, err := db.Snapshot()
 

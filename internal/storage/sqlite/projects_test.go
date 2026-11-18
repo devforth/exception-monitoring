@@ -4,11 +4,10 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 )
 
 // Projects from PROJECTS are written at every start: created once, then kept
-// in line with env for name and key, while retention set in the UI stays.
+// in line with env for name and key, while settings from the UI stay.
 func TestSeedProject(t *testing.T) {
 	database := openTestStore(t)
 	ctx := context.Background()
@@ -21,15 +20,14 @@ func TestSeedProject(t *testing.T) {
 		}
 	}
 
-	logs := 72 * time.Hour
 	stored, _ := database.GetProject(ctx, 1)
-	stored.RetentionLogs = &logs
+	stored.Color = "#123456"
 
 	if err := database.UpdateProject(ctx, stored, baseTime); err != nil {
 		t.Fatal(err)
 	}
 
-	// A new key in env (rotated) replaces the stored one; retention stays.
+	// A new key in env (rotated) replaces the stored one; the color stays.
 	backend.PublicKey = "bbbbbbbbbbbbbbbb"
 
 	if err := database.SeedProject(ctx, backend, baseTime); err != nil {
@@ -38,7 +36,7 @@ func TestSeedProject(t *testing.T) {
 
 	stored, _ = database.GetProject(ctx, 1)
 
-	if stored.PublicKey != "bbbbbbbbbbbbbbbb" || stored.RetentionLogs == nil || *stored.RetentionLogs != logs {
+	if stored.PublicKey != "bbbbbbbbbbbbbbbb" || stored.Color != "#123456" {
 		t.Fatalf("after a key change: %+v", stored)
 	}
 

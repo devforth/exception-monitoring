@@ -76,8 +76,8 @@ func (store *Store) Close() error {
 	return store.DB.Close()
 }
 
-// enableIncrementalVacuum lets retention give deleted space back to the file
-// system (see ReleaseFreeSpace); without it the file never shrinks. The mode
+// enableIncrementalVacuum lets deleted space go back to the file system
+// (PRAGMA incremental_vacuum); without it the file never shrinks. The mode
 // of an existing database changes only with a full VACUUM, done once.
 func enableIncrementalVacuum(ctx context.Context, db *sql.DB) error {
 	const incremental = 2

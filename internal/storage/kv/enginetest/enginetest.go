@@ -1,12 +1,11 @@
-// Package enginetest is the test every adapter of kv.Engine must pass: an
-// adapter that passes it works under the layer, with no need to compare it
-// with the adapters already there.
+// Package enginetest is the test every adapter of kv.Engine must pass.
 package enginetest
 
 import (
 	"bytes"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"testing"
 
 	"github.com/devforth/exception-monitoring/internal/storage/kv"
@@ -15,8 +14,7 @@ import (
 // Open opens (or creates) an engine in dir.
 type Open func(dir string) (kv.Engine, error)
 
-// Run runs the test on engines made by open; persistent says the data
-// outlives a Close (an engine on disk), which is then checked too.
+// Run runs the test on engines made by open; persistent also checks reopening.
 func Run(t *testing.T, open Open, persistent bool) {
 	t.Helper()
 
@@ -190,6 +188,53 @@ func Run(t *testing.T, open Open, persistent bool) {
 		}
 
 		expect(t, engine, nil, "key-00000", "key-01999")
+	})
+
+	// One call must give the space back, however the engine spreads the keys over its files.
+	t.Run("compacting a range frees its deleted keys", func(t *testing.T) {
+		engine := start(t)
+		random := rand.New(rand.NewPCG(1, 2))
+
+		for chunk := range 30 {
+			batch := kv.NewBatch(engine)
+
+			for index := range 1000 {
+				value := make([]byte, 200)
+
+				for at := range value {
+					value[at] = byte(random.Uint32())
+				}
+
+				batch.Put(fmt.Appendf(nil, "a/%06d", chunk*1000+index), value)
+			}
+
+			if err := engine.Write(batch, false); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		if err := engine.CompactRange(nil, nil); err != nil {
+			t.Fatal(err)
+		}
+
+		full, _ := engine.Size()
+		batch := kv.NewBatch(engine)
+
+		for index := range 30000 {
+			batch.Delete(fmt.Appendf(nil, "a/%06d", index))
+		}
+
+		if err := engine.Write(batch, true); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := engine.CompactRange([]byte("a/"), []byte("a0")); err != nil {
+			t.Fatal(err)
+		}
+
+		if size, err := engine.Size(); err != nil || size > full/10 {
+			t.Errorf("%d bytes left of %d, %v", size, full, err)
+		}
 	})
 
 	if !persistent {

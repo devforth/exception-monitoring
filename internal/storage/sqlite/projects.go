@@ -9,26 +9,19 @@ import (
 	"time"
 )
 
-const projectColumns = `id, name, public_key, retention_events, retention_logs, retention_issues, retention_events_per_issue, retention_logs_per_message, event_levels, log_levels, color, created_at`
+const projectColumns = `id, name, public_key, event_levels, log_levels, color, created_at`
 
 func scanProject(row interface{ Scan(...any) error }) (Project, error) {
 	var (
-		project                                    Project
-		events, logs, issues, perIssue, perMessage sql.NullInt64
-		eventLevels, logLevels                     sql.NullString
-		createdAt                                  string
+		project                Project
+		eventLevels, logLevels sql.NullString
+		createdAt              string
 	)
 
-	if err := row.Scan(&project.ID, &project.Name, &project.PublicKey, &events, &logs, &issues, &perIssue, &perMessage, &eventLevels, &logLevels, &project.Color, &createdAt); err != nil {
+	if err := row.Scan(&project.ID, &project.Name, &project.PublicKey, &eventLevels, &logLevels, &project.Color, &createdAt); err != nil {
 		return project, err
 	}
 
-	project.RetentionEvents = durationFromSeconds(events)
-	project.RetentionLogs = durationFromSeconds(logs)
-	project.RetentionIssues = durationFromSeconds(issues)
-
-	project.RetentionEventsPerIssue = intFromNull(perIssue)
-	project.RetentionLogsPerMessage = intFromNull(perMessage)
 	project.EventLevels = levelsFromNull(eventLevels)
 	project.LogLevels = levelsFromNull(logLevels)
 
@@ -57,42 +50,6 @@ func levelsOrNull(levels *[]string) any {
 	}
 
 	return strings.Join(*levels, ",")
-}
-
-func intFromNull(value sql.NullInt64) *int {
-	if !value.Valid {
-		return nil
-	}
-
-	count := int(value.Int64)
-
-	return &count
-}
-
-func durationFromSeconds(value sql.NullInt64) *time.Duration {
-	if !value.Valid {
-		return nil
-	}
-
-	duration := time.Duration(value.Int64) * time.Second
-
-	return &duration
-}
-
-func secondsOf(duration *time.Duration) any {
-	if duration == nil {
-		return nil
-	}
-
-	return int64(*duration / time.Second)
-}
-
-func intOrNull(value *int) any {
-	if value == nil {
-		return nil
-	}
-
-	return *value
 }
 
 // ListProjects returns every project by id.
@@ -134,12 +91,9 @@ func (store *Store) GetProject(ctx context.Context, id int) (Project, error) {
 // PROJECTS keep theirs through SeedProject).
 func (store *Store) CreateProject(ctx context.Context, project Project, now time.Time) (int, error) {
 	result, err := store.DB.ExecContext(ctx, `
-		INSERT INTO projects (name, public_key, retention_events, retention_logs, retention_issues, retention_events_per_issue, retention_logs_per_message,
-			event_levels, log_levels, color, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		project.Name, project.PublicKey, secondsOf(project.RetentionEvents), secondsOf(project.RetentionLogs),
-		secondsOf(project.RetentionIssues), intOrNull(project.RetentionEventsPerIssue), intOrNull(project.RetentionLogsPerMessage),
-		levelsOrNull(project.EventLevels), levelsOrNull(project.LogLevels), project.Color, formatTime(now), formatTime(now))
+		INSERT INTO projects (name, public_key, event_levels, log_levels, color, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		project.Name, project.PublicKey, levelsOrNull(project.EventLevels), levelsOrNull(project.LogLevels), project.Color, formatTime(now), formatTime(now))
 
 	if err != nil {
 		return 0, conflictError(err)
@@ -150,15 +104,12 @@ func (store *Store) CreateProject(ctx context.Context, project Project, now time
 	return int(newID), err
 }
 
-// UpdateProject saves the name, key and retention of a project.
+// UpdateProject saves the settings of a project.
 func (store *Store) UpdateProject(ctx context.Context, project Project, now time.Time) error {
 	result, err := store.DB.ExecContext(ctx, `
-		UPDATE projects SET name = ?, public_key = ?, retention_events = ?, retention_logs = ?, retention_issues = ?,
-			retention_events_per_issue = ?, retention_logs_per_message = ?, event_levels = ?, log_levels = ?, color = ?, updated_at = ?
+		UPDATE projects SET name = ?, public_key = ?, event_levels = ?, log_levels = ?, color = ?, updated_at = ?
 		WHERE id = ?`,
-		project.Name, project.PublicKey, secondsOf(project.RetentionEvents), secondsOf(project.RetentionLogs),
-		secondsOf(project.RetentionIssues), intOrNull(project.RetentionEventsPerIssue), intOrNull(project.RetentionLogsPerMessage),
-		levelsOrNull(project.EventLevels), levelsOrNull(project.LogLevels), project.Color, formatTime(now), project.ID)
+		project.Name, project.PublicKey, levelsOrNull(project.EventLevels), levelsOrNull(project.LogLevels), project.Color, formatTime(now), project.ID)
 
 	if err != nil {
 		return conflictError(err)
@@ -208,7 +159,7 @@ func (store *Store) DeleteProject(ctx context.Context, id int) error {
 
 // SeedProject writes a project from PROJECTS: created if missing, otherwise
 // its name and key are set to the env values (env is the source of truth for
-// them; retention set in the UI stays). A name or key taken by another
+// them; settings from the UI stay). A name or key taken by another
 // project is an error, so a typo in PROJECTS cannot take over another DSN.
 func (store *Store) SeedProject(ctx context.Context, project Project, now time.Time) error {
 	result, err := store.DB.ExecContext(ctx,

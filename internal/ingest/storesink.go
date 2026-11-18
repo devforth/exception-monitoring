@@ -25,9 +25,6 @@ type StoreSink struct {
 	Notifier Notifier
 	// PublicURL is the UI address for links in notifications; empty means no link.
 	PublicURL string
-	// Retention gives RETENTION_LOGS_PER_MESSAGE (a project may override it):
-	// logs of a repeated message beyond it are replaced as new ones arrive.
-	Retention config.Retention
 	// Recording gives the levels stored (a project may set its own); events
 	// and logs of other levels are dropped. The zero value stores every level.
 	Recording config.Recording
@@ -75,7 +72,6 @@ func (sink StoreSink) eventRecord(project config.Project, event *sentry.Event) (
 		Timestamp:    event.Timestamp.Time,
 		ReceivedAt:   sink.now(),
 		Payload:      event.Raw,
-		KeepEvents:   sink.Retention.For(project.Retention).EventsPerIssue,
 	}, true
 }
 
@@ -186,7 +182,7 @@ func (sink StoreSink) StoreLogs(ctx context.Context, project config.Project, log
 		return err
 	}
 
-	keep := sink.Retention.For(project.Retention).LogsPerMessage
+	keep := config.LogsPerMessage
 
 	if err := sink.Store.SaveLogs(ctx, records, keep); err != nil {
 		return err

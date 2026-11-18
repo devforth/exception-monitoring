@@ -1,7 +1,5 @@
-// Package kv is the layer over an ordered key-value store: keys built from
-// typed parts, collections of records with declared indexes, batches that
-// keep a record and its index keys together, and queries that walk an
-// index. Nothing above it builds a key by hand (see docs/storage-plan.md).
+// Package kv is the layer over an ordered key-value store: typed keys,
+// collections with indexes, batches and index walks.
 package kv
 
 import (
@@ -10,9 +8,7 @@ import (
 	"errors"
 )
 
-// Key is an encoded key or a part of one. Its parts sort the way their
-// values do: numbers are big-endian, text ends with a terminator that sorts
-// before any character.
+// Key is an encoded key or part of one; its parts sort the way their values do.
 type Key []byte
 
 // Part is one typed part of a key.
@@ -29,15 +25,13 @@ func U32(value uint32) Part { return Part{number: uint64(value), width: 4} }
 
 func U64(value uint64) Part { return Part{number: value, width: 8} }
 
-// Text is a text part. A zero byte inside it is escaped, so any text is
-// safe and a prefix never matches a longer text.
+// Text is a text part; zero bytes are escaped, so a prefix never matches a longer text.
 func Text(value string) Part { return Part{text: value} }
 
 // K builds a key from parts.
 func K(parts ...Part) Key { return Key(nil).With(parts...) }
 
-// KIf builds a key from parts when condition holds, else nil: an optional
-// index leaves the record out.
+// KIf builds a key from parts when condition holds, else returns nil.
 func KIf(condition bool, parts ...Part) Key {
 	if !condition {
 		return nil
@@ -79,14 +73,13 @@ func (part Part) appendTo(key Key) Key {
 	return append(key, 0, textEnd)
 }
 
-// A text part ends with 0x00 0x00; a zero byte inside it is 0x00 0xFF, so
-// "a" sorts before "a\x00" and before "ab".
+// A text part ends with 0x00 0x00; a zero byte inside it is 0x00 0xFF.
 const (
 	textEnd     = 0x00
 	escapedZero = 0xFF
 )
 
-// ErrBadKey: a key does not have the parts it is read as.
+// ErrBadKey means a key does not have the parts it is read as.
 var ErrBadKey = errors.New("kv: key does not match its parts")
 
 // Decoder reads the parts of a key in order.
@@ -95,7 +88,7 @@ type Decoder struct {
 	err  error
 }
 
-// Decode reads key from offset on (usually after its prefix).
+// Decode reads key from offset on.
 func Decode(key []byte, offset int) *Decoder {
 	if offset > len(key) {
 		return &Decoder{err: ErrBadKey}
@@ -162,11 +155,10 @@ func (decoder *Decoder) Text() string {
 	return ""
 }
 
-// Err is the first error of the reads, ErrBadKey when a part was missing.
+// Err returns the first error of the reads.
 func (decoder *Decoder) Err() error { return decoder.err }
 
-// prefixEnd is the first key after every key that starts with prefix; nil
-// when there is none (a prefix of 0xFF bytes only).
+// prefixEnd returns the first key after every key with prefix, or nil if none.
 func prefixEnd(prefix []byte) []byte {
 	end := bytes.Clone(prefix)
 

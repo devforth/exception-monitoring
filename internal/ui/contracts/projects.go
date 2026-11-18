@@ -1,6 +1,10 @@
 package contracts
 
-import "github.com/devforth/exception-monitoring/internal/ui/lists"
+import (
+	"time"
+
+	"github.com/devforth/exception-monitoring/internal/ui/lists"
+)
 
 type ProjectInfo struct {
 	ID               int
@@ -8,7 +12,6 @@ type ProjectInfo struct {
 	DSN              string
 	UnresolvedIssues int
 	FromEnv          bool
-	Retention        string // what differs from the global settings, or empty
 	EventLevels      []string
 	LogLevels        []string // nil: every level
 }
@@ -19,16 +22,40 @@ type ProjectsView struct {
 	Notice   string
 }
 
-// StorageInfo shows how much the database holds and what retention keeps.
+// StorageInfo shows how much the database holds and how it is cleaned.
 type StorageInfo struct {
-	Used           string
-	Limit          string // empty: no size limit
-	Percent        int    // of the limit
-	Events         string
-	Logs           string
-	EventsPerIssue string
-	LogsPerMessage string
-	Issues         string
+	Used        string
+	Limit       string // empty: no size limit
+	Percent     int    // of the limit
+	CleanupStop int    // the cleanup stops at this percent of the limit
+	Cleanups    []CleanupRunView
+}
+
+// CleanupRunView is a run of the cleanup by size, newest first on the Projects page.
+type CleanupRunView struct {
+	ID                                      uint64
+	StartedAt                               time.Time
+	Status                                  string // running, done or failed
+	Limit, SizeBefore, Compacted, SizeAfter string
+	Reached                                 int // the last step; 0: compacting was enough
+	Duration                                string
+	Error                                   string
+	Steps                                   []CleanupStepView
+}
+
+// CleanupStepView is a step that deleted something, numbered as in docs/configuration.md.
+type CleanupStepView struct {
+	Number   int
+	Name     string
+	Freed    string
+	Duration string
+	Projects []CleanupProjectView
+}
+
+// CleanupProjectView is what a step deleted in one project: "120 logs, 3 events".
+type CleanupProjectView struct {
+	Project string
+	Deleted string
 }
 
 // ProjectView is the form of a new or an existing project.
@@ -39,9 +66,6 @@ type ProjectView struct {
 	DSN     string
 	FromEnv bool
 	Color   string // "#rrggbb" shown in the color input
-	// Retention fields as typed: empty means the global value (shown as placeholder).
-	Events, Logs, Issues, EventsPerIssue, LogsPerMessage                                    string
-	DefaultEvents, DefaultLogs, DefaultIssues, DefaultEventsPerIssue, DefaultLogsPerMessage string
 	// The levels recorded, as checkboxes (highest first).
 	EventLevels, LogLevels []lists.Option
 	Errors                 map[string]string
@@ -64,50 +88,4 @@ func checked(options []lists.Option) []string {
 	}
 
 	return names
-}
-
-// RetentionSetting is one retention field as the closed Retention section
-// shows it: the typed value, or the default.
-type RetentionSetting struct {
-	Field   string // the form field (app.js updates the summary from it)
-	Label   string
-	Value   string
-	Zero    string // what 0 means: "forever" or "all"
-	Default bool   // the field is empty: the global value applies
-}
-
-// RetentionSummary lists the retention fields with what applies to each.
-func (view ProjectView) RetentionSummary() []RetentionSetting {
-	setting := func(field, label, value, fallback, zero string) RetentionSetting {
-		result := RetentionSetting{Field: field, Label: label, Value: value, Zero: zero}
-
-		if value == "" {
-			result.Value, result.Default = fallback, true
-		}
-
-		if result.Value == "0" {
-			result.Value = zero
-		}
-
-		return result
-	}
-
-	return []RetentionSetting{
-		setting("retention_events", "events", view.Events, view.DefaultEvents, "forever"),
-		setting("retention_logs", "logs", view.Logs, view.DefaultLogs, "forever"),
-		setting("retention_logs_per_message", "logs per message", view.LogsPerMessage, view.DefaultLogsPerMessage, "all"),
-		setting("retention_events_per_issue", "events per issue", view.EventsPerIssue, view.DefaultEventsPerIssue, "all"),
-		setting("retention_issues", "issues not seen", view.Issues, view.DefaultIssues, "forever"),
-	}
-}
-
-// RetentionInvalid: a retention field was refused, so its section opens.
-func (view ProjectView) RetentionInvalid() bool {
-	for _, field := range []string{"retention_events", "retention_logs", "retention_logs_per_message", "retention_events_per_issue", "retention_issues"} {
-		if view.Errors[field] != "" {
-			return true
-		}
-	}
-
-	return false
 }

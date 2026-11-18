@@ -1,17 +1,15 @@
 package kv
 
-// Batch collects writes to apply at once (Engine.Write). The writes go
-// straight into the engine's own batch, which keeps the one copy of them.
-// Reads through the batch see its own writes first, so a record saved twice
-// in one batch, or a unique key taken earlier in the batch, is handled like
-// a stored one.
+// Batch collects writes to apply at once (Engine.Write).
+// Reads through the batch see its own writes first.
 type Batch struct {
 	reader Reader
 	native WriteBatch
-	// latest is the last write of each key, for reads through the batch; it
-	// refers to the slices given, not copies.
+	// latest is the last write of each key; it refers to the slices given, not copies.
 	latest map[string]write
 	counts map[string]int64 // counter -> change; written by DB.Update
+	total  int64            // sum of counts
+	after  []func()
 }
 
 type write struct {
@@ -37,18 +35,24 @@ func (batch *Batch) Delete(key []byte) {
 	batch.latest[string(key)] = write{deleted: true}
 }
 
-// Count adds delta to a counter (DB.Counter) when the batch is written.
-// Only batches of DB.Update keep counters.
+// Count adds delta to a counter when the batch is written; only DB.Update keeps counters.
 func (batch *Batch) Count(counter Key, delta int64) {
 	if delta != 0 {
 		batch.counts[string(counter)] += delta
+		batch.total += delta
 	}
 }
 
-// Native is the engine's own batch, for the engine that made it (Write).
+// Counted is the sum of the counter changes so far: negative when the batch frees bytes.
+func (batch *Batch) Counted() int64 { return batch.total }
+
+// AfterWrite runs apply once DB.Update has written the batch, before the next update starts.
+func (batch *Batch) AfterWrite(apply func()) { batch.after = append(batch.after, apply) }
+
+// Native is the engine's own batch.
 func (batch *Batch) Native() WriteBatch { return batch.native }
 
-// Len is the number of writes.
+// Len returns the number of writes.
 func (batch *Batch) Len() int { return batch.native.Len() }
 
 // Get reads key as it will be once the batch is written.

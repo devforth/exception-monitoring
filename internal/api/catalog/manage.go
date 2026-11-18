@@ -191,18 +191,13 @@ type projectInput struct {
 }
 
 type projectSettings struct {
-	ID                      int      `json:"id"`
-	Name                    string   `json:"name"`
-	DSN                     string   `json:"dsn,omitempty"`
-	FromEnv                 bool     `json:"from_env,omitempty"`
-	Color                   string   `json:"color,omitempty"`
-	EventLevels             []string `json:"event_levels"`
-	LogLevels               []string `json:"log_levels"`
-	RetentionEvents         string   `json:"retention_events,omitempty"`
-	RetentionLogs           string   `json:"retention_logs,omitempty"`
-	RetentionIssues         string   `json:"retention_issues,omitempty"`
-	RetentionEventsPerIssue string   `json:"retention_events_per_issue,omitempty"`
-	RetentionLogsPerMessage string   `json:"retention_logs_per_message,omitempty"`
+	ID          int      `json:"id"`
+	Name        string   `json:"name"`
+	DSN         string   `json:"dsn,omitempty"`
+	FromEnv     bool     `json:"from_env,omitempty"`
+	Color       string   `json:"color,omitempty"`
+	EventLevels []string `json:"event_levels"`
+	LogLevels   []string `json:"log_levels"`
 }
 
 // findProject reads the project given by name or ID.
@@ -222,8 +217,6 @@ func (handler *handlers) settings(call Call, project store.Project) projectSetti
 	output := projectSettings{
 		ID: project.ID, Name: project.Name, FromEnv: handler.services.Projects.FromEnv(project.ID), Color: project.Color,
 		EventLevels: form["event_level"], LogLevels: form["log_level"],
-		RetentionEvents: form.Get("retention_events"), RetentionLogs: form.Get("retention_logs"), RetentionIssues: form.Get("retention_issues"),
-		RetentionEventsPerIssue: form.Get("retention_events_per_issue"), RetentionLogsPerMessage: form.Get("retention_logs_per_message"),
 	}
 
 	if call.Address != nil {
@@ -245,26 +238,15 @@ func (handler *handlers) getProject(ctx context.Context, call Call, input projec
 
 // projectFields are the settings a tool may change; nil keeps the value.
 type projectFields struct {
-	Color                   *string   `json:"color,omitempty" jsonschema:"#rrggbb, or empty for the palette color."`
-	EventLevels             *[]string `json:"event_levels,omitempty" jsonschema:"Event levels to store: fatal, error, warning, info, debug. An empty list stores none."`
-	LogLevels               *[]string `json:"log_levels,omitempty" jsonschema:"Log levels to store: fatal, error, warn, info, debug, trace. An empty list stores none."`
-	RetentionEvents         *string   `json:"retention_events,omitempty" jsonschema:"Delete events older than this (30d, 12h; 0 keeps them); empty for the default."`
-	RetentionLogs           *string   `json:"retention_logs,omitempty" jsonschema:"Delete logs older than this; empty for the default."`
-	RetentionIssues         *string   `json:"retention_issues,omitempty" jsonschema:"Delete issues not seen for this long; empty for the default."`
-	RetentionEventsPerIssue *string   `json:"retention_events_per_issue,omitempty" jsonschema:"Newest events kept per issue (0 keeps all); empty for the default."`
-	RetentionLogsPerMessage *string   `json:"retention_logs_per_message,omitempty" jsonschema:"Newest logs kept per repeated message (0 keeps all); empty for the default."`
+	Color       *string   `json:"color,omitempty" jsonschema:"#rrggbb, or empty for the palette color."`
+	EventLevels *[]string `json:"event_levels,omitempty" jsonschema:"Event levels to store: fatal, error, warning, info, debug. An empty list stores none."`
+	LogLevels   *[]string `json:"log_levels,omitempty" jsonschema:"Log levels to store: fatal, error, warn, info, debug, trace. An empty list stores none."`
 }
 
 // apply writes the given fields over the form.
 func (fields projectFields) apply(form url.Values) {
-	for name, value := range map[string]*string{
-		"color": fields.Color, "retention_events": fields.RetentionEvents, "retention_logs": fields.RetentionLogs,
-		"retention_issues": fields.RetentionIssues, "retention_events_per_issue": fields.RetentionEventsPerIssue,
-		"retention_logs_per_message": fields.RetentionLogsPerMessage,
-	} {
-		if value != nil {
-			form.Set(name, *value)
-		}
+	if fields.Color != nil {
+		form.Set("color", *fields.Color)
 	}
 
 	if fields.EventLevels != nil {

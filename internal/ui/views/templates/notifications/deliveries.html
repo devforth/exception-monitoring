@@ -39,7 +39,9 @@
         <td>
           <span class="muted small">{{.Description.Label}}</span>
           {{with .Description.Project}}{{template "badge" (projectBadge .)}}{{end}}
-          {{if .Description.IssueID}}<a href="/issues/{{.Description.IssueID}}">{{.Description.Title}}</a>{{else}}{{.Description.Title}}{{end}}
+          {{if .Description.IssueID}}<a href="/issues/{{.Description.IssueID}}">{{.Description.Title}}</a>
+          {{else if .Description.Items}}{{template "summary-issues" .}}
+          {{else}}{{.Description.Title}}{{end}}
         </td>
         <td class="nowrap">
           {{if .Retrying}}<span class="delivery delivery-retrying">retrying</span><div class="muted small">next {{template "time" .NextAttemptAt}}</div>
@@ -58,4 +60,27 @@
   {{end}}
 </div>
 {{end}}
+{{end}}
+
+{{/* The issues a summary stood for, in a popup. */}}
+{{define "summary-issues"}}
+<button type="button" class="link" popovertarget="summary-{{.ID}}">{{.Description.Title}}</button>
+<div popover id="summary-{{.ID}}" class="popup">
+  <div class="viewer-bar"><strong>{{.Description.Title}}</strong><button type="button" class="close" popovertarget="summary-{{.ID}}" popovertargetaction="hide">Close</button></div>
+  <div class="table-scroll">
+  <table class="list compact">
+    <thead><tr><th>Message</th><th>Project</th><th>Issue</th></tr></thead>
+    <tbody>
+      {{range .Description.Items}}
+      <tr>
+        <td class="muted small nowrap">{{.Label}}</td>
+        <td>{{with .Project}}{{template "badge" (projectBadge .)}}{{end}}</td>
+        <td>{{if .IssueID}}<a href="/issues/{{.IssueID}}">{{.Title}}</a>{{else}}{{.Title}}{{end}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  </div>
+  {{with .Description.More}}<p class="muted small">and {{.}} more not listed</p>{{end}}
+</div>
 {{end}}

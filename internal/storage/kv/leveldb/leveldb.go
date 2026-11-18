@@ -1,11 +1,13 @@
-// Package leveldb is the adapter of goleveldb to kv.Engine, and the only
-// code that imports goleveldb (kv/adapters_test.go checks it).
+// Package leveldb adapts goleveldb to kv.Engine; no other code imports goleveldb.
 package leveldb
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/filter"
@@ -20,23 +22,15 @@ import (
 // Name names the store; its data lives in DATA_DIR/<Name>.
 const Name = "leveldb"
 
-// options keep the files readable by LevelDB C++ too: Snappy only (its zstd
-// is unknown to goleveldb) and the default comparator.
 func options() *opt.Options {
 	return &opt.Options{
-		BlockCacheCapacity: 32 << 20,
-		WriteBuffer:        16 << 20,
-		// 8 MB tables: about 250 files for 2 GB instead of 1000.
+		BlockCacheCapacity:  32 << 20,
+		WriteBuffer:         16 << 20,
 		CompactionTableSize: 8 << 20,
-		// Most lookups by a unique key (event_id of a new event) miss.
+		// Most unique-key lookups miss.
 		Filter:      filter.NewBloomFilter(10),
 		Compression: opt.SnappyCompression,
-		// goleveldb compacts in one thread. With its defaults (slow down
-		// writes at 8 files in level 0, stop them at 12) a burst of ingest
-		// held writes back 5.5 s in all, the inbox's included, and SDKs
-		// waited up to 1.2 s; with these, 0.7 s and under 0.3 s. Reads may
-		// look into a few more level-0 files meanwhile. Compactions that
-		// reads would trigger are off: the writes keep compaction busy enough.
+		// Higher level-0 limits than the defaults, so ingest bursts are not held back.
 		CompactionL0Trigger:    8,
 		WriteL0SlowdownTrigger: 16,
 		WriteL0PauseTrigger:    32,
@@ -133,8 +127,7 @@ func (engine *levelEngine) CompactRange(lower, upper []byte) error {
 	return engine.db.CompactRange(util.Range{Start: lower, Limit: upper})
 }
 
-// Size sums the files of the database; in memory (tests), the keys and
-// values, since what is not flushed to a table yet has no file size.
+// Size sums the database files in use; in memory, the keys and values.
 func (engine *levelEngine) Size() (int64, error) {
 	if engine.dir == "" {
 		var total int64
@@ -148,11 +141,17 @@ func (engine *levelEngine) Size() (int64, error) {
 		return total, iterator.Close()
 	}
 
+	live, err := engine.liveTables()
+
+	if err != nil {
+		return 0, err
+	}
+
 	var total int64
 
-	err := filepath.WalkDir(engine.dir, func(_ string, entry fs.DirEntry, err error) error {
+	err = filepath.WalkDir(engine.dir, func(_ string, entry fs.DirEntry, err error) error {
 		if err != nil {
-			// A file deleted by a compaction while walking is simply gone.
+			// A compaction may delete a file while walking.
 			if errors.Is(err, fs.ErrNotExist) {
 				return nil
 			}
@@ -161,6 +160,11 @@ func (engine *levelEngine) Size() (int64, error) {
 		}
 
 		if entry.IsDir() {
+			return nil
+		}
+
+		// A table a compaction replaced stays on disk until goleveldb's next version change.
+		if number, ok := tableNumber(entry.Name()); ok && !live[number] {
 			return nil
 		}
 
@@ -176,6 +180,40 @@ func (engine *levelEngine) Size() (int64, error) {
 	})
 
 	return total, err
+}
+
+// liveTables lists the numbers of the tables in use, from "N:size[...]" lines.
+func (engine *levelEngine) liveTables() (map[int64]bool, error) {
+	tables, err := engine.db.GetProperty("leveldb.sstables")
+
+	if err != nil {
+		return nil, err
+	}
+
+	live := map[int64]bool{}
+
+	for line := range strings.Lines(tables) {
+		var number, size int64
+
+		if count, _ := fmt.Sscanf(line, "%d:%d", &number, &size); count == 2 {
+			live[number] = true
+		}
+	}
+
+	return live, nil
+}
+
+// tableNumber reads "000123.ldb" (or the older ".sst").
+func tableNumber(name string) (int64, bool) {
+	extension := filepath.Ext(name)
+
+	if extension != ".ldb" && extension != ".sst" {
+		return 0, false
+	}
+
+	number, err := strconv.ParseInt(strings.TrimSuffix(name, extension), 10, 64)
+
+	return number, err == nil
 }
 
 func (engine *levelEngine) Close() error { return engine.db.Close() }

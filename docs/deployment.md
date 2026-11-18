@@ -71,7 +71,7 @@ server {
 
 ## Data
 
-Events and logs are kept only as long as the [retention settings](configuration.md#retention) say and are not worth backing up. What takes effort to set up again lives in the same database: projects and their keys (keep them in `PROJECTS` and the DSNs survive any loss), users, notification connections and connected agents. Keep the `data` volume on a disk you trust.
+Events and logs are kept until the database nears [its size limit](configuration.md#retention) and are not worth backing up. What takes effort to set up again lives in the same database: projects and their keys (keep them in `PROJECTS` and the DSNs survive any loss), users, notification connections and connected agents. Keep the `data` volume on a disk you trust.
 
 ## Upgrades
 
@@ -94,4 +94,4 @@ It prints a temporary password; the user chooses a new one at the next login. Th
 
 ## Logs
 
-`docker compose logs -f` shows the startup settings (enabled notification types, retention), warnings about missing settings and errors. Set `LOG_LEVEL=debug` to see every request and why an envelope was rejected (wrong key, unknown project, rate limit), and `LOG_FORMAT=json` for a log collector.
+`docker compose logs -f` shows the startup settings (enabled notification types, the size limit), warnings about missing settings and errors. Set `LOG_LEVEL=debug` to see every request and why an envelope was rejected (wrong key, unknown project, rate limit), and `LOG_FORMAT=json` for a log collector.

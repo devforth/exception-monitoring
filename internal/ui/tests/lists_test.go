@@ -80,8 +80,9 @@ func TestLogPagination(t *testing.T) {
 
 	var items []string
 
+	// Different words, so the cap on a repeated message keeps them all.
 	for index := range 25 {
-		items = append(items, fmt.Sprintf(`{"timestamp":1731400000.%03d,"level":"info","body":"paged log %d"}`, index, index))
+		items = append(items, fmt.Sprintf(`{"timestamp":1731400000.%03d,"level":"info","body":"paged log %d %s"}`, index, index, strings.Repeat("x", index+1)))
 	}
 
 	server.sendEnvelope(fixtures.BackendEnvelopeURL, []byte(`{}`+"\n"+`{"type":"log","item_count":25,"content_type":"application/vnd.sentry.items.log+json"}`+"\n"+`{"items":[`+strings.Join(items, ",")+`]}`))
@@ -92,11 +93,11 @@ func TestLogPagination(t *testing.T) {
 		t.Error("the log page size does not belong to the log filters")
 	}
 
-	if !strings.Contains(first, "1–20 of 25") || !strings.Contains(first, "paged log 24") || strings.Contains(first, "paged log 4<") {
+	if !strings.Contains(first, "1–20 of 25") || !strings.Contains(first, "paged log 24 ") || strings.Contains(first, "paged log 4 ") {
 		t.Fatal("first page of logs")
 	}
 
-	if second := server.page("/logs?page=2"); !strings.Contains(second, "21–25 of 25") || !strings.Contains(second, "paged log 0") {
+	if second := server.page("/logs?page=2"); !strings.Contains(second, "21–25 of 25") || !strings.Contains(second, "paged log 0 ") {
 		t.Fatal("second page of logs")
 	}
 }

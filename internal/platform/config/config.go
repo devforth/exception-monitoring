@@ -26,8 +26,6 @@ type Project struct {
 	ID        int
 	Name      string
 	PublicKey string
-	// Retention overrides the global retention settings for this project.
-	Retention RetentionOverride
 	// EventLevels and LogLevels are the project's own lists of levels to
 	// record; nil uses Recording (an empty list records nothing).
 	EventLevels *[]string
@@ -151,7 +149,7 @@ type Config struct {
 	SessionLifetime time.Duration
 	// Notifications: where to send alerts about new and regressed issues.
 	Notifications Notifications
-	// Retention: how long and how much data is kept.
+	// Retention: how much data is kept (MAX_DATABASE_SIZE).
 	Retention Retention
 	// Recording: which event and log levels are stored by default.
 	Recording Recording

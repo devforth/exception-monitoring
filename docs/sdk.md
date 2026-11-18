@@ -2,7 +2,7 @@
 
 The server speaks the protocol of the official [Sentry SDKs](https://docs.sentry.io/platforms/), so an app is connected by installing the SDK of its platform and giving it a DSN. Nothing else changes in the app.
 
-Each service (backend, frontend, worker, …) should be its own project: the UI shows which project an error came from, and notifications, levels and retention can be set per project. Copy the DSN from the **Projects** page (a coding agent connected over [MCP](mcp.md) gets it from `list_projects`):
+Each service (backend, frontend, worker, …) should be its own project: the UI shows which project an error came from, and notifications and levels can be set per project. Copy the DSN from the **Projects** page (a coding agent connected over [MCP](mcp.md) gets it from `list_projects`):
 
 ```
 https://<public_key>@errors.example.com/<project id>

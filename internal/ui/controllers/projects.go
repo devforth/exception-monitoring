@@ -12,9 +12,9 @@ import (
 	"github.com/devforth/exception-monitoring/internal/ui/presenters"
 )
 
-// The Projects page: each project with its DSN and retention, the storage
-// used, and adding, editing and deleting projects. Projects from PROJECTS
-// keep the name and key set there; only their retention changes here.
+// The Projects page: each project with its DSN and recorded levels, the
+// storage used, and adding, editing and deleting projects. Projects from
+// PROJECTS keep the name and key set there.
 
 var projectNotices = map[string]string{
 	"created": "Project added. Put its DSN into the Sentry SDK config of the service.",
@@ -39,11 +39,27 @@ func (controller *Controllers) ProjectsPage(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	runs, err := controller.projects.Cleanups(r.Context())
+
+	if err != nil {
+		controller.serverError(w, r, err)
+
+		return
+	}
+
 	list := controller.registry.List()
 	view := contracts.ProjectsView{
 		Projects: make([]contracts.ProjectInfo, 0, len(list)), Notice: projectNotices[r.URL.Query().Get("notice")],
 		Storage: presenters.Storage(used, controller.retention),
 	}
+
+	view.Storage.Cleanups = presenters.CleanupRuns(runs, func(id int) string {
+		if project, ok := config.Projects(list).ByID(id); ok {
+			return project.Name
+		}
+
+		return fmt.Sprintf("#%d", id)
+	})
 
 	for _, project := range list {
 		view.Projects = append(view.Projects, controller.projectViews.Info(project, controller.projects.DSN(r, project), counts[project.ID]))
@@ -87,11 +103,6 @@ func (controller *Controllers) ProjectPage(w http.ResponseWriter, r *http.Reques
 func (controller *Controllers) renderProjectForm(w http.ResponseWriter, r *http.Request, project store.Project, problems map[string]string) {
 	view := controller.projectViews.Form(project)
 	view.Errors = problems
-
-	// Show what was typed, not the parsed values.
-	view.Events, view.Logs = r.PostFormValue("retention_events"), r.PostFormValue("retention_logs")
-	view.Issues, view.EventsPerIssue = r.PostFormValue("retention_issues"), r.PostFormValue("retention_events_per_issue")
-	view.LogsPerMessage = r.PostFormValue("retention_logs_per_message")
 
 	if project.ID != 0 {
 		view.DSN = controller.projects.DSN(r, config.Project{ID: project.ID, PublicKey: project.PublicKey})

@@ -6,10 +6,8 @@ import (
 	"fmt"
 )
 
-// Query walks the primary keys of a collection or one of its indexes: the
-// keys under a prefix, optionally between bounds, in key order or newest
-// (last) first. There is no free "where": a query names the index, and
-// Where checks each record the walk reads, which the code then shows.
+// Query walks the keys of a collection or an index under a prefix, in key
+// order or newest first.
 type Query[T any] struct {
 	collection   *Collection[T]
 	index        *index[T] // nil: the primary keys
@@ -25,7 +23,7 @@ func (collection *Collection[T]) Primary(parts ...Part) Query[T] {
 	return Query[T]{collection: collection, prefix: collection.prefix.With(parts...)}
 }
 
-// By walks the index name, the keys that start with parts.
+// By walks the index name from the keys that start with parts.
 func (collection *Collection[T]) By(name string, parts ...Part) Query[T] {
 	entry := collection.index(name)
 
@@ -60,15 +58,13 @@ func (query Query[T]) Limit(n int) Query[T] {
 	return query
 }
 
-// Where keeps the records match accepts. It is checked per record read, so
-// the walk may read many records for a few matches.
+// Where keeps the records match accepts; the walk still reads every record.
 func (query Query[T]) Where(match func(T) bool) Query[T] {
 	query.where = match
 
 	return query
 }
 
-// bounds are the keys the walk covers.
 func (query Query[T]) bounds() ([]byte, []byte) {
 	lower, upper := []byte(query.prefix), prefixEnd(query.prefix)
 
@@ -83,9 +79,8 @@ func (query Query[T]) bounds() ([]byte, []byte) {
 	return lower, upper
 }
 
-// Each calls visit with each record of the walk until it returns false or
-// the limit is reached. A record an index points to but that is gone is
-// skipped (Check reports it).
+// Each calls visit for each record until it returns false or the limit is reached.
+// Index keys pointing to missing records are skipped.
 func (query Query[T]) Each(reader Reader, visit func(Entry[T]) (bool, error)) error {
 	cursor := query.Open(reader)
 
@@ -104,9 +99,7 @@ func (query Query[T]) Each(reader Reader, visit func(Entry[T]) (bool, error)) er
 	}
 }
 
-// Keys walks the primary keys of the records only, without reading the
-// records: for an index, the keys it points to. Where does not apply, since
-// it needs the records.
+// Keys walks the primary keys without reading the records; Where does not apply.
 func (query Query[T]) Keys(reader Reader, visit func(key Key) (bool, error)) error {
 	lower, upper := query.bounds()
 	iterator := reader.Iterate(lower, upper)
@@ -139,8 +132,7 @@ func (query Query[T]) Keys(reader Reader, visit func(key Key) (bool, error)) err
 	return iterator.Close()
 }
 
-// Cursor reads a walk one record at a time, for code that merges several
-// walks (Each is simpler otherwise).
+// Cursor reads a walk one record at a time.
 type Cursor[T any] struct {
 	query    Query[T]
 	reader   Reader
@@ -157,8 +149,7 @@ func (query Query[T]) Open(reader Reader) *Cursor[T] {
 	return &Cursor[T]{query: query, reader: reader, iterator: reader.Iterate(lower, upper)}
 }
 
-// Next returns the next record of the walk; false at its end or on an
-// error (Close returns it).
+// Next returns false at the end or on an error, which Close returns.
 func (cursor *Cursor[T]) Next() (Entry[T], bool) {
 	query, iterator := cursor.query, cursor.iterator
 
@@ -207,8 +198,7 @@ func (cursor *Cursor[T]) Close() error {
 	return errors.Join(cursor.err, cursor.iterator.Close())
 }
 
-// read decodes the record at the iterator: its value for the primary keys,
-// the record the value points to for an index.
+// read decodes the record at the iterator, following an index to its record.
 func (query Query[T]) read(reader Reader, iterator Iterator) (Entry[T], bool, error) {
 	key, value := iterator.Key(), iterator.Value()
 
@@ -270,8 +260,7 @@ func (query Query[T]) First(reader Reader) (Entry[T], error) {
 	return *first, err
 }
 
-// Count counts the records of the walk, up to most (0: all); more says
-// there are more than most.
+// Count counts the records up to most (0: all); more says there are more.
 func (query Query[T]) Count(reader Reader, most int) (count int, more bool, err error) {
 	err = query.Limit(0).Each(reader, func(Entry[T]) (bool, error) {
 		if most > 0 && count == most {

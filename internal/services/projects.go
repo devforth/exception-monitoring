@@ -150,3 +150,11 @@ func (service *Projects) UnresolvedCounts(ctx context.Context) (map[int]int, err
 func (service *Projects) DatabaseSize(ctx context.Context) (int64, error) {
 	return service.store.DatabaseSize(ctx)
 }
+
+// cleanupsShown is how many runs of the cleanup the Projects page lists.
+const cleanupsShown = 10
+
+// Cleanups are the latest runs of the cleanup by size, newest first.
+func (service *Projects) Cleanups(ctx context.Context) ([]store.CleanupRun, error) {
+	return service.store.CleanupHistory(ctx, cleanupsShown)
+}

@@ -6,8 +6,8 @@ import (
 )
 
 func TestSetting(t *testing.T) {
-	if text, err := Setting("RETENTION_EVENTS"); err != nil || text != "Delete events received longer ago." {
-		t.Errorf("RETENTION_EVENTS: %q %v", text, err)
+	if text, err := Setting("NOTIFY_KEEP_SENT"); err != nil || text != "Delivered messages are deleted from the delivery log after this." {
+		t.Errorf("NOTIFY_KEEP_SENT: %q %v", text, err)
 	}
 
 	// Markdown is dropped: the text goes into a tooltip.

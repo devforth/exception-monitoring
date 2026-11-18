@@ -137,14 +137,12 @@ func TestStoreSinkNotifies(t *testing.T) {
 	}
 }
 
-// A message logged in a loop keeps its newest RETENTION_LOGS_PER_MESSAGE
-// copies; a project can set its own number.
+// A message logged in a loop keeps its newest config.LogsPerMessage copies.
 func TestStoreSinkLimitsRepeatedLogs(t *testing.T) {
 	database := storetest.Open(t)
 
-	sink := StoreSink{Store: database, Logger: slog.New(slog.DiscardHandler), Retention: config.Retention{LogsPerMessage: 50}}
-	three := 3
-	projects := []config.Project{{ID: 1, Name: "backend"}, {ID: 2, Name: "frontend", Retention: config.RetentionOverride{LogsPerMessage: &three}}}
+	sink := StoreSink{Store: database, Logger: slog.New(slog.DiscardHandler)}
+	projects := []config.Project{{ID: 1, Name: "backend"}, {ID: 2, Name: "frontend"}}
 
 	for _, project := range projects {
 		for batch := range 4 {
@@ -160,7 +158,7 @@ func TestStoreSinkLimitsRepeatedLogs(t *testing.T) {
 		}
 	}
 
-	for projectID, want := range map[int]int{1: 50, 2: 3} {
+	for projectID, want := range map[int]int{1: config.LogsPerMessage, 2: config.LogsPerMessage} {
 		if count := countLogs(t, database, store.LogFilter{ProjectIDs: []int{projectID}}); count != want {
 			t.Errorf("project %d: %d logs, want %d", projectID, count, want)
 		}

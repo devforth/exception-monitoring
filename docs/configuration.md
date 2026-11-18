@@ -20,7 +20,7 @@ Everything is set with environment variables (in Docker: `-e`, `env_file` or `en
 
 | Variable | Default | |
 |---|---|---|
-| `PROJECTS` | | Optional: `id:name:public_key,...`, e.g. `1:backend:<key>,2:frontend:<key>`. The key is 16–64 letters or digits (`openssl rand -hex 16`). Written to the database at every start; such projects can only change their retention and levels in the UI. Projects can also be added in the UI. |
+| `PROJECTS` | | Optional: `id:name:public_key,...`, e.g. `1:backend:<key>,2:frontend:<key>`. The key is 16–64 letters or digits (`openssl rand -hex 16`). Written to the database at every start; such projects can only change their color and levels in the UI. Projects can also be added in the UI. |
 
 The id is part of the DSN (`https://<public_key>@errors.example.com/<id>`) and of every stored event, so never change or reuse it. Name each service (backend, frontend, …) as its own project.
 
@@ -63,15 +63,28 @@ Email addresses are confirmed with a code before they receive anything. Telegram
 
 ## Retention
 
-Old data is deleted at startup and every 10 minutes. `0` turns a limit off. Every limit except the size can be overridden per project on the Projects page.
+While the limit is on, events lose their details as they turn a month old, every 10 minutes (breadcrumbs, request, tags, contexts; the exception and its stack trace stay, and the event's page says details were removed). Nothing is deleted by age alone: data stays until the database nears its size limit.
 
 | Variable | Default | |
 |---|---|---|
-| `RETENTION_EVENTS` | `14d` | Delete events received longer ago. |
-| `RETENTION_LOGS` | `7d` | Delete older logs. |
-| `RETENTION_EVENTS_PER_ISSUE` | `20` | Keep only the newest events of each issue; the issue's count still includes all. |
-| `RETENTION_LOGS_PER_MESSAGE` | `10` | Keep the newest logs of a message logged over and over (numbers and IDs in it do not count as a difference). |
-| `RETENTION_ISSUES` | `90d` | Delete issues, with their events, not seen this long. |
-| `MAX_DATABASE_SIZE` | `2GB` | Above it, delete the oldest events and logs down to 90%. Takes `KB`, `MB`, `GB`. |
+| `MAX_DATABASE_SIZE` | `2GB` | Once the database reaches it, the least useful data is deleted until the database is at 80%. Takes `KB`, `MB`, `GB`; `0` turns the limit off, and nothing is deleted or thinned. |
 
-Every issue keeps its latest event until the issue itself expires, so each error stays listed with its count and last stack trace.
+The size is checked at startup, every 10 minutes and after every 50 MB written. Only the database files in use count (`DATA_DIR/leveldb`). At the limit the parts that collect deleted data as the server works (the ingest queue, issues) are first compacted, since deleted data keeps its space until then; if the database is still at the limit, the cleanup runs and always deletes:
+
+1. Logs older than a month.
+2. Events older than a month beyond the newest 20 of their issue.
+3. The events of resolved and ignored issues but their latest.
+4. Logs below error (trace, debug, info, warn), whatever their age.
+
+Then, only while the database is still above 80%, each step after the one before:
+
+5. Error and fatal logs together, oldest first.
+6. Every issue down to its newest 20 events (new events are not capped as they arrive).
+7. Events older than a week, oldest first whatever their level, but the latest of each issue.
+8. Events of the last week, oldest first whatever their level, but the latest of each issue.
+9. The latest event of issues not seen for a week, longest unseen first: the issue stays listed with its title, count and dates.
+10. Whole issues, longest unseen first.
+
+It deletes in batches of up to 2000 records and stops as soon as enough is freed. Each batch looks at the data as it is then, so an issue that gets a new event or is reopened meanwhile is judged by that. A cleanup stopped by a restart goes on where it stopped. Each run is logged with what every step deleted per project, and the Projects page lists the latest runs with their steps.
+
+A message logged over and over keeps its newest 10 copies as it is written (numbers and IDs in it do not count as a difference); the issue's event count always includes every event.

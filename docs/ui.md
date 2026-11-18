@@ -13,8 +13,6 @@ A project is one service (backend, frontend, worker) with its own DSN. Projects 
 | Errors and messages | Event levels to store. Events of other levels are dropped when they arrive: not stored, no notifications. Unchanged, the project follows RECORD_EVENT_LEVELS. |
 | Logs | Log levels to store; others are dropped when they arrive. Unchanged, the project follows RECORD_LOG_LEVELS. |
 
-Retention fields are the variables of [Retention](configuration.md#retention) for this project only; left empty, the global value applies.
-
 ## Notifications
 
 A connection sends new issues and issues that happen again after being resolved to one place: an email address, a Telegram chat or a Slack channel.

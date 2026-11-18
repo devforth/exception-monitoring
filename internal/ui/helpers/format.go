@@ -9,12 +9,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/devforth/exception-monitoring/internal/ingest/sentry"
-	"github.com/devforth/exception-monitoring/internal/platform/config"
 )
 
 // Short returns the first n characters, for IDs shown in tables.
@@ -117,21 +115,4 @@ func MaskSecret(secret string) string {
 	}
 
 	return string(runes[:prefix]) + "…" + string(runes[len(runes)-4:])
-}
-
-// CountOrAll shows a count limit: "all" for 0 (no limit).
-func CountOrAll(count int) string {
-	if count == 0 {
-		return "all"
-	}
-
-	return strconv.Itoa(count)
-}
-
-func KeptFor(duration time.Duration) string {
-	if duration == 0 {
-		return "forever"
-	}
-
-	return config.HumanDuration(duration)
 }

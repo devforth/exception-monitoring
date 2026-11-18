@@ -319,8 +319,7 @@ function updateConnectionForm(form) {
 // Closed form sections (details.form-section) show in their heading what is
 // set inside; it follows the fields as they change. [data-summary-of] lists
 // the badges of the checked boxes of that name ("All projects" while its
-// data-summary-all box is checked), [data-summary-field] the value of a field
-// or, when it is empty, its placeholder (the default) in grey.
+// data-summary-all box is checked).
 function updateSectionSummaries(form) {
   form.querySelectorAll("[data-summary-of]").forEach((target) => {
     const all = target.dataset.summaryAll && form.querySelector(`input[name="${target.dataset.summaryAll}"]`);
@@ -340,21 +339,6 @@ function updateSectionSummaries(form) {
     }
 
     target.replaceChildren(...badges);
-  });
-
-  form.querySelectorAll("[data-summary-field]").forEach((target) => {
-    const input = form.querySelector(`[name="${target.dataset.summaryField}"]`);
-
-    if (!input) {
-      return;
-    }
-
-    const own = input.value.trim();
-    const value = own || input.placeholder;
-
-    target.textContent = `${target.dataset.summaryLabel} ${value === "0" ? target.dataset.summaryZero : value}`;
-    target.classList.toggle("muted", !own);
-    target.title = own ? "" : "Default";
   });
 }
 
@@ -456,7 +440,7 @@ document.addEventListener("click", (event) => {
 // Firefox stops loading the page on Esc, which would cancel a navigation
 // started on keydown, so the page would just stay.
 function backLink(event) {
-  const busy = document.querySelector("dialog[open], .flatpickr-calendar.open, .picker[open]");
+  const busy = document.querySelector("dialog[open], .flatpickr-calendar.open, .picker[open], [popover].open");
   const typing = event.target instanceof Element && event.target.closest("input, textarea, select, [contenteditable]");
 
   return busy || typing ? null : document.querySelector("a[data-back]");
@@ -661,3 +645,10 @@ document.addEventListener("htmx:afterSwap", (event) => {
 
   if (tab) history.replaceState(null, "", tab.href);
 });
+
+// Popovers close themselves on Esc; mark the open ones so Esc does not also go back.
+document.addEventListener("toggle", (event) => {
+  if (event.target instanceof Element && event.target.hasAttribute("popover")) {
+    event.target.classList.toggle("open", event.newState === "open");
+  }
+}, true);

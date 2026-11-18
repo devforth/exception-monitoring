@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"slices"
-	"time"
 
 	"github.com/devforth/exception-monitoring/internal/storage/storetest"
 
@@ -93,7 +92,7 @@ func startServer(t *testing.T, database store.Store, adminUsername, adminPasswor
 		// Every connection type is available: SMTP for email, a key for chat tokens.
 		Notifications: config.Notifications{SecretKey: secretKey, SMTP: smtp},
 		// Shown on the Projects page; nothing is deleted by the UI.
-		Retention: config.Retention{Events: 30 * 24 * time.Hour, Logs: 24 * time.Hour, MaxDatabaseBytes: 2 << 30, Issues: 365 * 24 * time.Hour},
+		Retention: config.Retention{MaxDatabaseBytes: 2 << 30},
 	}
 
 	for _, change := range configure {

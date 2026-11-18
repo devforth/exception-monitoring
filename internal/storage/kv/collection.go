@@ -7,36 +7,29 @@ import (
 	"fmt"
 )
 
-// Definition declares a collection: its name (the key prefix), its primary
-// key, its indexes, and how its records are stored.
+// Definition declares a collection: name, primary key, indexes and encoding.
 type Definition[T any] struct {
-	Name string
-	// Key is the primary key of a record, after the collection's prefix.
+	Name    string
 	Key     func(T) Key
 	Indexes []Index[T]
-	// Encode and Decode store a record; nil uses JSON.
+	// Encode and Decode default to JSON.
 	Encode func(T) ([]byte, error)
 	Decode func([]byte) (T, error)
-	// Counter, when set, is the counter that holds the bytes a record takes
-	// (its keys and value, index keys included); writes and deletes through
-	// the collection keep it up to date (DB.Update).
+	// Counter, when set, counts the bytes a record takes, index keys included.
 	Counter func(T) Key
 }
 
-// Index declares an index of a collection. Its keys hold the record's
-// primary key as their value.
+// Index declares an index; its keys hold the record's primary key as their value.
 type Index[T any] struct {
 	Name string
-	// Key is the index key of a record, after the index prefix; nil leaves
-	// the record out of the index. The key of a non-unique index must
-	// itself be unique per record: end it with the record's own key parts
-	// (a sequence number), which also sets the order of the walk.
+	// Key returns nil to leave the record out. A non-unique index key must
+	// still be unique per record: end it with the record's own key parts.
 	Key func(T) Key
-	// Unique indexes refuse a key another record holds (ErrConflict).
+	// Unique refuses a key another record holds (ErrConflict).
 	Unique bool
 }
 
-// Collection is a defined collection: build one with Define.
+// Collection is built with Define.
 type Collection[T any] struct {
 	name       string
 	prefix     Key
@@ -50,8 +43,7 @@ type index[T any] struct {
 	prefix Key
 }
 
-// Define registers a collection and its indexes in schema. The primary keys
-// live under "<name>/", an index under "<name>.<index>/".
+// Define registers a collection under "<name>/" and its indexes under "<name>.<index>/".
 func Define[T any](schema *Schema, definition Definition[T]) *Collection[T] {
 	if definition.Encode == nil {
 		definition.Encode = func(record T) ([]byte, error) { return json.Marshal(record) }
@@ -82,17 +74,21 @@ func Define[T any](schema *Schema, definition Definition[T]) *Collection[T] {
 	return collection
 }
 
-// Name is the collection's name.
+// KeyRange covers the keys of the collection and its indexes, and nothing else.
+func (collection *Collection[T]) KeyRange() (lower, upper []byte) {
+	return []byte(collection.name + "."), prefixEnd(collection.prefix)
+}
+
+// Name returns the collection's name.
 func (collection *Collection[T]) Name() string { return collection.name }
 
-// KeyOf is the primary key of record, after the collection's prefix.
+// KeyOf returns the primary key of record, without the prefix.
 func (collection *Collection[T]) KeyOf(record T) Key { return collection.definition.Key(record) }
 
 func (collection *Collection[T]) primaryKey(key Key) []byte {
 	return append(bytes.Clone(collection.prefix), key...)
 }
 
-// indexKeys are the index keys of record, unique ones marked.
 func (collection *Collection[T]) indexKeys(record T) []indexKey {
 	keys := make([]indexKey, 0, len(collection.order))
 
@@ -111,7 +107,7 @@ type indexKey struct {
 	unique bool
 }
 
-// ErrConflict: a unique index already holds the key for another record.
+// ErrConflict means a unique index already holds the key for another record.
 type ErrConflict struct {
 	Collection, Index string
 }
@@ -120,8 +116,7 @@ func (err ErrConflict) Error() string {
 	return fmt.Sprintf("kv: %s.%s is already taken", err.Collection, err.Index)
 }
 
-// Get reads the record under key (after the collection's prefix), or
-// ErrNotFound.
+// Get reads the record under key, or returns ErrNotFound.
 func (collection *Collection[T]) Get(reader Reader, key Key) (T, error) {
 	value, err := reader.Get(collection.primaryKey(key))
 
@@ -134,7 +129,7 @@ func (collection *Collection[T]) Get(reader Reader, key Key) (T, error) {
 	return collection.definition.Decode(value)
 }
 
-// GetBy reads the record a unique index points to, or ErrNotFound.
+// GetBy reads the record a unique index points to, or returns ErrNotFound.
 func (collection *Collection[T]) GetBy(reader Reader, indexName string, key Key) (T, error) {
 	entry := collection.index(indexName)
 	primary, err := reader.Get(append(bytes.Clone(entry.prefix), key...))
@@ -156,8 +151,7 @@ func (collection *Collection[T]) GetBy(reader Reader, indexName string, key Key)
 	return collection.definition.Decode(value)
 }
 
-// Taken reports whether a unique index holds key, through reader (a batch
-// sees its own writes).
+// Taken reports whether a unique index holds key.
 func (collection *Collection[T]) Taken(reader Reader, indexName string, key Key) (bool, error) {
 	_, err := reader.Get(append(bytes.Clone(collection.index(indexName).prefix), key...))
 
@@ -181,17 +175,14 @@ func (collection *Collection[T]) index(name string) *index[T] {
 	return entry
 }
 
-// Insert writes a record that is not stored yet, with its index keys. A
-// record already stored under the same key must go through Save, which
-// removes its old index keys.
+// Insert writes a record that is not stored yet; use Save to replace one.
 func (collection *Collection[T]) Insert(batch *Batch, record T) error {
 	_, err := collection.Write(batch, record, nil)
 
 	return err
 }
 
-// Save writes a record, replacing the stored one under the same key: index
-// keys the record no longer has are deleted.
+// Save writes a record, replacing the stored one and its old index keys.
 func (collection *Collection[T]) Save(batch *Batch, record T) error {
 	key := collection.primaryKey(collection.KeyOf(record))
 	value, err := batch.Get(key)
@@ -214,10 +205,8 @@ func (collection *Collection[T]) Save(batch *Batch, record T) error {
 	return err
 }
 
-// Write writes record over previous, the version stored under its key (nil
-// when there is none), and returns what is stored now. It reads nothing:
-// Insert and Save are the usual ways in, Write is for a caller that keeps
-// the stored version itself (in memory) and its size.
+// Write writes record over old (nil when none is stored) without reading the
+// stored version, for callers that keep it in memory.
 func (collection *Collection[T]) Write(batch *Batch, record T, old *Entry[T]) (Entry[T], error) {
 	key := collection.primaryKey(collection.KeyOf(record))
 	value, err := collection.definition.Encode(record)
@@ -271,16 +260,14 @@ func (collection *Collection[T]) Write(batch *Batch, record T, old *Entry[T]) (E
 	return Entry[T]{Key: key[len(collection.prefix):], Record: record, Size: len(value)}, nil
 }
 
-// Entry is a stored record as a walk reads it: its key (after the
-// collection's prefix), the record, and the size of its stored value.
+// Entry is a stored record with its key (without the prefix) and value size.
 type Entry[T any] struct {
 	Key    Key
 	Record T
 	Size   int
 }
 
-// Delete deletes record with its index keys. With a counter, the record is
-// encoded again to know what it took; DeleteEntry avoids that.
+// Delete deletes record with its index keys; DeleteEntry avoids re-encoding it.
 func (collection *Collection[T]) Delete(batch *Batch, record T) error {
 	size := 0
 
@@ -299,7 +286,7 @@ func (collection *Collection[T]) Delete(batch *Batch, record T) error {
 	return nil
 }
 
-// DeleteEntry deletes a record read by a walk, with its index keys.
+// DeleteEntry deletes a record read by a walk.
 func (collection *Collection[T]) DeleteEntry(batch *Batch, entry Entry[T]) {
 	collection.remove(batch, entry.Record, entry.Size)
 }
@@ -315,8 +302,7 @@ func (collection *Collection[T]) remove(batch *Batch, record T, valueSize int) {
 	collection.uncount(batch, record, len(key), valueSize)
 }
 
-// DeleteKey deletes the record under key with its index keys; false when
-// there is none.
+// DeleteKey deletes the record under key; false when there is none.
 func (collection *Collection[T]) DeleteKey(batch *Batch, key Key) (bool, error) {
 	value, err := batch.Get(collection.primaryKey(key))
 
@@ -338,8 +324,7 @@ func (collection *Collection[T]) DeleteKey(batch *Batch, key Key) (bool, error) 
 	return true, nil
 }
 
-// recordSize is what a record takes: its key and value, and each index key
-// with the primary key as its value.
+// recordSize counts the key, value and each index key with its value.
 func recordSize(keySize, valueSize int, keys []indexKey) int {
 	size := keySize + valueSize
 
@@ -356,7 +341,6 @@ func (collection *Collection[T]) count(batch *Batch, record T, size int) {
 	}
 }
 
-// uncount takes back what a stored record of valueSize bytes was counted.
 func (collection *Collection[T]) uncount(batch *Batch, record T, keySize, valueSize int) {
 	if collection.definition.Counter != nil {
 		batch.Count(collection.definition.Counter(record), -int64(recordSize(keySize, valueSize, collection.indexKeys(record))))

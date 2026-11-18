@@ -55,13 +55,13 @@ func TestPrettyWraps(t *testing.T) {
 	pretty.width = func() int { return 60 }
 	logger := slog.New(pretty)
 
-	logger.Info("retention", "events", "30d", "logs", "14d", "issues", "365d", "events_per_issue", 100)
+	logger.Info("settings", "events", "30d", "logs", "14d", "issues", "365d", "events_per_issue", 100)
 	logger.Info("short", "a", 1)
 
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
 	indent := strings.Repeat(" ", len("15:04:05 LEVEL "))
 
-	if len(lines) != 6 || !strings.HasSuffix(lines[0], " INFO  retention") || lines[1] != indent+"events=30d" || lines[4] != indent+"events_per_issue=100" {
+	if len(lines) != 6 || !strings.HasSuffix(lines[0], " INFO  settings") || lines[1] != indent+"events=30d" || lines[4] != indent+"events_per_issue=100" {
 		t.Fatalf("wrapped:\n%s", out.String())
 	}
 

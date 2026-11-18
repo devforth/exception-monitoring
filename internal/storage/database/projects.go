@@ -6,13 +6,10 @@ import (
 	"github.com/devforth/exception-monitoring/internal/storage/kv"
 )
 
-// deleteChunk is how many logs one batch of a project deletion removes, so
-// a large project does not become one huge batch.
+// deleteChunk is how many logs one batch of a project deletion removes.
 const deleteChunk = 5000
 
-// DeleteProject deletes a project and all its data: the project itself
-// first (its DSN stops working at once), then its issues with their events
-// and status history, and its logs, in batches.
+// DeleteProject deletes the project first, so its DSN stops at once, then its data in batches.
 func (database *Store) DeleteProject(ctx context.Context, id int) error {
 	if err := database.Store.DeleteProject(ctx, id); err != nil {
 		return err

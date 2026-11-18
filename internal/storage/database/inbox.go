@@ -7,18 +7,7 @@ import (
 	"github.com/devforth/exception-monitoring/internal/storage/kv"
 )
 
-// The inbox keeps envelopes as they arrived, until the pipeline of ingest
-// has stored what they hold: the HTTP handler answers once an envelope is
-// here. An entry is deleted in the batch that stores its data, so a crash
-// neither loses nor repeats one.
-
-// Append adds an envelope and returns its entry once the operating system
-// has it. It does not wait for the disk itself (a sync took ~13 ms on an
-// encrypted NVMe and halved ingest): the writer's next batch, a few
-// milliseconds later, is synced and takes every earlier write of the shared
-// journal to the disk with it. A crash of the process loses nothing; a
-// power cut or a kernel crash may lose the envelopes of those last
-// milliseconds (docs/storage-plan.md, "Inbox sync").
+// Append writes without a sync: the writer's next synced batch takes it to disk.
 func (database *Store) Append(projectID int, received time.Time, body []byte) (InboxEntry, error) {
 	sequence, err := database.db.Next()
 
@@ -43,7 +32,7 @@ func (database *Store) Append(projectID int, received time.Time, body []byte) (I
 	return entry, nil
 }
 
-// InInbox reports whether an entry is still waiting (not stored yet).
+// InInbox reports whether an entry is still waiting.
 func (database *Store) InInbox(sequence uint64) (bool, error) {
 	_, err := database.inbox.Get(database.db, kv.K(kv.U64(sequence)))
 
@@ -54,13 +43,12 @@ func (database *Store) InInbox(sequence uint64) (bool, error) {
 	return err == nil, err
 }
 
-// InboxBytes is the size of the envelopes waiting.
+// InboxBytes returns the size of the waiting envelopes.
 func (database *Store) InboxBytes() int64 {
 	return database.inboxBytes.Load()
 }
 
-// Pending returns up to limit entries after the given sequence number,
-// oldest first, without the ones skip names.
+// Pending returns up to limit entries after the sequence number, oldest first, except skipped ones.
 func (database *Store) Pending(after uint64, limit int, skip func(sequence uint64) bool) ([]InboxEntry, error) {
 	var entries []InboxEntry
 

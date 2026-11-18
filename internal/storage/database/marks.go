@@ -2,23 +2,18 @@ package database
 
 import (
 	"cmp"
+	"math"
 	"slices"
 	"time"
 
 	"github.com/devforth/exception-monitoring/internal/storage/kv"
 )
 
-// Time marks tie sequence numbers to the time records were received: at the
-// first batch of every markInterval, the writer stores a mark with the first
-// sequence number that batch may use. Every record written later has a
-// higher number, every one before a lower, so a list limited by dates
-// starts and stops by sequence number instead of reading every record, and
-// the cleanup can cut whole days. The marks are also kept in memory (a few
-// thousand a month).
+// Time marks tie sequence numbers to receive times, once per markInterval,
+// so date ranges become sequence ranges. They are also kept in memory.
 const (
 	markInterval = 10 * time.Minute
-	// markSlack covers records whose own time (the SDK's clock) differs
-	// from the time they arrived.
+	// markSlack covers records whose SDK time differs from the receive time.
 	markSlack = time.Hour
 )
 
@@ -31,8 +26,7 @@ func (database *Store) loadMarks() error {
 	return err
 }
 
-// mark adds the time mark of the interval now to the batch, once per
-// interval; first is the first sequence number the batch may use.
+// mark adds the mark of the current interval once; first is the batch's first sequence number.
 func (writer *batchWriter) mark(now time.Time, first uint64) error {
 	interval := markOf(now)
 
@@ -57,9 +51,23 @@ func (database *Store) addMark(mark timeMark) {
 	database.marks = append(database.marks, mark)
 }
 
-// sequenceAt is the first sequence number of the latest mark at or before
-// at: records received before that mark's interval have lower numbers. 0
-// when there is no such mark.
+// sequenceFrom returns the first sequence of at's interval, or of the next one marked:
+// everything before it arrived before that interval. MaxUint64 when nothing arrived since.
+func (database *Store) sequenceFrom(at time.Time) uint64 {
+	database.marksMutex.RLock()
+
+	defer database.marksMutex.RUnlock()
+
+	index, _ := slices.BinarySearchFunc(database.marks, markOf(at), compareMark)
+
+	if index >= len(database.marks) {
+		return math.MaxUint64
+	}
+
+	return database.marks[index].First
+}
+
+// sequenceAt returns the first sequence of the latest mark at or before at, or 0.
 func (database *Store) sequenceAt(at time.Time) uint64 {
 	database.marksMutex.RLock()
 
@@ -77,9 +85,7 @@ func (database *Store) sequenceAt(at time.Time) uint64 {
 	}
 }
 
-// sequenceAfter is the first sequence number of the first mark after the
-// interval of at: records with that number or higher were received after
-// at. 0 when there is no such mark yet.
+// sequenceAfter returns the first sequence of the first mark after at's interval, or 0.
 func (database *Store) sequenceAfter(at time.Time) uint64 {
 	database.marksMutex.RLock()
 
@@ -100,7 +106,7 @@ func (database *Store) sequenceAfter(at time.Time) uint64 {
 
 func compareMark(mark timeMark, interval uint64) int { return cmp.Compare(mark.Interval, interval) }
 
-// sequenceOf is the sequence number that ends a key of events and logs.
+// sequenceOf returns the sequence number that ends an event or log key.
 func sequenceOf(key kv.Key) uint64 {
 	decoder := kv.Decode(key, len(key)-8)
 

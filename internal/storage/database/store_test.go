@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/devforth/exception-monitoring/internal/storage/kv"
 	model "github.com/devforth/exception-monitoring/internal/storage/store"
 )
 
@@ -30,20 +29,12 @@ func openTest(t *testing.T) *Store {
 	return database
 }
 
-// checkCollections verifies every collection against its declaration:
-// each record has its index keys and each index key its record.
+// checkCollections verifies the stored data (Store.Verify).
 func checkCollections(t *testing.T, database *Store) {
 	t.Helper()
 
-	checks := map[string]func(kv.Reader) ([]string, error){
-		"inbox": database.inbox.Check, "issues": database.issues.Check, "status": database.status.Check,
-		"events": database.events.Check, "logs": database.logs.Check, "marks": database.collections.marks.Check,
-	}
-
-	for name, check := range checks {
-		if problems, err := check(database.db); err != nil || len(problems) > 0 {
-			t.Errorf("%s: %v %v", name, problems, err)
-		}
+	if problems, err := database.Verify(); err != nil || len(problems) > 0 {
+		t.Errorf("verify: %v %v", problems, err)
 	}
 }
 

@@ -92,8 +92,8 @@ func New(dependencies Dependencies) *Controllers {
 			Projects: dependencies.Registry, ProjectName: all.Projects.Name,
 		},
 		projectViews: presenters.Projects{
-			Retention: settings.Retention, Recording: settings.Recording,
-			FromEnv: dependencies.Registry.FromEnv, Color: all.Projects.Color,
+			Recording: settings.Recording,
+			FromEnv:   dependencies.Registry.FromEnv, Color: all.Projects.Color,
 		},
 	}
 }

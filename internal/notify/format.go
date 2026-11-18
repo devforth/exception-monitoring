@@ -89,6 +89,8 @@ type Description struct {
 	ProjectColor string
 	Title        string // the issue; for a summary, how many issues it covers
 	IssueID      int64
+	Items        []Description // a summary's first issues
+	More         int           // issues of a summary not in Items
 }
 
 // Describe reads an outbox message (kind "notification" or "summary") for
@@ -99,13 +101,23 @@ func Describe(kind string, payload []byte) Description {
 
 		_ = json.Unmarshal(payload, &summary)
 
-		return Description{Label: "Summary", Title: summary.heading()}
+		description := Description{Label: "Summary", Title: summary.heading(), More: max(summary.Count-len(summary.Items), 0)}
+
+		for _, item := range summary.Items {
+			description.Items = append(description.Items, describeNotification(item))
+		}
+
+		return description
 	}
 
 	var notification Notification
 
 	_ = json.Unmarshal(payload, &notification)
 
+	return describeNotification(notification)
+}
+
+func describeNotification(notification Notification) Description {
 	return Description{
 		Label: notification.Kind.label(), Project: notification.Project, ProjectColor: notification.ProjectColor,
 		Title: notification.Title, IssueID: notification.IssueID,

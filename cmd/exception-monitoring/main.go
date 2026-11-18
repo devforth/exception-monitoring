@@ -30,7 +30,6 @@ import (
 	"github.com/devforth/exception-monitoring/internal/services"
 	"github.com/devforth/exception-monitoring/internal/storage/database"
 	"github.com/devforth/exception-monitoring/internal/storage/projects"
-	"github.com/devforth/exception-monitoring/internal/storage/retention"
 	"github.com/devforth/exception-monitoring/internal/storage/store"
 	"github.com/devforth/exception-monitoring/internal/ui"
 )
@@ -68,11 +67,11 @@ func main() {
 	}
 }
 
-// defaultMemoryLimit is the soft memory limit when GOMEMLIMIT is not set:
-// under it the Go garbage collector works harder instead of letting the
-// heap grow. A burst of 50 000 events peaked at ~230–320 MB without it and
-// ~200 MB with it, at a cost of 5–8% in speed (docs/storage-plan.md).
+// defaultMemoryLimit applies when GOMEMLIMIT is not set (docs/configuration.md).
 const defaultMemoryLimit = 200 << 20
+
+// cleanupInterval is how often the size is checked besides after writes.
+const cleanupInterval = 10 * time.Minute
 
 func run() error {
 	settings, err := config.Load()
@@ -97,9 +96,7 @@ func run() error {
 		return err
 	}
 
-	// Issues, events and logs are in the key-value store, in a directory of
-	// its own (DATA_DIR/leveldb); the rest is still in SQLite until it moves
-	// too (docs/storage-plan.md).
+	// The rest of the storage is in SQLite until it moves (docs/storage-plan.md).
 	database, err := database.Open(settings.DataDir, relational)
 
 	if err != nil {
@@ -189,21 +186,21 @@ func run() error {
 		}
 	}()
 
-	// Retention runs in the background until shutdown; it stops before the
-	// database closes (defers run in reverse order).
-	retentionCtx, stopRetention := context.WithCancel(ctx)
-	retentionDone := make(chan struct{})
+	// The cleanup keeps the database under MAX_DATABASE_SIZE, in the
+	// background until shutdown; it stops before the database closes
+	// (defers run in reverse order).
+	cleanupCtx, stopCleanup := context.WithCancel(ctx)
+	cleanupDone := make(chan struct{})
 
 	go func() {
-		defer close(retentionDone)
+		defer close(cleanupDone)
 
-		cleaner := retention.Cleaner{Store: relational, Settings: settings.Retention, Projects: registry, Logger: logger}
-		cleaner.Run(retentionCtx)
+		database.RunCleanup(cleanupCtx, settings.Retention.MaxDatabaseBytes, cleanupInterval, logger)
 	}()
 
 	defer func() {
-		stopRetention()
-		<-retentionDone
+		stopCleanup()
+		<-cleanupDone
 	}()
 
 	logRetention(logger, settings.Retention)
@@ -215,7 +212,7 @@ func run() error {
 	}))
 
 	sink := ingest.StoreSink{Store: database, Logger: logger, Notifier: notifier, PublicURL: settings.Notifications.PublicURL,
-		Retention: settings.Retention, Recording: settings.Recording}
+		Recording: settings.Recording}
 
 	// Envelopes go through the inbox: the handler answers once one is on
 	// disk, the pipeline stores it. It stops after the HTTP server (no new
@@ -304,14 +301,17 @@ func serverURL(settings *config.Config, address net.Addr) string {
 	return address.String()
 }
 
-// logRetention says at startup what is kept, so a surprising deletion can be
-// traced to the settings.
+// logRetention says at startup how the database is kept small, so a
+// surprising deletion can be traced to the setting.
 func logRetention(logger *slog.Logger, settings config.Retention) {
-	// Written as the settings take them; 0 means no limit.
-	logger.Info("retention", logging.Block,
-		"events", config.FormatDuration(settings.Events), "logs", config.FormatDuration(settings.Logs),
-		"issues", config.FormatDuration(settings.Issues), "events_per_issue", settings.EventsPerIssue,
-		"logs_per_message", settings.LogsPerMessage, "max_database_size", config.FormatSize(settings.MaxDatabaseBytes))
+	if settings.MaxDatabaseBytes == 0 {
+		logger.Info("retention", "max_database_size", "0 (nothing is deleted)")
+
+		return
+	}
+
+	logger.Info("retention", logging.Block, "max_database_size", config.FormatSize(settings.MaxDatabaseBytes),
+		"cleanup", fmt.Sprintf("from %d%% to %d%%", config.CleanupStartPercent, config.CleanupStopPercent))
 }
 
 // notificationFactory builds channels for the connections set up in the UI.

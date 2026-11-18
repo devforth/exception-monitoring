@@ -12,33 +12,24 @@ import (
 	model "github.com/devforth/exception-monitoring/internal/storage/store"
 )
 
-// issueRecord is an issue as stored (schema.go). The whole table is also
-// kept in memory (tens of thousands of rows), so lists, filters, sorts and
-// counts run in Go; a change is written in the batch that makes it and put
-// in memory once that batch is committed.
+// issueRecord is a stored issue; the whole table is also kept in memory.
 type issueRecord struct {
 	model.Issue
 	Fingerprint string `json:"fingerprint"`
-	// Stored is how many of its events are kept on disk (EventCount counts
-	// every event ever received); trims read it.
+	// Stored counts the stored events; EventCount counts every event received.
 	Stored int `json:"stored"`
-	// EventDays counts the stored events per day they were received, oldest
-	// day first, for "any event in the date range". One entry per day, not
-	// per event, so an issue with a million events stays small.
+	// EventDays counts the stored events per day received, oldest first.
 	EventDays []dayCount `json:"event_days"`
 
-	// storedSize is the size of the stored value, so a change is written
-	// without reading the old version back (kv.Collection.Write).
+	// storedSize is the size of the stored value (kv.Collection.Write).
 	storedSize int
 }
 
-// dayCount is how many stored events of an issue arrived on a day.
 type dayCount struct {
 	Day   int32 `json:"d"` // days since 1970-01-01, UTC
 	Count int   `json:"n"`
 }
 
-// addEvent counts a stored event received at.
 func (issue *issueRecord) addEvent(at time.Time) {
 	issue.Stored++
 	number := dayOf(at)
@@ -53,7 +44,6 @@ func (issue *issueRecord) addEvent(at time.Time) {
 	issue.EventDays = slices.Insert(issue.EventDays, index, dayCount{Day: number, Count: 1})
 }
 
-// removeEvent forgets a stored event received at.
 func (issue *issueRecord) removeEvent(at time.Time) {
 	issue.Stored = max(issue.Stored-1, 0)
 	number := dayOf(at)
@@ -68,7 +58,6 @@ func (issue *issueRecord) removeEvent(at time.Time) {
 	}
 }
 
-// copy returns an issue the caller may change without touching this one.
 func (issue *issueRecord) copy() *issueRecord {
 	duplicate := *issue
 	duplicate.EventDays = slices.Clone(issue.EventDays)
@@ -87,7 +76,6 @@ type issueTable struct {
 	lastID        int64
 }
 
-// fingerprintKey names an issue in memory by its project and fingerprint.
 func fingerprintKey(projectID int, fingerprint string) string {
 	return string(kv.K(kv.U32(uint32(projectID)), kv.Text(fingerprint)))
 }
@@ -121,23 +109,19 @@ func (database *Store) loadIssues() error {
 	return err
 }
 
-// match is what the issue table says of an issue and a filter.
 type match int
 
 const (
 	noMatch match = iota
 	isMatch
-	// checkEvents: only events on a day the range covers in part, so the
-	// times of its stored events decide (the UI's ranges are whole days).
+	// checkEvents: the range covers a day of its events in part, so their times decide.
 	checkEvents
 )
 
-// inRange reports whether at is within the filter's dates.
 func inRange(filter model.IssueFilter, at time.Time) bool {
 	return (filter.SeenSince.IsZero() || !at.Before(filter.SeenSince)) && (filter.SeenUntil.IsZero() || at.Before(filter.SeenUntil))
 }
 
-// matches tells whether an issue passes the filter.
 func matches(issue *issueRecord, filter model.IssueFilter) match {
 	if len(filter.ProjectIDs) > 0 && !slices.Contains(filter.ProjectIDs, issue.ProjectID) ||
 		filter.Status != "" && issue.Status != filter.Status ||
@@ -182,7 +166,6 @@ func matches(issue *issueRecord, filter model.IssueFilter) match {
 	return result
 }
 
-// anyEventInRange reads the stored events of an issue for checkEvents.
 func (database *Store) anyEventInRange(issueID int64, filter model.IssueFilter) (bool, error) {
 	found := false
 
@@ -195,9 +178,7 @@ func (database *Store) anyEventInRange(issueID int64, filter model.IssueFilter) 
 	return found, err
 }
 
-// filterIssues returns copies of the issues passing the filter, unsorted.
-// Issues that need their events checked are checked after the table is
-// released, so a read from disk never holds up the writer.
+// filterIssues reads events from disk only after releasing the table.
 func (database *Store) filterIssues(filter model.IssueFilter) ([]model.Issue, error) {
 	database.issuesMutex.RLock()
 
@@ -230,7 +211,6 @@ func (database *Store) filterIssues(filter model.IssueFilter) ([]model.Issue, er
 	return issues, nil
 }
 
-// selectIssues returns copies of the issues passing the filter, sorted.
 func (database *Store) selectIssues(ctx context.Context, filter model.IssueFilter) ([]model.Issue, error) {
 	names := map[int]string{}
 
@@ -257,8 +237,7 @@ func (database *Store) selectIssues(ctx context.Context, filter model.IssueFilte
 	return issues, nil
 }
 
-// issueOrder compares issues for a sort of model.IssueSorts; the id breaks
-// ties so pages stay stable.
+// issueOrder breaks ties by id, so pages stay stable.
 func issueOrder(sort string, projectNames map[int]string) func(a, b model.Issue) int {
 	newestFirst := func(a, b model.Issue) int {
 		return cmp.Or(b.LastSeen.Compare(a.LastSeen), cmp.Compare(b.ID, a.ID))
@@ -296,14 +275,12 @@ func issueOrder(sort string, projectNames map[int]string) func(a, b model.Issue)
 	}
 }
 
-// CountIssues counts the issues matching the filter (Limit and Offset are ignored).
 func (database *Store) CountIssues(_ context.Context, filter model.IssueFilter) (int, error) {
 	issues, err := database.filterIssues(filter)
 
 	return len(issues), err
 }
 
-// ListIssues returns a page of the issues matching the filter.
 func (database *Store) ListIssues(ctx context.Context, filter model.IssueFilter) ([]model.Issue, error) {
 	issues, err := database.selectIssues(ctx, filter)
 
@@ -335,7 +312,6 @@ func (database *Store) GetIssue(_ context.Context, issueID int64) (model.Issue, 
 	return issue.Issue, nil
 }
 
-// GetIssues returns the issues found among the ids, in the order given.
 func (database *Store) GetIssues(_ context.Context, issueIDs []int64) ([]model.Issue, error) {
 	database.issuesMutex.RLock()
 
@@ -352,7 +328,6 @@ func (database *Store) GetIssues(_ context.Context, issueIDs []int64) ([]model.I
 	return issues, nil
 }
 
-// UnresolvedCounts returns the number of unresolved issues per project.
 func (database *Store) UnresolvedCounts(context.Context) (map[int]int, error) {
 	database.issuesMutex.RLock()
 

@@ -31,6 +31,7 @@
 {{$event := .}}
 <section>
   <h2>Event <code>{{.EventID}}</code></h2>
+  {{if $.Data.Event.Thinned}}<p class="muted small">Details of this old event (breadcrumbs, request, tags, contexts) were removed to save space; the error, its stack trace and message stay.</p>{{end}}
   <dl class="facts">
     <div><dt>Time</dt><dd>{{template "time" .Timestamp.Time}}</dd></div>
     {{with .Environment}}<div><dt>Environment</dt><dd>{{.}}</dd></div>{{end}}

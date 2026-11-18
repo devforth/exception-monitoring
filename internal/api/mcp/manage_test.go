@@ -142,21 +142,20 @@ func TestDestructiveToolsAskForConfirmation(t *testing.T) {
 }
 
 type projectSettings struct {
-	ID            int      `json:"id"`
-	Name          string   `json:"name"`
-	DSN           string   `json:"dsn"`
-	Color         string   `json:"color"`
-	EventLevels   []string `json:"event_levels"`
-	RetentionLogs string   `json:"retention_logs"`
+	ID          int      `json:"id"`
+	Name        string   `json:"name"`
+	DSN         string   `json:"dsn"`
+	Color       string   `json:"color"`
+	EventLevels []string `json:"event_levels"`
 }
 
 func TestManageProjects(t *testing.T) {
 	server := newTestServer(t)
 
 	var created projectSettings
-	server.decode("create_project", map[string]any{"name": "worker", "retention_logs": "7d", "event_levels": []string{"error"}}, &created)
+	server.decode("create_project", map[string]any{"name": "worker", "event_levels": []string{"error"}}, &created)
 
-	if created.ID == 0 || !strings.Contains(created.DSN, "/"+strconv.Itoa(created.ID)) || created.RetentionLogs != "7d" {
+	if created.ID == 0 || !strings.Contains(created.DSN, "/"+strconv.Itoa(created.ID)) || !slices.Equal(created.EventLevels, []string{"error"}) {
 		t.Fatalf("created = %+v", created)
 	}
 
@@ -164,16 +163,16 @@ func TestManageProjects(t *testing.T) {
 	var updated projectSettings
 	server.decode("update_project", map[string]any{"project": "worker", "color": "#123456"}, &updated)
 
-	if updated.Color != "#123456" || updated.RetentionLogs != "7d" || !slices.Equal(updated.EventLevels, []string{"error"}) || updated.Name != "worker" {
+	if updated.Color != "#123456" || !slices.Equal(updated.EventLevels, []string{"error"}) || updated.Name != "worker" {
 		t.Fatalf("updated = %+v", updated)
 	}
 
-	// An empty string returns a setting to the default.
+	// An empty list records nothing; the color is kept.
 	var reset projectSettings
-	server.decode("update_project", map[string]any{"project": "worker", "retention_logs": ""}, &reset)
+	server.decode("update_project", map[string]any{"project": "worker", "event_levels": []string{}}, &reset)
 
-	if reset.RetentionLogs != "" || reset.Color != "#123456" {
-		t.Fatalf("after reset = %+v, want the default retention and the color kept", reset)
+	if len(reset.EventLevels) != 0 || reset.Color != "#123456" {
+		t.Fatalf("after reset = %+v, want no levels and the color kept", reset)
 	}
 
 	if text, isError := server.try("create_project", map[string]any{"name": "Not Valid"}); !isError || !strings.Contains(text, "name:") {
@@ -184,8 +183,8 @@ func TestManageProjects(t *testing.T) {
 		t.Fatalf("duplicate name: %s", text)
 	}
 
-	if text, isError := server.try("update_project", map[string]any{"project": "worker", "event_levels": []string{"error"}, "retention_events": "soon"}); !isError || !strings.Contains(text, "retention_events") {
-		t.Fatalf("invalid retention: %s", text)
+	if text, isError := server.try("update_project", map[string]any{"project": "worker", "color": "red"}); !isError || !strings.Contains(text, "color") {
+		t.Fatalf("invalid color: %s", text)
 	}
 
 	server.call("delete_project", map[string]any{"project": "worker"})

@@ -13,12 +13,10 @@
 <section class="card storage">
   <h2>Storage</h2>
   <p>Database: <b>{{.Used}}</b>{{if .Limit}} of {{.Limit}}{{end}}</p>
-  {{if .Limit}}<meter min="0" max="100" value="{{.Percent}}" high="85" optimum="0">{{.Percent}}%</meter>{{end}}
-  <p class="muted small">By default events are kept {{.Events}}, logs {{.Logs}}; {{.EventsPerIssue}} events per issue.
-    A message logged over and over keeps its newest {{.LogsPerMessage}} copies.
-    Issues keep their latest event; an issue that has not happened for {{.Issues}} is deleted.
-    {{if .Limit}}Above the size limit the oldest events and logs of all projects are deleted first.{{end}}
-    Defaults are set with <code>RETENTION_EVENTS</code>, <code>RETENTION_LOGS</code>, <code>RETENTION_EVENTS_PER_ISSUE</code>, <code>RETENTION_LOGS_PER_MESSAGE</code>, <code>RETENTION_ISSUES</code> and <code>MAX_DATABASE_SIZE</code>; a project can override them in its settings.</p>
+  {{if .Limit}}<meter min="0" max="100" value="{{.Percent}}" high="80" optimum="0">{{.Percent}}%</meter>{{end}}
+  <p class="muted small">{{if .Limit}}At the limit the least useful data is deleted until the database is at {{.CleanupStop}}%: old logs first, errors last.{{else}}Nothing is deleted: the limit is off.{{end}}
+    <code>MAX_DATABASE_SIZE</code> {{template "hint" (settingHelp "MAX_DATABASE_SIZE")}}</p>
+  {{with .Cleanups}}{{template "cleanup-runs" .}}{{end}}
 </section>
 {{end}}
 
@@ -26,7 +24,7 @@
 
 {{if .Projects}}
 <table class="list projects-table">
-  <thead><tr><th>Project</th><th>DSN</th><th class="number">Unresolved</th><th>Records</th><th>Retention</th><th>Actions</th></tr></thead>
+  <thead><tr><th>Project</th><th>DSN</th><th class="number">Unresolved</th><th>Records</th><th>Actions</th></tr></thead>
   <tbody>
     {{range .Projects}}
     <tr>
@@ -45,7 +43,6 @@
         <div>{{if .EventLevels}}{{range .EventLevels}}{{template "badge" (levelBadge .)}} {{end}}{{else if eq .EventLevels nil}}all errors{{else}}<span class="muted">no errors</span>{{end}}</div>
         <div class="muted">logs: {{if .LogLevels}}{{range .LogLevels}}{{.}} {{end}}{{else if eq .LogLevels nil}}all{{else}}none{{end}}</div>
       </td>
-      <td class="muted small">{{or .Retention "default"}}</td>
       <td>
         <div class="actions connection-actions">
           {{if $.Viewer.CanAdminister}}
@@ -71,4 +68,49 @@
 <p class="empty">No projects yet. Add one, or set <code>PROJECTS=1:backend:&lt;public key&gt;</code>.</p>
 {{end}}
 {{end}}
+{{end}}
+
+{{/* The latest runs of the cleanup by size; a run's steps open in a popup. */}}
+{{define "cleanup-runs"}}
+<h3>Recent cleanups</h3>
+<div class="table-scroll">
+<table class="list compact">
+  <thead><tr><th>Started</th><th>Status</th><th>Size</th><th>Reached</th><th>Took</th><th></th></tr></thead>
+  <tbody>
+    {{range .}}
+    <tr>
+      <td class="nowrap">{{template "time" .StartedAt}}</td>
+      <td><span class="delivery cleanup-{{.Status}}">{{.Status}}</span>{{with .Error}}<div class="field-error small">{{.}}</div>{{end}}</td>
+      <td class="nowrap">{{.SizeBefore}} → {{if eq .Status "running"}}…{{else}}{{.SizeAfter}}{{end}}</td>
+      <td>{{if .Reached}}step {{.Reached}}{{else}}<span class="muted">compacting was enough</span>{{end}}</td>
+      <td class="nowrap">{{.Duration}}</td>
+      <td>{{if .Steps}}<button type="button" class="link" popovertarget="cleanup-{{.ID}}">Details</button>{{template "cleanup-steps" .}}{{end}}</td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>
+</div>
+{{end}}
+
+{{define "cleanup-steps"}}
+<div popover id="cleanup-{{.ID}}" class="popup">
+  <div class="viewer-bar"><strong>Cleanup, {{.StartedAt.UTC.Format "2006-01-02 15:04"}} UTC</strong><button type="button" class="close" popovertarget="cleanup-{{.ID}}" popovertargetaction="hide">Close</button></div>
+  <p class="muted small">Limit {{.Limit}} · before {{.SizeBefore}} · compacted {{.Compacted}} · after {{.SizeAfter}} · reached step {{.Reached}} · took {{.Duration}}</p>
+  <div class="table-scroll">
+  <table class="list compact">
+    <thead><tr><th class="number">#</th><th>Step</th><th class="number">Freed</th><th class="number">Took</th><th>Deleted</th></tr></thead>
+    <tbody>
+      {{range .Steps}}
+      <tr>
+        <td class="number">{{.Number}}</td>
+        <td>{{.Name}}</td>
+        <td class="number nowrap">{{.Freed}}</td>
+        <td class="number nowrap">{{.Duration}}</td>
+        <td>{{range .Projects}}<div>{{template "badge" (projectBadge .Project)}} {{.Deleted}}</div>{{end}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  </div>
+</div>
 {{end}}

@@ -85,7 +85,7 @@ func TestPipelineStoresEnvelopes(t *testing.T) {
 	settings := &config.Config{Projects: benchProjects(1), AllowedOrigins: []string{"*"}}
 	handler := New(slog.New(slog.DiscardHandler), settings, settings.Projects, nil)
 	notifier := &recordingNotifier{}
-	pipeline := NewPipeline(handler, database, StoreSink{Logger: slog.New(slog.DiscardHandler), Notifier: notifier, Retention: config.Retention{EventsPerIssue: 3, LogsPerMessage: 2}})
+	pipeline := NewPipeline(handler, database, StoreSink{Logger: slog.New(slog.DiscardHandler), Notifier: notifier})
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 
@@ -172,10 +172,6 @@ func TestPipelineStoresEnvelopes(t *testing.T) {
 
 	for _, issue := range issues {
 		counts[issue.EventCount]++
-
-		if events, _ := database.ListEvents(context.Background(), store.EventFilter{IssueID: issue.ID}); len(events) > 3 {
-			t.Errorf("issue %d keeps %d events", issue.ID, len(events))
-		}
 	}
 
 	// 7 distinct events of one issue (a retry is not counted), 1 of another.
@@ -382,7 +378,6 @@ func TestIngestLoad(t *testing.T) {
 	projects := benchProjects(projectCount)
 	settings := &config.Config{Projects: projects, AllowedOrigins: []string{"*"}}
 	event, logs := loadTestData(t, "node-event-unhandled.envelope"), loadTestData(t, "node-logs.envelope")
-	retention := config.Retention{EventsPerIssue: 20, LogsPerMessage: 10}
 
 	var reports []string
 
@@ -396,7 +391,7 @@ func TestIngestLoad(t *testing.T) {
 
 		var counted atomic.Int64
 
-		sink := countingSink{Sink: StoreSink{Store: database, Logger: slog.New(slog.DiscardHandler), Retention: retention}, counted: &counted}
+		sink := countingSink{Sink: StoreSink{Store: database, Logger: slog.New(slog.DiscardHandler)}, counted: &counted}
 		handler := New(slog.New(slog.DiscardHandler), settings, projects, sink)
 		reports = append(reports, sendBurst(t, "sqlite: events", handler, projects, eventsPerProject, event, 20, counted.Load).String())
 		counted.Store(0)
@@ -427,7 +422,8 @@ func TestIngestLoad(t *testing.T) {
 		}
 
 		handler := New(slog.New(slog.DiscardHandler), settings, projects, nil)
-		pipeline := NewPipeline(handler, database, StoreSink{Logger: slog.New(slog.DiscardHandler), Retention: config.Retention{LogsPerMessage: logsPerMessage()}})
+		pipeline := NewPipeline(handler, database, StoreSink{Logger: slog.New(slog.DiscardHandler)})
+		pipeline.LogsPerMessage = logsPerMessage()
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan struct{})
 
@@ -498,5 +494,129 @@ func logsPerMessage() int {
 		return limit
 	}
 
-	return config.DefaultRetentionLogsPerMessage
+	return config.LogsPerMessage
+}
+
+// A burst through the pipeline while the cleanup deletes and compacts under
+// a small limit: every accepted envelope is stored, the inbox empties, and
+// the stored data stays consistent (indexes, byte counters, issue counts).
+func TestBurstWithCleanup(t *testing.T) {
+	db, err := database.Open(t.TempDir(), nil)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { _ = db.Close() })
+
+	projects := benchProjects(10)
+	settings := &config.Config{Projects: projects, AllowedOrigins: []string{"*"}}
+	handler := New(slog.New(slog.DiscardHandler), settings, projects, nil)
+	pipeline := NewPipeline(handler, db, StoreSink{Logger: slog.New(slog.DiscardHandler)})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+
+	go func() { defer close(done); pipeline.Run(ctx) }()
+
+	cleanupCtx, stopCleanup := context.WithCancel(context.Background())
+	cleanupDone := make(chan struct{})
+
+	var (
+		cleanups   atomic.Int64
+		cleanupErr error
+	)
+
+	go func() {
+		defer close(cleanupDone)
+
+		for cleanupCtx.Err() == nil {
+			report, err := db.Cleanup(cleanupCtx, 3<<20)
+
+			if err != nil && cleanupCtx.Err() == nil {
+				cleanupErr = err
+
+				return
+			}
+
+			if len(report.Steps) > 0 {
+				cleanups.Add(1)
+			}
+
+			time.Sleep(20 * time.Millisecond)
+		}
+	}()
+
+	event, logs := loadTestData(t, "node-event-unhandled.envelope"), loadTestData(t, "node-logs.envelope")
+
+	var (
+		sent   atomic.Int64
+		failed atomic.Int64
+		group  sync.WaitGroup
+	)
+
+	send := func(project config.Project, body []byte) {
+		request := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/%d/envelope/?sentry_key=%s", project.ID, project.PublicKey), bytes.NewReader(body))
+		request.SetPathValue("projectID", strconv.Itoa(project.ID))
+
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+
+		if response.Code != http.StatusOK {
+			failed.Add(1)
+
+			return
+		}
+
+		sent.Add(1)
+	}
+
+	for _, project := range projects {
+		group.Add(1)
+
+		go func() {
+			defer group.Done()
+
+			for index := range 200 {
+				body := varied(event, index%25)
+				send(project, body)
+
+				if index%10 == 0 {
+					send(project, body) // a retry of the SDK
+				}
+
+				if index%5 == 0 {
+					send(project, logs)
+				}
+			}
+		}()
+	}
+
+	group.Wait()
+
+	for deadline := time.Now().Add(60 * time.Second); pipeline.Stored() < sent.Load() || db.InboxBytes() > 0; {
+		if time.Now().After(deadline) {
+			t.Fatalf("stored %d of %d, inbox %d bytes", pipeline.Stored(), sent.Load(), db.InboxBytes())
+		}
+
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	stopCleanup()
+	<-cleanupDone
+	cancel()
+	<-done
+
+	if failed.Load() > 0 || cleanupErr != nil || cleanups.Load() == 0 {
+		t.Fatalf("%d answers not 200, cleanup error %v, %d cleanups", failed.Load(), cleanupErr, cleanups.Load())
+	}
+
+	if pending, err := db.Pending(0, 10, nil); err != nil || len(pending) > 0 {
+		t.Fatalf("inbox not empty: %d entries, %v", len(pending), err)
+	}
+
+	if problems, err := db.Verify(); err != nil || len(problems) > 0 {
+		t.Fatalf("verify: %v %v", problems, err)
+	}
+
+	t.Logf("%d envelopes, %d cleanups that deleted something", sent.Load(), cleanups.Load())
 }

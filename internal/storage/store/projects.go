@@ -5,17 +5,11 @@ import (
 	"time"
 )
 
-// Project is a row of the projects table. Nil retention fields use the
-// global settings.
+// Project is a row of the projects table.
 type Project struct {
-	ID                      int
-	Name                    string
-	PublicKey               string
-	RetentionEvents         *time.Duration
-	RetentionLogs           *time.Duration
-	RetentionIssues         *time.Duration
-	RetentionEventsPerIssue *int
-	RetentionLogsPerMessage *int
+	ID        int
+	Name      string
+	PublicKey string
 	// EventLevels and LogLevels: the levels recorded; nil uses the defaults.
 	EventLevels *[]string
 	LogLevels   *[]string

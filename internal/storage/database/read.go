@@ -11,10 +11,17 @@ import (
 	model "github.com/devforth/exception-monitoring/internal/storage/store"
 )
 
-// newestFirst walks several queries at once, newest first across all of
-// them, by the sequence number that ends the keys of events and logs.
-// visit returns false to stop.
+// newestFirst merges queries newest first by the sequence number ending their keys.
 func newestFirst[T any](reader kv.Reader, queries []kv.Query[T], visit func(entry kv.Entry[T]) bool) error {
+	return merged(reader, queries, true, visit)
+}
+
+// oldestFirst merges queries oldest first by the sequence number ending their keys.
+func oldestFirst[T any](reader kv.Reader, queries []kv.Query[T], visit func(entry kv.Entry[T]) bool) error {
+	return merged(reader, queries, false, visit)
+}
+
+func merged[T any](reader kv.Reader, queries []kv.Query[T], newest bool, visit func(entry kv.Entry[T]) bool) error {
 	type head struct {
 		cursor *kv.Cursor[T]
 		entry  kv.Entry[T]
@@ -24,29 +31,33 @@ func newestFirst[T any](reader kv.Reader, queries []kv.Query[T], visit func(entr
 	heads := make([]*head, 0, len(queries))
 
 	for _, query := range queries {
-		current := &head{cursor: query.Newest().Open(reader)}
+		if newest {
+			query = query.Newest()
+		}
+
+		current := &head{cursor: query.Open(reader)}
 		current.entry, current.valid = current.cursor.Next()
 		heads = append(heads, current)
 	}
 
 	for {
-		var newest *head
+		var next *head
 
 		for _, current := range heads {
-			if current.valid && (newest == nil || sequenceOf(current.entry.Key) > sequenceOf(newest.entry.Key)) {
-				newest = current
+			if !current.valid {
+				continue
+			}
+
+			if next == nil || (sequenceOf(current.entry.Key) > sequenceOf(next.entry.Key)) == newest {
+				next = current
 			}
 		}
 
-		if newest == nil {
+		if next == nil || !visit(next.entry) {
 			break
 		}
 
-		if !visit(newest.entry) {
-			break
-		}
-
-		newest.entry, newest.valid = newest.cursor.Next()
+		next.entry, next.valid = next.cursor.Next()
 	}
 
 	var err error
@@ -58,7 +69,6 @@ func newestFirst[T any](reader kv.Reader, queries []kv.Query[T], visit func(entr
 	return err
 }
 
-// before bounds a query to sequence numbers below before (0: no bound).
 func before[T any](query kv.Query[T], sequence uint64) kv.Query[T] {
 	if sequence == 0 {
 		return query
@@ -71,7 +81,7 @@ func eventSummary(meta eventMeta) model.EventSummary {
 	return model.EventSummary{
 		ID: int64(meta.Sequence), ProjectID: meta.ProjectID, IssueID: meta.IssueID, EventID: meta.EventID, Timestamp: meta.Timestamp,
 		ReceivedAt: meta.ReceivedAt, Level: meta.Level, Environment: meta.Environment, Release: meta.Release,
-		TraceID: meta.TraceID, SpanID: meta.SpanID, ParentSpanID: meta.ParentSpanID,
+		TraceID: meta.TraceID, SpanID: meta.SpanID, ParentSpanID: meta.ParentSpanID, Thinned: meta.Thinned,
 	}
 }
 
@@ -79,7 +89,6 @@ func fullEvent(record eventRecord) model.Event {
 	return model.Event{EventSummary: eventSummary(record.eventMeta), Payload: json.RawMessage(record.Payload)}
 }
 
-// ListEvents lists events newest first: of an issue, of a trace, or all.
 func (database *Store) ListEvents(_ context.Context, filter model.EventFilter) ([]model.EventSummary, error) {
 	limit := uint64(max(filter.BeforeID, 0))
 
@@ -113,7 +122,6 @@ func (database *Store) ListEvents(_ context.Context, filter model.EventFilter) (
 	return events, err
 }
 
-// GetEvent returns an event by its SDK event_id.
 func (database *Store) GetEvent(_ context.Context, projectID int, eventID string) (model.Event, error) {
 	record, err := database.events.GetBy(database.db, "id", eventIDKey(projectID, eventID))
 
@@ -124,7 +132,6 @@ func (database *Store) GetEvent(_ context.Context, projectID int, eventID string
 	return fullEvent(record), nil
 }
 
-// LatestEvent returns the most recent event of an issue.
 func (database *Store) LatestEvent(_ context.Context, issueID int64) (model.Event, error) {
 	entry, err := database.events.Primary(kv.U64(uint64(issueID))).Newest().First(database.db)
 
@@ -135,12 +142,10 @@ func (database *Store) LatestEvent(_ context.Context, issueID int64) (model.Even
 	return fullEvent(entry.Record), nil
 }
 
-// logQueries picks the walks a log filter reads: the trace's, the spans',
-// the projects' at the filter's levels, or every level.
+// logQueries picks the walks a log filter reads.
 func (database *Store) logQueries(filter model.LogFilter) []kv.Query[logRecord] {
 	limit := uint64(max(filter.BeforeID, 0))
 
-	// Logs received after the range (with some slack) cannot be in it.
 	if !filter.Until.IsZero() {
 		if end := database.sequenceAfter(filter.Until.Add(markSlack)); end > 0 && (limit == 0 || end < limit) {
 			limit = end
@@ -153,7 +158,6 @@ func (database *Store) logQueries(filter model.LogFilter) []kv.Query[logRecord] 
 	case filter.TraceID != "":
 		queries = append(queries, database.logs.By("trace", kv.Text(filter.TraceID)))
 	case len(filter.SpanIDs) > 0:
-		// A span named twice would list its logs twice.
 		spans := slices.Clone(filter.SpanIDs)
 		slices.Sort(spans)
 
@@ -179,7 +183,6 @@ func (database *Store) logQueries(filter model.LogFilter) []kv.Query[logRecord] 
 	return queries
 }
 
-// logMatches checks the conditions the chosen walks do not.
 func logMatches(record logRecord, filter model.LogFilter) bool {
 	switch {
 	case len(filter.ProjectIDs) > 0 && !slices.Contains(filter.ProjectIDs, record.ProjectID),
@@ -195,12 +198,8 @@ func logMatches(record logRecord, filter model.LogFilter) bool {
 	return true
 }
 
-// scanLogs visits the logs matching the filter, newest first, until visit
-// returns false. The walks never name a log twice: a log has one trace, one
-// span, one project and one level.
+// scanLogs visits matching logs newest first until visit returns false.
 func (database *Store) scanLogs(filter model.LogFilter, visit func(record logRecord) bool) error {
-	// Logs received well before the range cannot be in it: the scan stops
-	// at the first of them.
 	var stop uint64
 
 	if !filter.Since.IsZero() {
@@ -224,7 +223,6 @@ func logView(record logRecord) model.LogRecord {
 	}
 }
 
-// ListLogs returns a page of the logs matching the filter, newest first.
 func (database *Store) ListLogs(_ context.Context, filter model.LogFilter) ([]model.LogRecord, error) {
 	logs := []model.LogRecord{}
 	skip := max(filter.Offset, 0)
@@ -244,8 +242,6 @@ func (database *Store) ListLogs(_ context.Context, filter model.LogFilter) ([]mo
 	return logs, err
 }
 
-// CountLogs counts the logs matching the filter up to LogCountLimit; more
-// says there are more than that.
 func (database *Store) CountLogs(_ context.Context, filter model.LogFilter) (int, bool, error) {
 	count := 0
 
@@ -262,8 +258,6 @@ func (database *Store) CountLogs(_ context.Context, filter model.LogFilter) (int
 	return count, false, err
 }
 
-// IssuesForLogs finds, for each log, the issue of an error of the same
-// request: an event of the same trace whose span or parent span is the log's.
 func (database *Store) IssuesForLogs(_ context.Context, logs []model.LogRecord) (map[int64]model.LogIssue, error) {
 	result := map[int64]model.LogIssue{}
 	bySpan := map[string]model.LogIssue{} // trace + "/" + span
@@ -312,7 +306,6 @@ func (database *Store) IssuesForLogs(_ context.Context, logs []model.LogRecord) 
 	return result, nil
 }
 
-// ranksOf are the ranks of the levels a filter names (all for none).
 func ranksOf(levels []string) []byte {
 	if len(levels) == 0 {
 		return allRanks

@@ -7,117 +7,31 @@ import (
 	"time"
 )
 
-// Retention limits how much data is kept. A zero value disables that limit.
+// Retention: how much data is kept. The database stays under
+// MaxDatabaseBytes: the cleanup (package database) deletes the least useful data
+// first when it nears it.
 type Retention struct {
-	// Events older than this are deleted (by the time the server received them).
-	Events time.Duration
-	// Logs older than this are deleted. Logs usually outnumber events many
-	// times, so they are kept for a shorter time by default.
-	Logs time.Duration
-	// EventsPerIssue keeps only the newest events of every issue; the issue's
-	// event count still counts all of them.
-	EventsPerIssue int
-	// LogsPerMessage keeps only the newest logs of each repeated message (the
-	// same text with other numbers or IDs), so a line logged in a loop cannot
-	// fill the database.
-	LogsPerMessage int
-	// MaxDatabaseBytes: above it, the oldest events and logs are deleted.
-	MaxDatabaseBytes int64
-	// Issues not seen for this long are deleted with their events. Until
-	// then an issue is never deleted and keeps its latest event.
-	Issues time.Duration
+	MaxDatabaseBytes int64 // 0: no limit
 }
 
-// RetentionOverride is a project's own retention; nil fields use the global value.
-type RetentionOverride struct {
-	Events         *time.Duration
-	Logs           *time.Duration
-	Issues         *time.Duration
-	EventsPerIssue *int
-	LogsPerMessage *int
-}
-
-// For returns the retention of a project: its overrides on top of these settings.
-func (retention Retention) For(override RetentionOverride) Retention {
-	if override.Events != nil {
-		retention.Events = *override.Events
-	}
-
-	if override.Logs != nil {
-		retention.Logs = *override.Logs
-	}
-
-	if override.Issues != nil {
-		retention.Issues = *override.Issues
-	}
-
-	if override.EventsPerIssue != nil {
-		retention.EventsPerIssue = *override.EventsPerIssue
-	}
-
-	if override.LogsPerMessage != nil {
-		retention.LogsPerMessage = *override.LogsPerMessage
-	}
-
-	return retention
-}
-
-// Retention defaults.
 const (
-	DefaultRetentionEvents         = 14 * 24 * time.Hour
-	DefaultRetentionLogs           = 7 * 24 * time.Hour
-	DefaultRetentionEventsPerIssue = 20
-	DefaultMaxDatabaseBytes        = 2 << 30 // 2 GB
-	DefaultRetentionIssues         = 90 * 24 * time.Hour
-	DefaultRetentionLogsPerMessage = 10
+	// LogsPerMessage caps a message logged over and over (the same text
+	// with other numbers or IDs) as it is written: its newest copies stay.
+	LogsPerMessage = 10
+
+	// The cleanup (database/cleanup.go; order in docs/configuration.md).
+	CleanupStartPercent = 100
+	CleanupStopPercent  = 80
+	CleanupAge          = 30 * 24 * time.Hour
+	CleanupRecentAge    = 7 * 24 * time.Hour
+	OldEventsPerIssue   = 20
 )
 
+// DefaultMaxDatabaseBytes is the default of MAX_DATABASE_SIZE.
+const DefaultMaxDatabaseBytes = 2 << 30 // 2 GB
+
 func parseRetention(getenv func(string) string) (Retention, error) {
-	retention := Retention{
-		Events:           DefaultRetentionEvents,
-		Logs:             DefaultRetentionLogs,
-		EventsPerIssue:   DefaultRetentionEventsPerIssue,
-		MaxDatabaseBytes: DefaultMaxDatabaseBytes,
-		Issues:           DefaultRetentionIssues,
-		LogsPerMessage:   DefaultRetentionLogsPerMessage,
-	}
-
-	for _, setting := range []struct {
-		name   string
-		target *time.Duration
-	}{
-		{"RETENTION_EVENTS", &retention.Events},
-		{"RETENTION_LOGS", &retention.Logs},
-		{"RETENTION_ISSUES", &retention.Issues},
-	} {
-		if value := strings.TrimSpace(getenv(setting.name)); value != "" {
-			duration, err := ParseOptionalDuration(value)
-
-			if err != nil {
-				return retention, fmt.Errorf("%s: %w", setting.name, err)
-			}
-
-			*setting.target = duration
-		}
-	}
-
-	for _, setting := range []struct {
-		name   string
-		target *int
-	}{
-		{"RETENTION_EVENTS_PER_ISSUE", &retention.EventsPerIssue},
-		{"RETENTION_LOGS_PER_MESSAGE", &retention.LogsPerMessage},
-	} {
-		if value := strings.TrimSpace(getenv(setting.name)); value != "" {
-			count, err := ParseCount(value)
-
-			if err != nil {
-				return retention, fmt.Errorf("%s: %w", setting.name, err)
-			}
-
-			*setting.target = count
-		}
-	}
+	retention := Retention{MaxDatabaseBytes: DefaultMaxDatabaseBytes}
 
 	if value := strings.TrimSpace(getenv("MAX_DATABASE_SIZE")); value != "" {
 		size, err := parseSize(value)

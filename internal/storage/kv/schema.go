@@ -7,11 +7,8 @@ import (
 	"sync"
 )
 
-// Schema registers the key prefixes of a database: every collection and
-// index, and the raw prefixes the code above keeps for itself (counters,
-// time marks). A prefix that is another one's prefix would mix their keys
-// in a walk, so registering one panics: schemas are built when the program
-// starts, and a conflict stops it there.
+// Schema registers the key prefixes of a database; registering one that
+// overlaps another panics, so a conflict stops the program at start.
 type Schema struct {
 	mutex    sync.Mutex
 	prefixes map[string]string // prefix -> what owns it
@@ -45,7 +42,7 @@ func (schema *Schema) register(prefix, owner string) {
 	schema.prefixes[prefix] = owner
 }
 
-// Prefixes lists the registered prefixes in order, for tests and docs.
+// Prefixes lists the registered prefixes in order.
 func (schema *Schema) Prefixes() []string {
 	schema.mutex.Lock()
 	defer schema.mutex.Unlock()

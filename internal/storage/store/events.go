@@ -33,7 +33,7 @@ type NewEvent struct {
 	ReceivedAt   time.Time // when the server got it
 	Payload      []byte    // full event JSON
 	// KeepEvents > 0 keeps only the newest KeepEvents events of the issue:
-	// older ones are deleted as this one is saved (RETENTION_EVENTS_PER_ISSUE).
+	// older ones are deleted as this one is saved.
 	KeepEvents int
 }
 

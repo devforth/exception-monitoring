@@ -563,6 +563,12 @@ func TestDeliveryLog(t *testing.T) {
 		}
 	}
 
+	summary := `{"Count":12,"Window":60000000000,"Items":[{"Kind":"new_issue","Project":"backend","Title":"Error: disk is full","IssueID":8}]}`
+
+	if err := database.EnqueueOutbox(ctx, []string{"2"}, "summary", []byte(summary), nil, now); err != nil {
+		t.Fatal(err)
+	}
+
 	if err := database.MarkOutboxRetry(ctx, 1, "slack: 500 internal_error", now.Add(time.Minute), now); err != nil {
 		t.Fatal(err)
 	}
@@ -579,7 +585,9 @@ func TestDeliveryLog(t *testing.T) {
 
 	log := server.page("/notifications/log")
 
-	for _, want := range []string{"Broken chat", "Working chat", `href="/issues/7">Error: queue is full</a>`, "retrying", "slack: 500 internal_error", `delivery-sent`} {
+	// A summary opens the issues it stood for in a popup.
+	for _, want := range []string{"Broken chat", "Working chat", `href="/issues/7">Error: queue is full</a>`, "retrying", "slack: 500 internal_error", `delivery-sent`,
+		`popovertarget="summary-3">12 more issues in the last 1m0s</button>`, `<div popover id="summary-3"`, `href="/issues/8">Error: disk is full</a>`, "and 11 more not listed"} {
 		if !strings.Contains(log, want) {
 			t.Errorf("delivery log is missing %q", want)
 		}

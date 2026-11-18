@@ -5,21 +5,6 @@ import (
 	"time"
 )
 
-func TestKeptFor(t *testing.T) {
-	for duration, want := range map[time.Duration]string{
-		0:                   "forever",
-		24 * time.Hour:      "1 day",
-		30 * 24 * time.Hour: "30 days",
-		36 * time.Hour:      "36 hours",
-		12 * time.Hour:      "12 hours",
-		15 * time.Minute:    "15 minutes",
-	} {
-		if got := KeptFor(duration); got != want {
-			t.Errorf("KeptFor(%v) = %q, want %q", duration, got, want)
-		}
-	}
-}
-
 func TestTimeAgo(t *testing.T) {
 	now := time.Now()
 
@@ -53,17 +38,13 @@ func TestTimeAgo(t *testing.T) {
 	}
 }
 
-func TestShortAndCountOrAll(t *testing.T) {
+func TestShort(t *testing.T) {
 	if got := Short("0123456789abcdef", 8); got != "01234567" {
 		t.Errorf("Short = %q", got)
 	}
 
 	if got := Short("abc", 8); got != "abc" {
 		t.Errorf("Short of a short text = %q", got)
-	}
-
-	if CountOrAll(0) != "all" || CountOrAll(50) != "50" {
-		t.Errorf("CountOrAll = %q, %q", CountOrAll(0), CountOrAll(50))
 	}
 }
 

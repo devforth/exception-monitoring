@@ -10,18 +10,18 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
-	"github.com/devforth/exception-monitoring/docs"
+	"github.com/devforth/exception-monitoring/internal/storage/store"
 
 	"github.com/devforth/exception-monitoring/internal/fixtures"
 	"github.com/devforth/exception-monitoring/internal/platform/config"
-	"github.com/devforth/exception-monitoring/internal/storage/store"
 )
 
 var dsnPattern = regexp.MustCompile(`http://([0-9a-f]{32})@example\.com/(\d+)`)
 
 // A project added in the UI gets a DSN that works at once, without a restart;
-// its retention can be set, and deleting it removes its data.
+// its settings can be changed, and deleting it removes its data.
 func TestProjectLifecycle(t *testing.T) {
 	database := openDatabase(t)
 	server := startServer(t, database, "admin", password)
@@ -36,7 +36,7 @@ func TestProjectLifecycle(t *testing.T) {
 	}
 
 	created := server.post("/projects", url.Values{
-		"name": {"mobile"}, "retention_logs": {"3d"}, "retention_logs_per_message": {"10"},
+		"name": {"mobile"}, "color": {"#123456"},
 		"event_level": {"fatal", "error"}, "log_level": {"error", "warn"},
 	})
 
@@ -47,7 +47,7 @@ func TestProjectLifecycle(t *testing.T) {
 	page := server.page(created.Header().Get("Location"))
 	match := dsnPattern.FindStringSubmatch(page)
 
-	if match == nil || !strings.Contains(page, `name="retention_logs" value="3d"`) || !strings.Contains(page, `name="retention_logs_per_message" value="10"`) {
+	if match == nil || !strings.Contains(page, `name="color" value="#123456"`) {
 		t.Fatalf("new project page:\n%s", page)
 	}
 
@@ -78,16 +78,13 @@ func TestProjectLifecycle(t *testing.T) {
 		t.Fatal("level checkboxes")
 	}
 
-	if list := server.page("/projects"); !strings.Contains(list, ">logs 3 days, 10 logs per message</td>") {
-		t.Fatalf("projects list:\n%s", list)
-	}
-
-	// Empty fields go back to the defaults.
+	// Levels left out go back to unchecked; the color is kept when not sent.
 	if response := server.post("/projects/"+id, url.Values{"name": {"mobile-app"}, "event_level": {"error"}}); response.Code != http.StatusSeeOther {
 		t.Fatalf("update: %d %s", response.Code, response.Body)
 	}
 
-	if page := server.page("/projects/" + id); !strings.Contains(page, `name="retention_logs" value=""`) || !strings.Contains(page, `value="mobile-app"`) {
+	if page := server.page("/projects/" + id); !strings.Contains(page, `name="color" value="#123456"`) || !strings.Contains(page, `value="mobile-app"`) ||
+		strings.Contains(page, `name="event_level" value="fatal" checked`) {
 		t.Fatalf("after update:\n%s", page)
 	}
 
@@ -115,7 +112,7 @@ func TestProjectLifecycle(t *testing.T) {
 }
 
 // A project from PROJECTS keeps the name and key set there: the form changes
-// only its retention, and it cannot be deleted in the UI.
+// only its color and levels, and it cannot be deleted in the UI.
 func TestProjectFromEnv(t *testing.T) {
 	server := newTestServer(t, password)
 	server.login()
@@ -126,11 +123,11 @@ func TestProjectFromEnv(t *testing.T) {
 		t.Fatalf("project from env:\n%s", page)
 	}
 
-	if response := server.post("/projects/1", url.Values{"name": {"renamed"}, "retention_events": {"90d"}}); response.Code != http.StatusSeeOther {
+	if response := server.post("/projects/1", url.Values{"name": {"renamed"}, "color": {"#123456"}}); response.Code != http.StatusSeeOther {
 		t.Fatalf("update: %d %s", response.Code, response.Body)
 	}
 
-	if page := server.page("/projects/1"); !strings.Contains(page, "<h1>backend</h1>") || !strings.Contains(page, `name="retention_events" value="90d"`) {
+	if page := server.page("/projects/1"); !strings.Contains(page, "<h1>backend</h1>") || !strings.Contains(page, `name="color" value="#123456"`) {
 		t.Fatalf("after update:\n%s", page)
 	}
 
@@ -138,18 +135,17 @@ func TestProjectFromEnv(t *testing.T) {
 		t.Fatalf("delete from env: %d", response.Code)
 	}
 
-	if response := server.post("/projects/1", url.Values{"retention_events": {"forever"}}); response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), "Enter a period") {
-		t.Fatalf("invalid retention: %d", response.Code)
+	if response := server.post("/projects/1", url.Values{"color": {"red"}}); response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), "Choose a color") {
+		t.Fatalf("invalid color: %d", response.Code)
 	}
 }
 
-// Levels to record and Retention start closed, their headings showing the
-// values set inside; a refused retention value opens its section.
+// Levels to record starts closed, its heading showing the values set inside.
 func TestProjectFormSectionsShowTheirValues(t *testing.T) {
 	server := newTestServer(t, password)
 	server.login()
 
-	if response := server.post("/projects/1", url.Values{"retention_events": {"90d"}, "event_level": {"fatal"}}); response.Code != http.StatusSeeOther {
+	if response := server.post("/projects/1", url.Values{"event_level": {"fatal"}}); response.Code != http.StatusSeeOther {
 		t.Fatalf("update: %d %s", response.Code, response.Body)
 	}
 
@@ -165,23 +161,9 @@ func TestProjectFormSectionsShowTheirValues(t *testing.T) {
 		t.Errorf("levels summary: %v", summary)
 	}
 
-	if !strings.Contains(page, `data-summary-field="retention_events" data-summary-label="events" data-summary-zero="forever">events 90d</span>`) ||
-		!strings.Contains(page, `data-summary-field="retention_logs" data-summary-label="logs" data-summary-zero="forever" class="muted" title="Default">logs `) {
-		t.Error("the retention summary does not show the own and the default values")
-	}
-
-	// Each field explains itself with the text of the docs: retention from
-	// configuration.md, the others from ui.md.
-	hint, _ := docs.Setting("RETENTION_EVENTS")
-
-	if !strings.Contains(page, `title="`+hint+`"`) || strings.Count(page, `class="hint"`) != 9 {
-		t.Error("the retention fields lack their hints")
-	}
-
-	refused := server.post("/projects/1", url.Values{"retention_logs": {"forever"}}).Body.String()
-
-	if !strings.Contains(refused, `<details class="form-section" open>`) {
-		t.Error("the section with a refused value stays closed")
+	// Each field explains itself with the text of ui.md.
+	if strings.Count(page, `class="hint"`) != 4 {
+		t.Errorf("hints: %d", strings.Count(page, `class="hint"`))
 	}
 }
 
@@ -260,9 +242,41 @@ func TestProjectsPage(t *testing.T) {
 		t.Fatalf("projects page must show the DSN:\n%s", projects)
 	}
 
-	// The storage section: size against the limit and what retention keeps.
-	for _, want := range []string{" of 2.0 GB", "<meter", "By default events are kept 30 days, logs 1 day; all events per issue.", "has not happened for 365 days"} {
+	// The storage section: size against the limit and how it is cleaned.
+	for _, want := range []string{" of 2.0 GB", "<meter", "until the database is at 80%: old logs first, errors last"} {
 		if !strings.Contains(projects, want) {
+			t.Errorf("projects page is missing %q", want)
+		}
+	}
+}
+
+// The Projects page lists the latest cleanups; the steps of a run open in a popup.
+func TestCleanupHistoryOnProjectsPage(t *testing.T) {
+	database := openDatabase(t)
+	cleaner, ok := database.(interface {
+		Cleanup(ctx context.Context, maxBytes int64) (store.CleanupRun, error)
+	})
+
+	if !ok {
+		t.Skip("the cleanup by size runs on the key-value store (STORE=kv)")
+	}
+
+	ctx := context.Background()
+
+	if err := database.SaveLogs(ctx, []store.NewLog{{ProjectID: 1, Timestamp: time.Now(), Level: "info", Body: "a log to clean"}}, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := cleaner.Cleanup(ctx, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	server := startServer(t, database, "admin", password)
+	server.login()
+	page := server.page("/projects")
+
+	for _, want := range []string{"Recent cleanups", "cleanup-done", `popovertarget="cleanup-`, "logs below error", `data-project="backend"`, "1 logs"} {
+		if !strings.Contains(page, want) {
 			t.Errorf("projects page is missing %q", want)
 		}
 	}

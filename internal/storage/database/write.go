@@ -9,8 +9,7 @@ import (
 	model "github.com/devforth/exception-monitoring/internal/storage/store"
 )
 
-// Envelope is what one inbox entry holds, ready to store. Sequence 0 is
-// not from the inbox (SaveEvent, SaveLogs).
+// Envelope is an inbox entry ready to store; Sequence 0 is not from the inbox.
 type Envelope struct {
 	Sequence       uint64
 	InboxSize      int // bytes of the inbox entry, freed once stored
@@ -19,14 +18,12 @@ type Envelope struct {
 	LogsPerMessage int // keep the newest of a repeated message (0: all)
 }
 
-// Write stores envelopes in one batch, together with the deletion of their
-// inbox entries, and returns what each event changed.
+// Write stores envelopes and deletes their inbox entries in one batch.
 func (database *Store) Write(envelopes []Envelope) ([][]model.SaveResult, error) {
 	results := make([][]model.SaveResult, len(envelopes))
 	freed := 0
 
-	// Copies of a repeated message beyond the newest it keeps are not
-	// written at all: the same batch would delete them again.
+	// Copies of a repeated message this batch would delete are not written.
 	copies := map[string]int{}
 
 	for _, envelope := range envelopes {
@@ -84,7 +81,6 @@ func (database *Store) Write(envelopes []Envelope) ([][]model.SaveResult, error)
 	return results, nil
 }
 
-// SaveEvent stores one event and creates or updates its issue.
 func (database *Store) SaveEvent(_ context.Context, event model.NewEvent) (model.SaveResult, error) {
 	results, err := database.Write([]Envelope{{Events: []model.NewEvent{event}}})
 
@@ -95,23 +91,18 @@ func (database *Store) SaveEvent(_ context.Context, event model.NewEvent) (model
 	return results[0][0], nil
 }
 
-// SaveLogs stores logs; with keepPerMessage > 0 the older copies of each
-// repeated message beyond it are deleted.
 func (database *Store) SaveLogs(_ context.Context, logs []model.NewLog, keepPerMessage int) error {
 	_, err := database.Write([]Envelope{{Logs: logs, LogsPerMessage: keepPerMessage}})
 
 	return err
 }
 
-// SetIssueStatus changes an issue's status.
 func (database *Store) SetIssueStatus(ctx context.Context, issueID int64, status string, actor model.Actor) error {
 	_, err := database.SetIssuesStatus(ctx, []int64{issueID}, status, actor)
 
 	return err
 }
 
-// SetIssuesStatus applies one status to a batch atomically: a missing id
-// changes nothing (ErrNotFound). Only real changes are recorded, with actor.
 func (database *Store) SetIssuesStatus(_ context.Context, issueIDs []int64, status string, actor model.Actor) ([]model.Issue, error) {
 	ids, err := model.NormalizeIssueIDs(issueIDs)
 
@@ -163,8 +154,6 @@ func (database *Store) SetIssuesStatus(_ context.Context, issueIDs []int64, stat
 	return issues, err
 }
 
-// DeleteIssue removes the issue with its events and status history. If the
-// error happens again, it opens a new issue.
 func (database *Store) DeleteIssue(_ context.Context, issueID int64) error {
 	return database.update(func(writer *batchWriter) error {
 		issue, ok := writer.issue(issueID)
@@ -173,34 +162,37 @@ func (database *Store) DeleteIssue(_ context.Context, issueID int64) error {
 			return model.ErrNotFound
 		}
 
-		err := database.events.Primary(kv.U64(uint64(issueID))).Each(database.db, func(entry kv.Entry[eventRecord]) (bool, error) {
-			writer.deleteEvent(entry)
-
-			return true, nil
-		})
-
-		if err != nil {
+		if err := writer.deleteIssueEvents(issue); err != nil {
 			return err
 		}
 
-		err = database.status.Primary(kv.U64(uint64(issueID))).Each(database.db, func(entry kv.Entry[statusRecord]) (bool, error) {
-			database.status.DeleteEntry(writer.batch, entry)
-
-			return true, nil
-		})
-
-		if err != nil {
-			return err
-		}
-
-		delete(writer.issues, issueID)
-		writer.deleted[issueID] = issue
-
-		return nil
+		return writer.deleteIssue(issue)
 	})
 }
 
-// IssueStatusHistory lists the status changes of an issue, newest first.
+func (writer *batchWriter) deleteIssueEvents(issue *issueRecord) error {
+	return writer.database.events.Primary(kv.U64(uint64(issue.ID))).Each(writer.database.db, func(entry kv.Entry[eventRecord]) (bool, error) {
+		writer.deleteEvent(entry)
+
+		return true, nil
+	})
+}
+
+// deleteIssue deletes an issue and its history; its events must be gone.
+func (writer *batchWriter) deleteIssue(issue *issueRecord) error {
+	err := writer.database.status.Primary(kv.U64(uint64(issue.ID))).Each(writer.database.db, func(entry kv.Entry[statusRecord]) (bool, error) {
+		writer.database.status.DeleteEntry(writer.batch, entry)
+
+		return true, nil
+	})
+
+	delete(writer.issues, issue.ID)
+	writer.deleted[issue.ID] = issue
+	writer.count(issue.ProjectID).Issues++
+
+	return err
+}
+
 func (database *Store) IssueStatusHistory(_ context.Context, issueID int64) ([]model.StatusChange, error) {
 	changes := []model.StatusChange{}
 
@@ -213,8 +205,7 @@ func (database *Store) IssueStatusHistory(_ context.Context, issueID int64) ([]m
 	return changes, err
 }
 
-// batchWriter collects one batch. Issues it changes are copies, put in
-// memory only once the batch is written.
+// batchWriter collects one batch; the issues it changes are copies until it is written.
 type batchWriter struct {
 	database *Store
 	batch    *kv.Batch
@@ -223,20 +214,17 @@ type batchWriter struct {
 	deleted  map[int64]*issueRecord
 	created  map[string]*issueRecord // new, by fingerprint key
 	messages map[string]*messageGroup
-	// events written by this batch, per issue, oldest first: newer than the
-	// stored ones, so a trim reaches them last
+	// written are this batch's events per issue, oldest first.
 	written map[int64][]eventRecord
-	// removed are the events this batch deletes: reads of the database
-	// still see them until the batch is written, so a later trim skips them.
-	removed map[string]bool
-	// newMark is the time mark the batch writes, if any.
-	newMark *timeMark
-	// messageStart moves the start of repeated messages once written.
+	// removed are events this batch deletes; reads still see them until it is written.
+	removed      map[string]bool
+	newMark      *timeMark
 	messageStart map[string]uint64
+	// counted is what this batch deletes per project, inside the cleanup.
+	counted map[int]*CleanupCounts
 }
 
-// update runs change in one batch of the database, then puts what it
-// changed in memory. Nothing is written or kept when change fails.
+// update runs change in one batch; its changes reach memory before the next batch.
 func (database *Store) update(change func(writer *batchWriter) error) error {
 	writer := &batchWriter{
 		database: database, issues: map[int64]*issueRecord{}, stored: map[int64]*issueRecord{}, deleted: map[int64]*issueRecord{},
@@ -253,6 +241,8 @@ func (database *Store) update(change func(writer *batchWriter) error) error {
 			return err
 		}
 
+		batch.AfterWrite(writer.apply)
+
 		return writer.finish(first)
 	})
 
@@ -260,13 +250,12 @@ func (database *Store) update(change func(writer *batchWriter) error) error {
 		return err
 	}
 
-	writer.apply()
+	database.noteWritten()
 
 	return nil
 }
 
-// finish adds what the changes imply: trims of repeated logs, the changed
-// issues and the time mark.
+// finish adds the trims of repeated logs, the changed issues and the time mark.
 func (writer *batchWriter) finish(first uint64) error {
 	if err := writer.trimMessages(); err != nil {
 		return err
@@ -288,8 +277,7 @@ func (writer *batchWriter) finish(first uint64) error {
 		issue.storedSize = written.Size
 	}
 
-	// By key: the stored value says what to take off the counter, while
-	// this batch's copy of the issue has already lost its events.
+	// By key: the copy has lost its events, the stored value has the size.
 	for _, issue := range writer.deleted {
 		if _, err := writer.database.issues.DeleteKey(writer.batch, writer.database.issues.KeyOf(*issue)); err != nil {
 			return err
@@ -299,13 +287,11 @@ func (writer *batchWriter) finish(first uint64) error {
 	return writer.mark(writer.database.now(), first)
 }
 
-// apply puts the written issues and mark in memory.
 func (writer *batchWriter) apply() {
 	if writer.newMark != nil {
 		writer.database.addMark(*writer.newMark)
 	}
 
-	// Only a start: forgetting them all costs one longer walk per message.
 	if len(writer.database.messageStart) > maxMessageStarts {
 		clear(writer.database.messageStart)
 	}
@@ -326,7 +312,6 @@ func (writer *batchWriter) apply() {
 	}
 }
 
-// issue returns this batch's copy of an issue.
 func (writer *batchWriter) issue(id int64) (*issueRecord, bool) {
 	if issue, ok := writer.issues[id]; ok {
 		return issue, true
@@ -360,7 +345,7 @@ func (writer *batchWriter) statusChange(issue *issueRecord, to string, actor mod
 	})
 }
 
-// findIssue is this batch's issue of a fingerprint, or nil for a new one.
+// findIssue returns nil for a new issue.
 func (writer *batchWriter) findIssue(fingerprint string) *issueRecord {
 	if issue := writer.created[fingerprint]; issue != nil {
 		return issue
@@ -382,7 +367,6 @@ func (writer *batchWriter) findIssue(fingerprint string) *issueRecord {
 func (writer *batchWriter) event(event model.NewEvent) (model.SaveResult, error) {
 	var result model.SaveResult
 
-	// A retry of the SDK, also one earlier in this batch.
 	if taken, err := writer.database.events.Taken(writer.batch, "id", eventIDKey(event.ProjectID, event.EventID)); err != nil || taken {
 		result.Duplicate = taken
 
@@ -418,7 +402,6 @@ func (writer *batchWriter) event(event model.NewEvent) (model.SaveResult, error)
 		result.Regression = true
 	}
 
-	// Title, culprit and level follow the latest event.
 	issue.Title, issue.Culprit = event.IssueText()
 	issue.Level = event.Level
 	issue.EventCount++
@@ -460,8 +443,7 @@ func (writer *batchWriter) event(event model.NewEvent) (model.SaveResult, error)
 	return result, nil
 }
 
-// deleteEvent deletes a stored event with its index keys, once per batch,
-// and takes it off its issue's counts.
+// deleteEvent deletes a stored event once per batch and uncounts it.
 func (writer *batchWriter) deleteEvent(entry kv.Entry[eventRecord]) {
 	if writer.removed[string(entry.Key)] {
 		return
@@ -469,14 +451,14 @@ func (writer *batchWriter) deleteEvent(entry kv.Entry[eventRecord]) {
 
 	writer.removed[string(entry.Key)] = true
 	writer.database.events.DeleteEntry(writer.batch, entry)
+	writer.count(entry.Record.ProjectID).Events++
 
 	if issue, ok := writer.issue(entry.Record.IssueID); ok {
 		issue.removeEvent(entry.Record.ReceivedAt)
 	}
 }
 
-// trimIssue deletes the oldest events of an issue beyond keep: the stored
-// ones first, then the ones this batch wrote.
+// trimIssue deletes an issue's oldest events beyond keep.
 func (writer *batchWriter) trimIssue(issue *issueRecord, keep int) error {
 	err := writer.database.events.Primary(kv.U64(uint64(issue.ID))).Each(writer.database.db, func(entry kv.Entry[eventRecord]) (bool, error) {
 		writer.deleteEvent(entry)
@@ -503,7 +485,6 @@ func (writer *batchWriter) trimIssue(issue *issueRecord, keep int) error {
 	return nil
 }
 
-// messageGroup is the logs of one repeated message written by this batch.
 type messageGroup struct {
 	projectID   int
 	fingerprint string
@@ -546,11 +527,9 @@ func (writer *batchWriter) log(record model.NewLog, keepPerMessage int) error {
 	return nil
 }
 
-// trimMessages keeps the newest copies of each repeated message: the oldest
-// stored ones go first, then the oldest of this batch.
+// trimMessages keeps the newest copies of each repeated message.
 func (writer *batchWriter) trimMessages() error {
 	for name, group := range writer.messages {
-		// The keys alone count the stored copies; only those deleted are read.
 		var stored []kv.Key // oldest first
 
 		query := writer.database.logs.By("message", messageParts(group.projectID, group.fingerprint)...)
@@ -583,7 +562,6 @@ func (writer *batchWriter) trimMessages() error {
 			}
 		}
 
-		// The oldest copy left is where the next trim starts.
 		switch kept := max(excess, 0); {
 		case kept < len(stored):
 			writer.messageStart[name] = sequenceOf(stored[kept])
@@ -595,6 +573,5 @@ func (writer *batchWriter) trimMessages() error {
 	return nil
 }
 
-// maxMessageStarts bounds the messages whose start is remembered (about
-// 50 bytes each).
+// maxMessageStarts bounds messageStart (about 50 bytes each).
 const maxMessageStarts = 100_000
