@@ -15,6 +15,7 @@ import (
 	"runtime/debug"
 	"runtime/pprof"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -361,6 +362,9 @@ func sendBurst(t *testing.T, name string, handler *Handler, projects config.Proj
 // The target of docs/storage-plan.md: 50 DSNs sending 1000 errors each at
 // once, through SQLite as today and through the inbox and the key-value store. Run with
 // INGEST_LOAD=1 go test ./internal/ingest -run TestIngestLoad -v
+// (INGEST_LOAD=kv for the key-value store only). The database is in a
+// temporary directory, on tmpfs on many systems, where a disk sync costs
+// nothing: INGEST_DIR=<dir> puts it on the disk to measure.
 func TestIngestLoad(t *testing.T) {
 	if os.Getenv("INGEST_LOAD") == "" {
 		t.Skip("set INGEST_LOAD=1")
@@ -400,9 +404,22 @@ func TestIngestLoad(t *testing.T) {
 		_ = database.Close()
 	}
 
-	// The plan: inbox, processors, writer, key-value store.
+	// The plan: inbox, processors, writer, key-value store. Events are not
+	// capped as they are written (the cleanup trims them); repeated log
+	// messages are.
 	{
 		dir := t.TempDir()
+
+		if parent := os.Getenv("INGEST_DIR"); parent != "" {
+			var err error
+
+			if dir, err = os.MkdirTemp(parent, "ingest-load-"); err != nil {
+				t.Fatal(err)
+			}
+
+			t.Cleanup(func() { _ = os.RemoveAll(dir) })
+		}
+
 		database, err := kvstore.Open(dir, nil)
 
 		if err != nil {
@@ -410,13 +427,17 @@ func TestIngestLoad(t *testing.T) {
 		}
 
 		handler := New(slog.New(slog.DiscardHandler), settings, projects, nil)
-		pipeline := NewPipeline(handler, database, StoreSink{Logger: slog.New(slog.DiscardHandler), Retention: retention})
+		pipeline := NewPipeline(handler, database, StoreSink{Logger: slog.New(slog.DiscardHandler), Retention: config.Retention{LogsPerMessage: logsPerMessage()}})
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan struct{})
 
 		go func() { defer close(done); pipeline.Run(ctx) }()
 
-		reports = append(reports, sendBurst(t, "kv: events", handler, projects, eventsPerProject, event, 20, pipeline.Stored).String())
+		// INGEST_ONLY=logs skips the events, to profile the logs alone.
+		if os.Getenv("INGEST_ONLY") != "logs" {
+			reports = append(reports, sendBurst(t, "kv: events", handler, projects, eventsPerProject, event, 20, pipeline.Stored).String())
+		}
+
 		before := pipeline.Stored()
 
 		reports = append(reports, sendBurst(t, "kv: logs (11 per envelope)", handler, projects, logsPerProject, logs, 0, func() int64 { return pipeline.Stored() - before }).String())
@@ -464,4 +485,18 @@ func (sink countingSink) StoreLogs(ctx context.Context, project config.Project, 
 	defer sink.counted.Add(1)
 
 	return sink.Sink.StoreLogs(ctx, project, logs)
+}
+
+// logsPerMessage is the cap on repeated log messages of the load test:
+// INGEST_REPEATS=0 turns it off to measure the write path alone (the test
+// sends the same 11 lines again and again, so with the cap nearly every log
+// is deleted as soon as it is written).
+func logsPerMessage() int {
+	if value := os.Getenv("INGEST_REPEATS"); value != "" {
+		limit, _ := strconv.Atoi(value)
+
+		return limit
+	}
+
+	return config.DefaultRetentionLogsPerMessage
 }

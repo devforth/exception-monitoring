@@ -17,6 +17,8 @@ import "errors"
 // store's library.
 type Engine interface {
 	Reader
+	// NewWriteBatch starts a batch of the engine's own kind (NewBatch).
+	NewWriteBatch() WriteBatch
 	// Write applies the batch atomically; sync waits until it is on disk.
 	Write(batch *Batch, sync bool) error
 	// Snapshot is a consistent view of the store as of now; release it.
@@ -36,6 +38,13 @@ type Reader interface {
 	Get(key []byte) ([]byte, error)
 	// Iterate walks the keys in [lower, upper); nil bounds are open.
 	Iterate(lower, upper []byte) Iterator
+}
+
+// WriteBatch is an engine's own batch: it copies what it is given once.
+type WriteBatch interface {
+	Put(key, value []byte)
+	Delete(key []byte)
+	Len() int
 }
 
 // Snapshot is a Reader fixed at one moment.

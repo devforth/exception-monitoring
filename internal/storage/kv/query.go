@@ -104,6 +104,41 @@ func (query Query[T]) Each(reader Reader, visit func(Entry[T]) (bool, error)) er
 	}
 }
 
+// Keys walks the primary keys of the records only, without reading the
+// records: for an index, the keys it points to. Where does not apply, since
+// it needs the records.
+func (query Query[T]) Keys(reader Reader, visit func(key Key) (bool, error)) error {
+	lower, upper := query.bounds()
+	iterator := reader.Iterate(lower, upper)
+	found := 0
+
+	move, valid := iterator.Next, iterator.First()
+
+	if query.newest {
+		move, valid = iterator.Prev, iterator.Last()
+	}
+
+	for ; valid; valid = move() {
+		key := iterator.Key()
+
+		if query.index != nil {
+			key = iterator.Value()
+		}
+
+		more, err := visit(bytes.Clone(key[len(query.collection.prefix):]))
+
+		if err != nil || !more {
+			return errors.Join(err, iterator.Close())
+		}
+
+		if found++; query.limit > 0 && found >= query.limit {
+			break
+		}
+	}
+
+	return iterator.Close()
+}
+
 // Cursor reads a walk one record at a time, for code that merges several
 // walks (Each is simpler otherwise).
 type Cursor[T any] struct {

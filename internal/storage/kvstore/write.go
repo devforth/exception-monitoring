@@ -25,6 +25,18 @@ func (database *Store) Write(envelopes []Envelope) ([][]model.SaveResult, error)
 	results := make([][]model.SaveResult, len(envelopes))
 	freed := 0
 
+	// Copies of a repeated message beyond the newest it keeps are not
+	// written at all: the same batch would delete them again.
+	copies := map[string]int{}
+
+	for _, envelope := range envelopes {
+		for _, record := range envelope.Logs {
+			if record.Fingerprint != "" && envelope.LogsPerMessage > 0 {
+				copies[fingerprintKey(record.ProjectID, record.Fingerprint)]++
+			}
+		}
+	}
+
 	err := database.update(func(writer *batchWriter) error {
 		for index, envelope := range envelopes {
 			for _, event := range envelope.Events {
@@ -38,6 +50,14 @@ func (database *Store) Write(envelopes []Envelope) ([][]model.SaveResult, error)
 			}
 
 			for _, record := range envelope.Logs {
+				if record.Fingerprint != "" && envelope.LogsPerMessage > 0 {
+					group := fingerprintKey(record.ProjectID, record.Fingerprint)
+
+					if copies[group]--; copies[group] >= envelope.LogsPerMessage {
+						continue
+					}
+				}
+
 				if err := writer.log(record, envelope.LogsPerMessage); err != nil {
 					return err
 				}
@@ -199,6 +219,7 @@ type batchWriter struct {
 	database *Store
 	batch    *kv.Batch
 	issues   map[int64]*issueRecord // changed by this batch
+	stored   map[int64]*issueRecord // their versions as stored, for Write
 	deleted  map[int64]*issueRecord
 	created  map[string]*issueRecord // new, by fingerprint key
 	messages map[string]*messageGroup
@@ -210,14 +231,18 @@ type batchWriter struct {
 	removed map[string]bool
 	// newMark is the time mark the batch writes, if any.
 	newMark *timeMark
+	// messageStart moves the start of repeated messages once written.
+	messageStart map[string]uint64
 }
 
 // update runs change in one batch of the database, then puts what it
 // changed in memory. Nothing is written or kept when change fails.
 func (database *Store) update(change func(writer *batchWriter) error) error {
 	writer := &batchWriter{
-		database: database, issues: map[int64]*issueRecord{}, deleted: map[int64]*issueRecord{}, created: map[string]*issueRecord{},
+		database: database, issues: map[int64]*issueRecord{}, stored: map[int64]*issueRecord{}, deleted: map[int64]*issueRecord{},
+		created:  map[string]*issueRecord{},
 		messages: map[string]*messageGroup{}, written: map[int64][]eventRecord{}, removed: map[string]bool{},
+		messageStart: map[string]uint64{},
 	}
 
 	err := database.db.Update(true, func(batch *kv.Batch) error {
@@ -247,10 +272,20 @@ func (writer *batchWriter) finish(first uint64) error {
 		return err
 	}
 
-	for _, issue := range writer.issues {
-		if err := writer.database.issues.Save(writer.batch, *issue); err != nil {
+	for id, issue := range writer.issues {
+		var previous *kv.Entry[issueRecord]
+
+		if stored := writer.stored[id]; stored != nil {
+			previous = &kv.Entry[issueRecord]{Record: *stored, Size: stored.storedSize}
+		}
+
+		written, err := writer.database.issues.Write(writer.batch, *issue, previous)
+
+		if err != nil {
 			return err
 		}
+
+		issue.storedSize = written.Size
 	}
 
 	// By key: the stored value says what to take off the counter, while
@@ -268,6 +303,15 @@ func (writer *batchWriter) finish(first uint64) error {
 func (writer *batchWriter) apply() {
 	if writer.newMark != nil {
 		writer.database.addMark(*writer.newMark)
+	}
+
+	// Only a start: forgetting them all costs one longer walk per message.
+	if len(writer.database.messageStart) > maxMessageStarts {
+		clear(writer.database.messageStart)
+	}
+
+	for group, start := range writer.messageStart {
+		writer.database.messageStart[group] = start
 	}
 
 	writer.database.issuesMutex.Lock()
@@ -298,6 +342,7 @@ func (writer *batchWriter) issue(id int64) (*issueRecord, bool) {
 
 	issue := stored.copy()
 	writer.issues[id] = issue
+	writer.stored[id] = stored
 
 	return issue, true
 }
@@ -504,13 +549,18 @@ func (writer *batchWriter) log(record model.NewLog, keepPerMessage int) error {
 // trimMessages keeps the newest copies of each repeated message: the oldest
 // stored ones go first, then the oldest of this batch.
 func (writer *batchWriter) trimMessages() error {
-	for _, group := range writer.messages {
-		var stored []kv.Entry[logRecord] // oldest first
+	for name, group := range writer.messages {
+		// The keys alone count the stored copies; only those deleted are read.
+		var stored []kv.Key // oldest first
 
 		query := writer.database.logs.By("message", messageParts(group.projectID, group.fingerprint)...)
 
-		err := query.Each(writer.database.db, func(entry kv.Entry[logRecord]) (bool, error) {
-			stored = append(stored, entry)
+		if start := writer.database.messageStart[name]; start > 0 {
+			query = query.From(kv.U64(start))
+		}
+
+		err := query.Keys(writer.database.db, func(key kv.Key) (bool, error) {
+			stored = append(stored, key)
 
 			return true, nil
 		})
@@ -521,8 +571,10 @@ func (writer *batchWriter) trimMessages() error {
 
 		excess := len(stored) + len(group.added) - group.keep
 
-		for _, entry := range stored[:max(0, min(excess, len(stored)))] {
-			writer.database.logs.DeleteEntry(writer.batch, entry)
+		for _, key := range stored[:max(0, min(excess, len(stored)))] {
+			if _, err := writer.database.logs.DeleteKey(writer.batch, key); err != nil {
+				return err
+			}
 		}
 
 		for _, record := range group.added[:max(0, min(excess-len(stored), len(group.added)))] {
@@ -530,7 +582,19 @@ func (writer *batchWriter) trimMessages() error {
 				return err
 			}
 		}
+
+		// The oldest copy left is where the next trim starts.
+		switch kept := max(excess, 0); {
+		case kept < len(stored):
+			writer.messageStart[name] = sequenceOf(stored[kept])
+		case kept-len(stored) < len(group.added):
+			writer.messageStart[name] = group.added[kept-len(stored)].Sequence
+		}
 	}
 
 	return nil
 }
+
+// maxMessageStarts bounds the messages whose start is remembered (about
+// 50 bytes each).
+const maxMessageStarts = 100_000

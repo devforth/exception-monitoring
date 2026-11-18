@@ -185,7 +185,9 @@ func (collection *Collection[T]) index(name string) *index[T] {
 // record already stored under the same key must go through Save, which
 // removes its old index keys.
 func (collection *Collection[T]) Insert(batch *Batch, record T) error {
-	return collection.write(batch, record, nil)
+	_, err := collection.Write(batch, record, nil)
+
+	return err
 }
 
 // Save writes a record, replacing the stored one under the same key: index
@@ -196,7 +198,7 @@ func (collection *Collection[T]) Save(batch *Batch, record T) error {
 
 	switch {
 	case errors.Is(err, ErrNotFound):
-		return collection.write(batch, record, nil)
+		return collection.Insert(batch, record)
 	case err != nil:
 		return err
 	}
@@ -207,21 +209,21 @@ func (collection *Collection[T]) Save(batch *Batch, record T) error {
 		return fmt.Errorf("kv: %s %x: %w", collection.name, key, err)
 	}
 
-	return collection.write(batch, record, &stored[T]{record: old, size: len(value)})
+	_, err = collection.Write(batch, record, &Entry[T]{Record: old, Size: len(value)})
+
+	return err
 }
 
-// stored is the version of a record being replaced.
-type stored[T any] struct {
-	record T
-	size   int
-}
-
-func (collection *Collection[T]) write(batch *Batch, record T, old *stored[T]) error {
+// Write writes record over previous, the version stored under its key (nil
+// when there is none), and returns what is stored now. It reads nothing:
+// Insert and Save are the usual ways in, Write is for a caller that keeps
+// the stored version itself (in memory) and its size.
+func (collection *Collection[T]) Write(batch *Batch, record T, old *Entry[T]) (Entry[T], error) {
 	key := collection.primaryKey(collection.KeyOf(record))
 	value, err := collection.definition.Encode(record)
 
 	if err != nil {
-		return fmt.Errorf("kv: %s: %w", collection.name, err)
+		return Entry[T]{}, fmt.Errorf("kv: %s: %w", collection.name, err)
 	}
 
 	keys := collection.indexKeys(record)
@@ -236,14 +238,14 @@ func (collection *Collection[T]) write(batch *Batch, record T, old *stored[T]) e
 		switch {
 		case errors.Is(err, ErrNotFound):
 		case err != nil:
-			return err
+			return Entry[T]{}, err
 		case !bytes.Equal(holder, key):
-			return ErrConflict{Collection: collection.name, Index: entry.index}
+			return Entry[T]{}, ErrConflict{Collection: collection.name, Index: entry.index}
 		}
 	}
 
 	if old != nil {
-		collection.uncount(batch, old.record, len(key), old.size)
+		collection.uncount(batch, old.Record, len(key), old.Size)
 
 		kept := map[string]bool{}
 
@@ -251,7 +253,7 @@ func (collection *Collection[T]) write(batch *Batch, record T, old *stored[T]) e
 			kept[string(entry.key)] = true
 		}
 
-		for _, entry := range collection.indexKeys(old.record) {
+		for _, entry := range collection.indexKeys(old.Record) {
 			if !kept[string(entry.key)] {
 				batch.Delete(entry.key)
 			}
@@ -266,7 +268,7 @@ func (collection *Collection[T]) write(batch *Batch, record T, old *stored[T]) e
 
 	collection.count(batch, record, recordSize(len(key), len(value), keys))
 
-	return nil
+	return Entry[T]{Key: key[len(collection.prefix):], Record: record, Size: len(value)}, nil
 }
 
 // Entry is a stored record as a walk reads it: its key (after the

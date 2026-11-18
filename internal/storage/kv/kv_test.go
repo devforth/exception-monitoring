@@ -320,7 +320,7 @@ func TestCheckFindsProblems(t *testing.T) {
 	store := newStore(t)
 	store.insert(t, item{ID: 1, Project: 1, Trace: "t"}, item{ID: 2, Project: 1})
 
-	batch := NewBatch(store.db)
+	batch := NewBatch(store.db.Engine)
 	batch.Delete(store.items.indexes["trace"].prefix.With(Text("t"), U64(1)))
 	batch.Delete(store.items.primaryKey(K(U64(2))))
 

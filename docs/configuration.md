@@ -13,6 +13,7 @@ Everything is set with environment variables (in Docker: `-e`, `env_file` or `en
 | `DATA_DIR` | `./data` (`/data` in the image) | Where the SQLite database (`database.db`) lives, and `secret.key` when `SECRET_KEY` is not set. Keep it on a volume. |
 | `PUBLIC_URL` | | The address users and SDKs reach the server at, e.g. `https://errors.example.com` (a path prefix is kept). Used for links in notifications, the DSNs on the Projects page and the MCP address. Without it, DSNs use the address the UI was opened with and notifications have no links. |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error`. `debug` also logs every request and every rejected envelope. |
+| `GOMEMLIMIT` | `200MiB` | The memory the server aims to stay under: the Go runtime collects garbage harder as it nears it. A soft limit, not a cap. Takes `MiB`, `GiB`. |
 | `LOG_FORMAT` | `auto` | `auto`: readable colored lines in a terminal, logfmt otherwise (e.g. `docker logs`). Or `pretty`, `text`, `json`. `NO_COLOR` turns colors off. |
 
 ## Projects

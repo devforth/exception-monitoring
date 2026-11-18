@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"strconv"
 	"syscall"
 	"time"
@@ -68,11 +69,21 @@ func main() {
 	}
 }
 
+// defaultMemoryLimit is the soft memory limit when GOMEMLIMIT is not set:
+// under it the Go garbage collector works harder instead of letting the
+// heap grow. A burst of 50 000 events peaked at ~230–320 MB without it and
+// ~200 MB with it, at a cost of 5–8% in speed (docs/storage-plan.md).
+const defaultMemoryLimit = 200 << 20
+
 func run() error {
 	settings, err := config.Load()
 
 	if err != nil {
 		return err
+	}
+
+	if os.Getenv("GOMEMLIMIT") == "" {
+		debug.SetMemoryLimit(defaultMemoryLimit)
 	}
 
 	logger := logging.New(os.Stderr, settings.LogFormat, settings.LogLevel)

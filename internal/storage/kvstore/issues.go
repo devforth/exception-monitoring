@@ -26,6 +26,10 @@ type issueRecord struct {
 	// day first, for "any event in the date range". One entry per day, not
 	// per event, so an issue with a million events stays small.
 	EventDays []dayCount `json:"event_days"`
+
+	// storedSize is the size of the stored value, so a change is written
+	// without reading the old version back (kv.Collection.Write).
+	storedSize int
 }
 
 // dayCount is how many stored events of an issue arrived on a day.
@@ -106,6 +110,7 @@ func (database *Store) loadIssues() error {
 
 	err := database.issues.Primary().Each(database.db, func(entry kv.Entry[issueRecord]) (bool, error) {
 		issue := entry.Record
+		issue.storedSize = entry.Size
 		table.put(&issue)
 
 		return true, nil

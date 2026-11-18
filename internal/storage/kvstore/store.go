@@ -38,6 +38,12 @@ type Store struct {
 	marksMutex sync.RWMutex
 	marks      []timeMark
 
+	// messageStart is, per repeated log message, the sequence number of
+	// its oldest copy still stored: the trim walks from there instead of
+	// over the deleted copies before it. Used only inside updates, which
+	// run one at a time.
+	messageStart map[string]uint64
+
 	// now is the clock: time.Now, or a test's.
 	now func() time.Time
 
@@ -65,7 +71,7 @@ func OpenMemory(rest model.Store) (*Store, error) { return open(kv.OpenMemory(),
 
 func open(engine kv.Engine, rest model.Store) (*Store, error) {
 	schema := kv.NewSchema()
-	database := &Store{Store: rest, collections: defineCollections(schema), now: time.Now}
+	database := &Store{Store: rest, collections: defineCollections(schema), now: time.Now, messageStart: map[string]uint64{}}
 	db, err := kv.OpenDB(engine, schema)
 
 	if err == nil {

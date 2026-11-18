@@ -8,10 +8,10 @@ The branch `archive/pebble` holds an earlier attempt on Pebble that went as far 
 
 Accept every error when many applications report at once. Target: **50 DSNs, each sending 1000 errors at the same moment.** The default rate limit is 1000 envelopes per minute per project.
 
-- A burst of 50 000 events is accepted without a 429 and without a request waiting more than 100 ms.
+- A burst of 50 000 events is accepted without a 429, with half the answers within a few milliseconds and none over ~300 ms (SDKs wait seconds).
 - The burst is stored within a minute, so sustained processing is at least ~830 events/s.
 - Logs: at least 10 000 lines/s sustained.
-- Memory stays under 150 MB, and the image under the 50 MB budget.
+- Memory stays around 200 MB at the peak of such a burst (a default `GOMEMLIMIT` of 200 MiB; 150 MB would cost speed), and the image under the 50 MB budget.
 
 Baseline today (SQLite, one transaction per request): about **700 events/s** and **1100 log lines/s**. The single SQLite writer is the limit.
 
@@ -192,7 +192,7 @@ One limit stays: `MAX_DATABASE_SIZE` (default 2 GB).
 | 0. Plan and audit | This plan; `docs/storage-audit.md` | The plan is agreed |
 | 1. Interfaces | `store` keeps the records, their rules and the `Store` interface; the SQL is in `sqlite`. **Done** (taken from `archive/pebble`) | Services compile against interfaces |
 | 2. Ingest and reads | First the collections layer (see *Collections*): the `Engine` interface with the goleveldb adapter, key encoding, collections with indexes, batches, queries, the consistency check, with its own tests. Then, on top of it: inbox, issues, events, logs, time marks, counters; the pipeline; `storetest.Open` runs every test on either store (`STORE=kv`); the rest passes to SQLite until stage 5 **Done:** the layer is `internal/storage/kv` (engine, keys, collections, batches with counters and sequence numbers, queries and cursors, the consistency check); the store is `internal/storage/kvstore` on it (`schema.go` declares every collection; the rest of `store.Store` passes to SQLite); the ingest pipeline and the server run on it (`DATA_DIR/leveldb`). First measurements (tmpfs, 50 projects): 50 000 events stored at 2 500/s, logs at ~6 400 lines/s; answers p50 4 ms, max 690 ms; peak memory 300–540 MB, so stage 3 has work to do. | The layer's tests pass; UI and API tests pass on goleveldb |
-| 3. Measurements | Ingest load test (50 × 1000 events, logs), peak memory, latency of answers; tune the settings above; decide the inbox sync policy | The goal is met, or the gap is understood |
+| 3. Measurements | Ingest load test (50 × 1000 events, logs), peak memory, latency of answers; tune the settings above; decide the inbox sync policy **Done** (NVMe, 50 projects at once; `INGEST_DIR`, `INGEST_REPEATS`, `INGEST_ONLY` of the load test): one copy of each batch instead of two; issues written without reading them back; repeated log messages counted by keys from their oldest live copy, copies a batch would delete never written; batches bounded by 4 MB as well; goleveldb's level-0 limits relaxed (write stalls 5.5 s to 0.7 s); the inbox without its own sync. Events 3,500/s, answers p50 2 ms, p99 ~105 ms, max ~140–180 ms; logs ~12,400 lines/s without repeats, ~6,500 when every line repeats; peak memory 230–320 MB, ~200 MB with `GOMEMLIMIT=200MiB` at a 5–8% cost. Memory: a default `GOMEMLIMIT` of 200 MiB (in main, overridden by the variable); the goals above follow these numbers. | The goal is met, or the gap is understood |
 | 4. Cleanup | The cleanup above under ingest on a 2 GB database; the retention settings, UI and docs removed. A test runs a burst of writes through the pipeline while the cleanup deletes and compacts: nothing accepted is lost or stored twice, the counters match the stored records, the consistency check passes, and the answers to SDKs stay within the goal | Cleanup tests pass, the burst-with-cleanup test among them; the cleanup does not stall ingest |
 | 5. Small data | Users, sessions, projects, OAuth, notifications, outbox, as collections of the same layer | All tests pass; `modernc.org/sqlite` removed from `go.mod` |
 | 6. Operations | `backup` through a snapshot, docs, image size, `CLAUDE.md` | Ready for the release |
@@ -201,20 +201,20 @@ One limit stays: `MAX_DATABASE_SIZE` (default 2 GB).
 
 - **Memory.** In the audit goleveldb peaked at 190–230 MB RSS, mostly Go heap, against a 150 MB goal. Stage 3 measures it under our load. Levers: block cache, write buffer, open-files cache, `GOMEMLIMIT`.
 - **One compaction thread.** Under a burst, together with the cleanup's compaction, goleveldb may slow writes down once level 0 holds too many files (defaults: slow down at 8, pause at 12). Stage 4 measures it.
-- **The inbox sync bounds ingest.**
-  - Every inbox write is synced, and concurrent writes share a sync, so ingest manages about (concurrent requests) ÷ (sync time).
-  - On an encrypted NVMe, about 3,800/s at 50 concurrent requests.
-  - This bound does not depend on the engine.
+- **Inbox sync (decided in stage 3).** A synced inbox write waits for the disk (~13 ms on an encrypted NVMe), and every answer to an SDK waited for one: events were accepted at 2,300/s with answers at 22 ms, logs at ~5,900 lines/s. The inbox now writes without its own sync: the writer's next batch, a few milliseconds later, is synced and takes the earlier writes of the shared journal to the disk with it. A crash of the process loses nothing; a power cut or a kernel crash may lose the envelopes accepted in those last milliseconds. With it, on the same disk: events 3,550/s with answers at 2 ms, logs ~11,700 lines/s.
 - **No maintenance upstream.** Mitigated by the format compatibility with LevelDB C++ and the small code.
 
 ## Open questions
 
 - The inbox size limit and its default (1 GB in the earlier attempt).
-- Sync every inbox write (no loss on power failure) or sync in groups with a short delay (faster, a small loss window).
 - How long a request may wait for the inbox when the writer lags, before answering 429.
 - The search design (stage 2 keeps the simple version).
 - Are the logs of a stored error's request kept as long as the error, or cleaned with the other logs?
 - Table file size (8 MB proposed) and `GOMEMLIMIT`.
+
+## After stage 3
+
+- Discuss and change the package structure. The goal: an API of the storage that is the one source of every operation in the project, from which each database is reached through its adapter; names that say what each package is (the store on the key-value layer is not obviously "LevelDB" today); one test suite run against that API for every adapter. Adapters could later split into two families, key-value and SQL, sharing their code; not now, while no second database is planned.
 
 ## Later, outside this plan
 

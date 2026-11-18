@@ -31,10 +31,13 @@ type Pipeline struct {
 	MaxInboxBytes int64
 	// Workers parse envelopes; 0 means one per core.
 	Workers int
-	// BatchSize and BatchWait bound one write: the writer commits after
-	// BatchSize envelopes, or once no more arrive within BatchWait.
-	BatchSize int
-	BatchWait time.Duration
+	// BatchSize, BatchBytes and BatchWait bound one write: the writer
+	// commits after BatchSize envelopes or BatchBytes of them as received,
+	// or once no more arrive within BatchWait. The bytes keep a batch of
+	// large envelopes (many logs each) from holding much memory.
+	BatchSize  int
+	BatchBytes int
+	BatchWait  time.Duration
 	// Rescan is how often the inbox is read again for entries that did not
 	// reach the processors directly (a full queue).
 	Rescan time.Duration
@@ -64,7 +67,7 @@ type processed struct {
 func NewPipeline(handler *Handler, database *kvstore.Store, sink StoreSink) *Pipeline {
 	pipeline := &Pipeline{
 		handler: handler, store: database, sink: sink, logger: handler.logger,
-		MaxInboxBytes: 1 << 30, BatchSize: 512, BatchWait: 5 * time.Millisecond, Rescan: 10 * time.Second,
+		MaxInboxBytes: 1 << 30, BatchSize: 512, BatchBytes: 4 << 20, BatchWait: 5 * time.Millisecond, Rescan: 10 * time.Second,
 		fresh: make(chan kvstore.InboxEntry, 4*runtime.GOMAXPROCS(0)), wake: make(chan struct{}, 1),
 	}
 	handler.pipeline = pipeline
@@ -117,9 +120,9 @@ func (pipeline *Pipeline) Run(ctx context.Context) {
 	}
 
 	// Small queues between the stages: envelopes wait in the inbox (on disk),
-	// not in memory.
+	// not in memory, and parsed ones do not pile up while the writer writes.
 	entries := make(chan kvstore.InboxEntry, workers*2)
-	results := make(chan processed, pipeline.BatchSize)
+	results := make(chan processed, workers*4)
 
 	var processors sync.WaitGroup
 
@@ -288,10 +291,11 @@ func (pipeline *Pipeline) process(entry kvstore.InboxEntry) processed {
 func (pipeline *Pipeline) write(ctx context.Context, results <-chan processed) {
 	for first := range results {
 		batch := []processed{first}
+		size := first.InboxSize
 		timer := time.NewTimer(pipeline.BatchWait)
 
 	collect:
-		for len(batch) < pipeline.BatchSize {
+		for len(batch) < pipeline.BatchSize && size < pipeline.BatchBytes {
 			select {
 			case next, ok := <-results:
 				if !ok {
@@ -299,6 +303,7 @@ func (pipeline *Pipeline) write(ctx context.Context, results <-chan processed) {
 				}
 
 				batch = append(batch, next)
+				size += next.InboxSize
 			case <-timer.C:
 				break collect
 			}

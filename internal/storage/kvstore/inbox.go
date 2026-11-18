@@ -12,9 +12,13 @@ import (
 // here. An entry is deleted in the batch that stores its data, so a crash
 // neither loses nor repeats one.
 
-// Append adds an envelope and returns its entry once it is on disk.
-// Concurrent appends share their disk syncs (the store commits them as a
-// group), and none waits for the writer.
+// Append adds an envelope and returns its entry once the operating system
+// has it. It does not wait for the disk itself (a sync took ~13 ms on an
+// encrypted NVMe and halved ingest): the writer's next batch, a few
+// milliseconds later, is synced and takes every earlier write of the shared
+// journal to the disk with it. A crash of the process loses nothing; a
+// power cut or a kernel crash may lose the envelopes of those last
+// milliseconds (docs/storage-plan.md, "Inbox sync").
 func (database *Store) Append(projectID int, received time.Time, body []byte) (InboxEntry, error) {
 	sequence, err := database.db.Next()
 
@@ -23,13 +27,13 @@ func (database *Store) Append(projectID int, received time.Time, body []byte) (I
 	}
 
 	entry := InboxEntry{Sequence: sequence, ProjectID: projectID, Received: received.UTC(), Body: body}
-	batch := kv.NewBatch(database.db)
+	batch := kv.NewBatch(database.db.Engine)
 
 	if err := database.inbox.Insert(batch, entry); err != nil {
 		return InboxEntry{}, err
 	}
 
-	if err := database.db.Write(batch, true); err != nil {
+	if err := database.db.Write(batch, false); err != nil {
 		return InboxEntry{}, err
 	}
 
