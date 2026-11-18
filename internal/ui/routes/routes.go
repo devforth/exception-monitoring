@@ -31,6 +31,7 @@ func Register(router *http.ServeMux, protect func(http.Handler) http.Handler, co
 		"POST /issues/bulk":             controller.BulkIssueAction,
 		"GET /logs":                     controller.LogsPage,
 		"GET /projects":                 controller.ProjectsPage, // read-only for users: the DSNs
+		"GET /projects/cleanups":        controller.CleanupsPage,
 
 		"GET /agents":                       controller.AgentsPage,
 		"POST /agents/token":                controller.NewAgentToken,

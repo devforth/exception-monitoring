@@ -656,3 +656,19 @@ func TestThinNeverGrows(t *testing.T) {
 		t.Fatalf("thinned: %s", thinned)
 	}
 }
+
+// The store's step counts, shown by the UI, match the steps.
+func TestCleanupStepCounts(t *testing.T) {
+	steps := openTest(t).cleanupSteps()
+	always := 0
+
+	for _, step := range steps {
+		if step.always {
+			always++
+		}
+	}
+
+	if len(steps) != model.CleanupSteps || always != model.CleanupAlwaysSteps || !steps[always-1].always {
+		t.Fatalf("%d steps, %d always; the store says %d and %d", len(steps), always, model.CleanupSteps, model.CleanupAlwaysSteps)
+	}
+}

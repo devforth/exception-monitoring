@@ -341,7 +341,6 @@ dialog.log-viewer pre { height: calc(100% - 52px); margin: 0; padding: 14px; ove
 .cleanup-done { color: #2e7d32; }
 .cleanup-running { color: var(--warning); }
 .cleanup-failed { color: var(--error); }
-.storage h3 { margin: 18px 0 8px; font-size: 15px; }
 .log-actions { display: flex; gap: 12px; margin-top: 4px; }
 
 /* Issues list: checkboxes and the bulk action bar. */

@@ -85,6 +85,6 @@ Then, only while the database is still above 80%, each step after the one before
 9. The latest event of issues not seen for a week, longest unseen first: the issue stays listed with its title, count and dates.
 10. Whole issues, longest unseen first.
 
-It deletes in batches of up to 2000 records and stops as soon as enough is freed. Each batch looks at the data as it is then, so an issue that gets a new event or is reopened meanwhile is judged by that. A cleanup stopped by a restart goes on where it stopped. Each run is logged with what every step deleted per project, and the Projects page lists the latest runs with their steps.
+It deletes in batches of up to 2000 records and stops as soon as enough is freed. Each batch looks at the data as it is then, so an issue that gets a new event or is reopened meanwhile is judged by that. A cleanup stopped by a restart goes on where it stopped. Each run is logged with what every step deleted per project, and the last 100 runs with their steps are on the Projects page (Cleanup history).
 
 A message logged over and over keeps its newest 10 copies as it is written (numbers and IDs in it do not count as a difference); the issue's event count always includes every event.

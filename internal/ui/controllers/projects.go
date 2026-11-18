@@ -39,6 +39,21 @@ func (controller *Controllers) ProjectsPage(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	list := controller.registry.List()
+	view := contracts.ProjectsView{
+		Projects: make([]contracts.ProjectInfo, 0, len(list)), Notice: projectNotices[r.URL.Query().Get("notice")],
+		Storage: presenters.Storage(used, controller.retention),
+	}
+
+	for _, project := range list {
+		view.Projects = append(view.Projects, controller.projectViews.Info(project, controller.projects.DSN(r, project), counts[project.ID]))
+	}
+
+	controller.views.Render(w, r, http.StatusOK, "projects", view)
+}
+
+// CleanupsPage lists the runs of the cleanup by size; a run's steps open in a popup.
+func (controller *Controllers) CleanupsPage(w http.ResponseWriter, r *http.Request) {
 	runs, err := controller.projects.Cleanups(r.Context())
 
 	if err != nil {
@@ -47,25 +62,16 @@ func (controller *Controllers) ProjectsPage(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	list := controller.registry.List()
-	view := contracts.ProjectsView{
-		Projects: make([]contracts.ProjectInfo, 0, len(list)), Notice: projectNotices[r.URL.Query().Get("notice")],
-		Storage: presenters.Storage(used, controller.retention),
-	}
-
-	view.Storage.Cleanups = presenters.CleanupRuns(runs, func(id int) string {
-		if project, ok := config.Projects(list).ByID(id); ok {
+	list := config.Projects(controller.registry.List())
+	view := contracts.CleanupsView{Runs: presenters.CleanupRuns(runs, func(id int) string {
+		if project, ok := list.ByID(id); ok {
 			return project.Name
 		}
 
 		return fmt.Sprintf("#%d", id)
-	})
+	})}
 
-	for _, project := range list {
-		view.Projects = append(view.Projects, controller.projectViews.Info(project, controller.projects.DSN(r, project), counts[project.ID]))
-	}
-
-	controller.views.Render(w, r, http.StatusOK, "projects", view)
+	controller.views.Render(w, r, http.StatusOK, "cleanups", view)
 }
 
 func (controller *Controllers) NewProjectPage(w http.ResponseWriter, r *http.Request) {

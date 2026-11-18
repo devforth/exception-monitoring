@@ -151,8 +151,8 @@ func (service *Projects) DatabaseSize(ctx context.Context) (int64, error) {
 	return service.store.DatabaseSize(ctx)
 }
 
-// cleanupsShown is how many runs of the cleanup the Projects page lists.
-const cleanupsShown = 10
+// cleanupsShown is how many runs of the cleanup the cleanups page lists: all the store keeps.
+const cleanupsShown = 100
 
 // Cleanups are the latest runs of the cleanup by size, newest first.
 func (service *Projects) Cleanups(ctx context.Context) ([]store.CleanupRun, error) {

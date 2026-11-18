@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -63,17 +64,20 @@ func CleanupRuns(runs []store.CleanupRun, projectName func(id int) string) []con
 	views := make([]contracts.CleanupRunView, 0, len(runs))
 
 	for _, run := range runs {
+		stop := run.Limit * config.CleanupStopPercent / 100
 		view := contracts.CleanupRunView{
 			ID: run.Sequence, StartedAt: run.StartedAt, Status: run.Status, Reached: run.Reached, Error: run.Error,
 			Limit: config.FormatSize(run.Limit), SizeBefore: config.FormatSize(run.SizeBefore),
 			Compacted: config.FormatSize(run.Compacted), SizeAfter: config.FormatSize(run.SizeAfter),
-			Duration: run.Duration.Round(time.Second).String(),
+			Stop: config.FormatSize(stop), Needed: config.FormatSize(max(run.Compacted-stop, 0)),
+			Deleted: stepNumbers(run.Steps), Result: cleanupResult(run),
+			Duration: tookText(run.Duration),
 		}
 
 		for _, step := range run.Steps {
 			stepView := contracts.CleanupStepView{
 				Number: step.Number, Name: step.Name, Freed: config.FormatSize(step.Freed),
-				Duration: step.Duration.Round(time.Millisecond).String(),
+				Duration: tookText(step.Duration),
 			}
 
 			for _, id := range slices.Sorted(maps.Keys(step.Projects)) {
@@ -87,6 +91,56 @@ func CleanupRuns(runs []store.CleanupRun, projectName func(id int) string) []con
 	}
 
 	return views
+}
+
+// tookText rounds to milliseconds under 10 s, to seconds above.
+func tookText(took time.Duration) string {
+	if took < 10*time.Second {
+		return took.Round(time.Millisecond).String()
+	}
+
+	return took.Round(time.Second).String()
+}
+
+// cleanupResult says why a run stopped.
+func cleanupResult(run store.CleanupRun) string {
+	switch {
+	case run.Status == store.CleanupRunning:
+		return fmt.Sprintf("running, at step %d", run.Reached)
+	case run.Status == store.CleanupFailed:
+		return fmt.Sprintf("failed in step %d", run.Reached)
+	case run.Reached == 0:
+		return "compacting was enough, nothing deleted"
+	case run.Reached <= store.CleanupAlwaysSteps:
+		return fmt.Sprintf("steps 1–%d always run; after them the database was under 80%%", store.CleanupAlwaysSteps)
+	case run.Reached < store.CleanupSteps:
+		return fmt.Sprintf("stopped in step %d: the database was at 80%%", run.Reached)
+	default:
+		return "every step ran"
+	}
+}
+
+// stepNumbers reads the steps that deleted something as "1, 4–7".
+func stepNumbers(steps []store.CleanupStep) string {
+	var parts []string
+
+	for index := 0; index < len(steps); {
+		end := index
+
+		for end+1 < len(steps) && steps[end+1].Number == steps[end].Number+1 {
+			end++
+		}
+
+		if end > index {
+			parts = append(parts, fmt.Sprintf("%d–%d", steps[index].Number, steps[end].Number))
+		} else {
+			parts = append(parts, strconv.Itoa(steps[index].Number))
+		}
+
+		index = end + 1
+	}
+
+	return strings.Join(parts, ", ")
 }
 
 // deleted reads "120 logs, 3 events, 5 events thinned".

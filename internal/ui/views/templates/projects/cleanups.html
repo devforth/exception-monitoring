@@ -1,0 +1,61 @@
+{{define "title"}}Cleanup history · Projects{{end}}
+
+{{define "content"}}
+{{with .Data}}
+{{template "back" (back "/projects" "Projects")}}
+<h1>Cleanup history</h1>
+<p class="muted">When the database reaches <code>MAX_DATABASE_SIZE</code> {{template "hint" (settingHelp "MAX_DATABASE_SIZE")}},
+  the ingest queue and the issues are compacted first: deleted data keeps its space on disk until then. If the database is still
+  at the limit, data is deleted step by step until it is at 80% of the limit. Sizes are on disk; the last 100 runs are kept.</p>
+
+{{if .Runs}}
+<div class="table-scroll">
+<table class="list compact">
+  <thead><tr><th>Started</th><th>Status</th><th class="number">Limit</th><th class="number">Before</th><th class="number">Compacted</th><th class="number">After</th><th>Deleted in steps</th><th>Result</th><th class="number">Took</th><th></th></tr></thead>
+  <tbody>
+    {{range .Runs}}
+    <tr>
+      <td class="nowrap">{{template "time" .StartedAt}}</td>
+      <td><span class="delivery cleanup-{{.Status}}">{{.Status}}</span></td>
+      <td class="number nowrap">{{.Limit}}</td>
+      <td class="number nowrap">{{.SizeBefore}}</td>
+      <td class="number nowrap">{{.Compacted}}</td>
+      <td class="number nowrap">{{if eq .Status "running"}}…{{else}}{{.SizeAfter}}{{end}}</td>
+      <td>{{or .Deleted "—"}}</td>
+      <td class="small">{{.Result}}{{with .Error}}<div class="field-error">{{.}}</div>{{end}}</td>
+      <td class="number nowrap">{{.Duration}}</td>
+      <td>{{if .Steps}}<button type="button" class="link" popovertarget="cleanup-{{.ID}}">Details</button>{{template "cleanup-steps" .}}{{end}}</td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>
+</div>
+{{else}}
+<p class="empty">No cleanup has run yet.</p>
+{{end}}
+{{end}}
+{{end}}
+
+{{define "cleanup-steps"}}
+<div popover id="cleanup-{{.ID}}" class="popup">
+  <div class="viewer-bar"><strong>Cleanup, {{.StartedAt.UTC.Format "2006-01-02 15:04"}} UTC</strong><button type="button" class="close" popovertarget="cleanup-{{.ID}}" popovertargetaction="hide">Close</button></div>
+  <p class="small">Limit {{.Limit}}: deleting goes down to {{.Stop}}. On disk: {{.SizeBefore}} before, {{.Compacted}} after compacting, so about {{.Needed}} to free; {{.SizeAfter}} after.<br>
+    {{.Result}}. Took {{.Duration}}.</p>
+  <div class="table-scroll">
+  <table class="list compact">
+    <thead><tr><th class="number">#</th><th>Step</th><th class="number" title="Bytes of the deleted data before compression">Data freed</th><th class="number">Took</th><th>Deleted</th></tr></thead>
+    <tbody>
+      {{range .Steps}}
+      <tr>
+        <td class="number">{{.Number}}</td>
+        <td>{{.Name}}</td>
+        <td class="number nowrap">{{.Freed}}</td>
+        <td class="number nowrap">{{.Duration}}</td>
+        <td>{{range .Projects}}<div>{{template "badge" (projectBadge .Project)}} {{.Deleted}}</div>{{end}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  </div>
+</div>
+{{end}}

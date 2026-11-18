@@ -100,6 +100,7 @@ func TestBackLinks(t *testing.T) {
 	for path, want := range map[string]string{
 		"/issues/" + issueIDs(server.page("/issues"))[0]: `<a href="/issues" data-back`,
 		"/projects/1":        `<a href="/projects" data-back`,
+		"/projects/cleanups": `<a href="/projects" data-back`,
 		"/notifications/new": `<a href="/notifications" data-back`,
 		"/notifications/log": `<a href="/notifications" data-back`,
 	} {

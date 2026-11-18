@@ -2,6 +2,13 @@ package store
 
 import "time"
 
+// The cleanup by size has CleanupSteps steps (docs/configuration.md); the
+// first CleanupAlwaysSteps run in full, the rest only while needed.
+const (
+	CleanupSteps       = 10
+	CleanupAlwaysSteps = 4
+)
+
 // Statuses of a cleanup run.
 const (
 	CleanupRunning = "running"

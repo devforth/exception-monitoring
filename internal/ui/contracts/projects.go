@@ -28,16 +28,24 @@ type StorageInfo struct {
 	Limit       string // empty: no size limit
 	Percent     int    // of the limit
 	CleanupStop int    // the cleanup stops at this percent of the limit
-	Cleanups    []CleanupRunView
 }
 
-// CleanupRunView is a run of the cleanup by size, newest first on the Projects page.
+// CleanupsView is the page of the cleanup runs.
+type CleanupsView struct {
+	Runs []CleanupRunView
+}
+
+// CleanupRunView is a run of the cleanup by size.
 type CleanupRunView struct {
 	ID                                      uint64
 	StartedAt                               time.Time
 	Status                                  string // running, done or failed
 	Limit, SizeBefore, Compacted, SizeAfter string
-	Reached                                 int // the last step; 0: compacting was enough
+	Reached                                 int    // the last step; 0: compacting was enough
+	Stop                                    string // 80% of the limit, where deleting stops
+	Needed                                  string // to free after compacting
+	Deleted                                 string // the steps that deleted something: "1, 4–7"
+	Result                                  string // why it stopped
 	Duration                                string
 	Error                                   string
 	Steps                                   []CleanupStepView

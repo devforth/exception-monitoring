@@ -250,15 +250,27 @@ func TestProjectsPage(t *testing.T) {
 	}
 }
 
-// The Projects page lists the latest cleanups; the steps of a run open in a popup.
-func TestCleanupHistoryOnProjectsPage(t *testing.T) {
+// The cleanup history is a page of its own, linked from the Projects page;
+// the steps of a run open in a popup.
+func TestCleanupHistoryPage(t *testing.T) {
 	database := openDatabase(t)
+	server := startServer(t, database, "admin", password)
+	server.login()
+
+	if page := server.page("/projects"); !strings.Contains(page, `href="/projects/cleanups"`) {
+		t.Fatal("the Projects page does not link the cleanup history")
+	}
+
 	cleaner, ok := database.(interface {
 		Cleanup(ctx context.Context, maxBytes int64) (store.CleanupRun, error)
 	})
 
 	if !ok {
-		t.Skip("the cleanup by size runs on the key-value store (STORE=kv)")
+		if page := server.page("/projects/cleanups"); !strings.Contains(page, "No cleanup has run yet.") {
+			t.Fatal("the empty history says nothing")
+		}
+
+		return
 	}
 
 	ctx := context.Background()
@@ -271,13 +283,11 @@ func TestCleanupHistoryOnProjectsPage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	server := startServer(t, database, "admin", password)
-	server.login()
-	page := server.page("/projects")
+	page := server.page("/projects/cleanups")
 
-	for _, want := range []string{"Recent cleanups", "cleanup-done", `popovertarget="cleanup-`, "logs below error", `data-project="backend"`, "1 logs"} {
+	for _, want := range []string{"Cleanup history", "cleanup-done", `popovertarget="cleanup-`, "logs below error", `data-project="backend"`, "1 logs"} {
 		if !strings.Contains(page, want) {
-			t.Errorf("projects page is missing %q", want)
+			t.Errorf("cleanup history is missing %q", want)
 		}
 	}
 }
