@@ -63,7 +63,7 @@ func newTestServer(t *testing.T, allowedIPs ...string) *testServer {
 		Logger:     logger,
 		Database:   database,
 		Ingest:     ingest.New(logger, settings, registry, ingest.StoreSink{Store: database, Logger: logger}),
-		API:        rest.New(logger, catalog.New(database, registry, all), "", nil),
+		API:        rest.New(logger, catalog.New(registry, all), "", nil),
 		APIToken:   token,
 		AllowedIPs: allowed,
 	}).Handler()
@@ -187,7 +187,7 @@ func TestAccessControl(t *testing.T) {
 func TestRoutesFollowTheCatalog(t *testing.T) {
 	server := newTestServer(t)
 
-	for _, endpoint := range catalog.New(nil, nil, nil) {
+	for _, endpoint := range catalog.New(nil, nil) {
 		if endpoint.AgentsOnly {
 			if response := server.do(http.MethodPost, rest.Prefix+endpoint.Name, ""); !strings.Contains(response.Body.String(), "unknown API endpoint") {
 				t.Errorf("agent-only %s is a REST route: %d", endpoint.Name, response.Code)

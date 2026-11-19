@@ -113,10 +113,8 @@ type Options struct {
 	KeepSent   time.Duration // default 1 day
 	KeepFailed time.Duration // default 30 days
 
-	PollInterval    time.Duration // how often workers look for due retries; default 1s
-	CleanupInterval time.Duration // default config.OutboxCleanupInterval
-	CleanupDelay    time.Duration // before the first cleanup; 0: at start
-	Now             func() time.Time
+	PollInterval time.Duration // how often workers look for due retries; default 1s
+	Now          func() time.Time
 }
 
 var defaultSchedule = []time.Duration{
@@ -211,8 +209,6 @@ func New(options Options) *Notifier {
 		close(notifier.dispatched)
 	})
 
-	notifier.running.Go(notifier.runCleanup)
-
 	go func() {
 		notifier.running.Wait()
 		close(notifier.done)
@@ -252,10 +248,6 @@ func setDefaults(options *Options) {
 
 	if options.PollInterval <= 0 {
 		options.PollInterval = time.Second
-	}
-
-	if options.CleanupInterval <= 0 {
-		options.CleanupInterval = config.OutboxCleanupInterval
 	}
 
 	if options.Now == nil {
@@ -609,31 +601,14 @@ func send(ctx context.Context, channel Channel, message store.OutboxMessage) err
 	}
 }
 
-// runCleanup deletes old outbox messages after CleanupDelay and every CleanupInterval.
-func (notifier *Notifier) runCleanup() {
-	timer := time.NewTimer(notifier.options.CleanupDelay)
+// CleanOutbox deletes sent messages older than KeepSent and failed ones older than KeepFailed.
+func (notifier *Notifier) CleanOutbox(ctx context.Context) error {
+	now := notifier.options.Now()
+	deleted, err := notifier.options.Store.CleanOutbox(ctx, now.Add(-notifier.options.KeepSent), now.Add(-notifier.options.KeepFailed))
 
-	defer timer.Stop()
-
-	for {
-		select {
-		case <-timer.C:
-		case <-notifier.dispatched:
-			return
-		case <-notifier.ctx.Done():
-			return
-		}
-
-		now := notifier.options.Now()
-
-		deleted, err := notifier.options.Store.CleanOutbox(notifier.ctx, now.Add(-notifier.options.KeepSent), now.Add(-notifier.options.KeepFailed))
-
-		if err != nil && notifier.ctx.Err() == nil {
-			notifier.options.Logger.Error("clean notification outbox", "err", err)
-		} else if deleted > 0 {
-			notifier.options.Logger.Debug("cleaned notification outbox", "deleted", deleted)
-		}
-
-		timer.Reset(notifier.options.CleanupInterval)
+	if err == nil && deleted > 0 {
+		notifier.options.Logger.Debug("cleaned notification outbox", "deleted", deleted)
 	}
+
+	return err
 }

@@ -46,62 +46,53 @@ const (
 	cleanupFailed  = model.CleanupFailed
 )
 
-// RunCleanup checks the size (ReduceAging, then Cleanup) now, every interval
-// and after every cleanupEvery bytes written, and compacts the inbox now and
-// halfway between the checks (config.CleanupInterval).
-func (database *Store) RunCleanup(ctx context.Context, maxBytes int64, interval time.Duration, logger *slog.Logger) {
-	checks := time.NewTicker(interval)
-	inbox := time.NewTimer(interval / 2)
+// quietFor is how long ingest must be quiet before a forced compaction:
+// under writes goleveldb repeats a range compaction as long as new files come.
+var quietFor = 2 * time.Second
 
-	defer checks.Stop()
-	defer inbox.Stop()
-
-	database.logCompactInbox(ctx, logger)
-
-	for {
-		database.checkSize(ctx, maxBytes, logger)
-
-		for waiting := true; waiting; {
-			select {
-			case <-ctx.Done():
-				return
-			case <-inbox.C:
-				database.logCompactInbox(ctx, logger)
-				inbox.Reset(interval)
-			case <-checks.C:
-				waiting = false
-			case <-database.cleanupWake:
-				waiting = false
-			}
-		}
-	}
+func (database *Store) quiet() bool {
+	return time.Since(time.Unix(0, database.lastAppend.Load())) >= quietFor
 }
 
-func (database *Store) logCompactInbox(ctx context.Context, logger *slog.Logger) {
-	if err := database.compactInbox(); err != nil && ctx.Err() == nil {
-		logger.Error("compacting the inbox failed", "err", err)
+// CompactInbox takes processed envelopes, credentials included, out of the
+// files, when ingest is quiet: a deleted record keeps its bytes until a
+// compaction reaches its key.
+func (database *Store) CompactInbox(context.Context) error {
+	if !database.quiet() || database.backups.Load() > 0 {
+		return nil
 	}
+
+	return database.compactInbox()
 }
 
-// checkSize thins the events that turned a month old and runs the cleanup if the database is at maxBytes.
-func (database *Store) checkSize(ctx context.Context, maxBytes int64, logger *slog.Logger) {
+// CleanupWake ticks after every cleanupEvery bytes written.
+func (database *Store) CleanupWake() <-chan struct{} { return database.cleanupWake }
+
+// CheckSize thins the events that turned a month old and runs the cleanup if the database is at maxBytes.
+func (database *Store) CheckSize(ctx context.Context, maxBytes int64, logger *slog.Logger) error {
 	if maxBytes > 0 {
-		if reduced, err := database.ReduceAging(ctx); err != nil && ctx.Err() == nil {
-			logger.Error("thinning old events failed", "err", err)
-		} else if len(reduced) > 0 {
+		reduced, err := database.ReduceAging(ctx)
+
+		if err != nil {
+			return fmt.Errorf("thinning old events: %w", err)
+		}
+
+		if len(reduced) > 0 {
 			logger.Debug("old events thinned", "step", stepLine(reduced[0]))
 		}
 	}
 
 	run, err := database.Cleanup(ctx, maxBytes)
 
-	switch {
-	case ctx.Err() != nil:
-	case err != nil:
-		logger.Error("cleanup failed", "err", err, "reached", fmt.Sprintf("step %d", run.Reached))
-	case run.Status == cleanupDone:
+	if err != nil {
+		return fmt.Errorf("cleanup, step %d: %w", run.Reached, err)
+	}
+
+	if run.Status == cleanupDone {
 		logCleanup(logger, run)
 	}
+
+	return nil
 }
 
 // logCleanup writes a run as one record: sizes, the last step reached and a line per step that deleted something.
@@ -158,7 +149,7 @@ func (database *Store) noteWritten() {
 }
 
 // Cleanup goes on with a run a restart stopped, or starts one when the
-// database is at cleanupStart of maxBytes (0: no limit). A run stopped by ctx
+// database is at cleanupStart of maxBytes (0: no limit) and no backup runs. A run stopped by ctx
 // stays running and goes on at the next call.
 func (database *Store) Cleanup(ctx context.Context, maxBytes int64) (CleanupRun, error) {
 	if maxBytes <= 0 {
@@ -170,6 +161,9 @@ func (database *Store) Cleanup(ctx context.Context, maxBytes int64) (CleanupRun,
 
 	switch {
 	case err == nil && run.Status == cleanupRunning:
+	case database.backups.Load() > 0:
+		// A backup's snapshot keeps deleted records on disk, which would make the goal too low.
+		return CleanupRun{}, nil
 	case err == nil || errors.Is(err, kv.ErrNotFound):
 		run, err = database.startCleanup(maxBytes)
 
@@ -189,10 +183,9 @@ func (database *Store) Cleanup(ctx context.Context, maxBytes int64) (CleanupRun,
 	return run, database.finishCleanup(&run, err)
 }
 
-// startCleanup compacts first what collects deleted and replaced records as
-// the server works (the inbox, the issues rewritten with every event): they
-// keep their space until then, and that may be enough. Otherwise it saves a
-// run whose goal is cleanupStop of maxBytes.
+// startCleanup compacts first, when ingest is quiet, what collects deleted
+// and replaced records (the inbox, the issues rewritten with every event):
+// that may be enough. Otherwise it saves a run whose goal is cleanupStop of maxBytes.
 func (database *Store) startCleanup(maxBytes int64) (CleanupRun, error) {
 	run := CleanupRun{StartedAt: database.now().UTC(), Limit: maxBytes}
 	size, err := database.db.Size()
@@ -203,9 +196,11 @@ func (database *Store) startCleanup(maxBytes int64) (CleanupRun, error) {
 
 	run.SizeBefore = size
 
-	for _, keyRange := range []func() ([]byte, []byte){database.inbox.KeyRange, database.issues.KeyRange, database.status.KeyRange} {
-		if err := database.db.CompactRange(keyRange()); err != nil {
-			return run, err
+	if database.quiet() {
+		for _, keyRange := range []func() ([]byte, []byte){database.inbox.KeyRange, database.issues.KeyRange, database.status.KeyRange} {
+			if err := database.db.CompactRange(keyRange()); err != nil {
+				return run, err
+			}
 		}
 	}
 

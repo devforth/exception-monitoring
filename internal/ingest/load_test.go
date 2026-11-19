@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/devforth/exception-monitoring/internal/fixtures"
+	"github.com/devforth/exception-monitoring/internal/platform/background"
 	"github.com/devforth/exception-monitoring/internal/platform/config"
 	"github.com/devforth/exception-monitoring/internal/platform/logging"
 	"github.com/devforth/exception-monitoring/internal/storage/database"
@@ -80,10 +81,20 @@ func loadServer(t *testing.T, db *database.Store, projects config.Projects, cloc
 
 	go func() { defer close(piped); pipeline.Run(ctx) }()
 
+	// The database lane of cmd/exception-monitoring/jobs.go.
+	jobsLogger := logging.New(os.Stderr, logging.FormatPretty, slog.LevelInfo)
+	stopJobs := background.Start(ctx, jobsLogger, background.Lane{Name: "database", Jobs: []background.Job{
+		{Name: "inbox compaction", AtStart: true, First: config.InboxCompactionAt, Every: config.CleanupInterval, Timeout: config.InboxCompactionTimeout,
+			Run: db.CompactInbox},
+		{Name: "size check", AtStart: true, First: config.CleanupInterval, Every: config.CleanupInterval, Timeout: config.SizeCheckTimeout,
+			Wake: db.CleanupWake(), Run: func(ctx context.Context) error { return db.CheckSize(ctx, limit, jobsLogger) }},
+	}})
+
 	go func() {
 		defer close(cleaned)
 
-		db.RunCleanup(ctx, limit, config.CleanupInterval, logging.New(os.Stderr, logging.FormatPretty, slog.LevelInfo))
+		<-ctx.Done()
+		stopJobs()
 	}()
 
 	// Before the store closes (cleanups run last added first).

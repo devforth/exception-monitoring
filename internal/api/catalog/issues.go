@@ -1,7 +1,6 @@
 package catalog
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -66,7 +65,7 @@ func (handler *handlers) listIssues(ctx context.Context, call Call, input listIs
 
 	limit := filter.Limit
 	filter.Limit++ // one extra row tells whether there is a next page
-	issues, err := handler.store.ListIssues(ctx, filter)
+	issues, err := handler.services.Issues.List(ctx, filter)
 
 	if err != nil {
 		return output, err
@@ -140,7 +139,7 @@ type getIssueInput struct {
 }
 
 func (handler *handlers) getIssue(ctx context.Context, _ Call, input getIssueInput) (Text, error) {
-	issue, err := handler.store.GetIssue(ctx, input.IssueID)
+	issue, err := handler.services.Issues.Get(ctx, input.IssueID)
 
 	if err != nil {
 		return "", err
@@ -173,7 +172,7 @@ func (handler *handlers) findEvent(ctx context.Context, input getEventInput) (st
 		return store.Event{}, Invalid("unknown project %q (see list_projects)", input.Project)
 	}
 
-	return handler.store.GetEvent(ctx, project.ID, sentry.NormalizeEventID(input.EventID))
+	return handler.services.Issues.Event(ctx, project.ID, input.EventID)
 }
 
 func (handler *handlers) getEvent(ctx context.Context, _ Call, input getEventInput) (Text, error) {
@@ -183,7 +182,7 @@ func (handler *handlers) getEvent(ctx context.Context, _ Call, input getEventInp
 		return "", err
 	}
 
-	issue, err := handler.store.GetIssue(ctx, event.IssueID)
+	issue, err := handler.services.Issues.Get(ctx, event.IssueID)
 
 	if err != nil {
 		return "", err
@@ -256,7 +255,7 @@ type eventOutput struct {
 func (handler *handlers) listIssueEvents(ctx context.Context, call Call, input listIssueEventsInput) (Page[eventOutput], error) {
 	output := Page[eventOutput]{Items: []eventOutput{}}
 
-	if _, err := handler.store.GetIssue(ctx, input.IssueID); err != nil {
+	if _, err := handler.services.Issues.Get(ctx, input.IssueID); err != nil {
 		return output, err
 	}
 
@@ -272,7 +271,7 @@ func (handler *handlers) listIssueEvents(ctx context.Context, call Call, input l
 		return output, err
 	}
 
-	events, err := handler.store.ListEvents(ctx, store.EventFilter{IssueID: input.IssueID, BeforeID: beforeID, Limit: limit + 1})
+	events, err := handler.services.Issues.Events(ctx, store.EventFilter{IssueID: input.IssueID, BeforeID: beforeID, Limit: limit + 1})
 
 	if err != nil {
 		return output, err
@@ -330,7 +329,7 @@ func (handler *handlers) getIssues(ctx context.Context, call Call, input issueID
 		return issueBatchOutput{}, Invalid("%s", err)
 	}
 
-	issues, err := handler.store.GetIssues(ctx, ids)
+	issues, err := handler.services.Issues.GetMany(ctx, ids)
 
 	if err != nil {
 		return issueBatchOutput{}, err
@@ -359,7 +358,7 @@ func (handler *handlers) updateIssueStatus(ctx context.Context, call Call, input
 		return issueBatchOutput{}, Invalid("status must be resolved, ignored or unresolved")
 	}
 
-	issues, err := handler.store.SetIssuesStatus(ctx, ids, input.Status, call.Actor)
+	issues, err := handler.services.Issues.SetStatus(ctx, ids, input.Status, call.Actor)
 
 	if errors.Is(err, store.ErrNotFound) {
 		return issueBatchOutput{}, Invalid("one or more issue IDs were not found; no status changed")
@@ -381,8 +380,8 @@ type deletedOutput struct {
 }
 
 func (handler *handlers) deleteIssue(ctx context.Context, _ Call, input deleteIssueInput) (deletedOutput, error) {
-	if deleted, err := handler.store.DeleteIssues(ctx, []string{input.IssueID}); err != nil || deleted == 0 {
-		return deletedOutput{}, cmp.Or(err, store.ErrNotFound)
+	if err := handler.services.Issues.Delete(ctx, input.IssueID); err != nil {
+		return deletedOutput{}, err
 	}
 
 	return deletedOutput{Deleted: input.IssueID}, nil

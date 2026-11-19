@@ -19,15 +19,6 @@ const (
 	// with other numbers or IDs) as it is written: its newest copies stay.
 	LogsPerMessage = 10
 
-	// The periodic jobs start apart: the size checks at start and every
-	// CleanupInterval (and after CleanupWritten bytes), the inbox compactions at
-	// start and halfway between the checks, the outbox cleanups a quarter of
-	// an interval after them and every OutboxCleanupInterval, a multiple of it.
-	CleanupInterval       = 10 * time.Minute
-	CleanupWritten        = 50 << 20
-	OutboxCleanupDelay    = CleanupInterval / 4
-	OutboxCleanupInterval = 6 * CleanupInterval
-
 	// The cleanup (database/cleanup.go; order in docs/configuration.md).
 	CleanupStartPercent = 100
 	CleanupStopPercent  = 80
@@ -38,6 +29,19 @@ const (
 
 // DefaultMaxDatabaseBytes is the default of MAX_DATABASE_SIZE.
 const DefaultMaxDatabaseBytes = 2 << 30 // 2 GB
+
+// InboxPercent of MAX_DATABASE_SIZE (or of its default when it is off) may
+// wait in the ingest queue; beyond it new envelopes get 429.
+const InboxPercent = 20
+
+// MaxInboxBytes is the ingest queue's share of maxDatabaseBytes (0: no limit).
+func MaxInboxBytes(maxDatabaseBytes int64) int64 {
+	if maxDatabaseBytes <= 0 {
+		maxDatabaseBytes = DefaultMaxDatabaseBytes
+	}
+
+	return maxDatabaseBytes * InboxPercent / 100
+}
 
 func parseRetention(getenv func(string) string) (Retention, error) {
 	retention := Retention{MaxDatabaseBytes: DefaultMaxDatabaseBytes}

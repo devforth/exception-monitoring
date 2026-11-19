@@ -71,7 +71,24 @@ server {
 
 ## Data
 
-Events and logs are kept until the database nears [its size limit](configuration.md#retention) and are not worth backing up. What takes effort to set up again lives in the same database: projects and their keys (keep them in `PROJECTS` and the DSNs survive any loss), users, notification connections and connected agents. Keep the `data` volume on a disk you trust.
+Events and logs are kept until the database nears [its size limit](configuration.md#retention). What takes effort to set up again lives in the same database: projects and their keys (keep them in `PROJECTS` and the DSNs survive any loss), users, notification connections and connected agents. Keep the `data` volume on a disk you trust, and back it up.
+
+## Backup and restore
+
+```sh
+docker compose run --rm exception-monitoring backup
+```
+
+The running server writes a consistent copy to `/data/backups/<time>` without stopping (with the server stopped, the command reads the database itself); add an absolute path for another place, a new or empty directory. The copy holds `leveldb/` and `secret.key`, which decrypts the chat tokens of notifications (with `SECRET_KEY` set there is no file: keep that value). While a backup runs, the cleanup by size waits. `/data/backups` is on the database's disk: copy backups off (`docker compose cp exception-monitoring:/data/backups ./backups`) and delete them there with the helper container below (`rm -rf /data/backups`). Never copy `/data/leveldb` of a running server by hand: such a copy may not open.
+
+To restore, stop the server and put the backup's `leveldb/` (and `secret.key`, if it has one) in place of those in the volume (the image has no shell, so use a helper container; `docker volume ls` shows the volume's name):
+
+```sh
+docker compose stop exception-monitoring
+docker run --rm -v <project>_data:/data -v "$PWD/backups/<date>:/backup:ro" alpine \
+  sh -c 'rm -rf /data/leveldb && cp -a /backup/. /data/ && chown -R 65534:65534 /data'
+docker compose start exception-monitoring
+```
 
 ## Upgrades
 

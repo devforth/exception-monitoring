@@ -27,6 +27,7 @@ func (database *Store) Append(projectID int, received time.Time, body []byte) (I
 
 	entry.Size = inboxHeader + len(body)
 	database.inboxBytes.Add(int64(entry.Size))
+	database.lastAppend.Store(time.Now().UnixNano())
 
 	return entry, nil
 }

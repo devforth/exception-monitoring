@@ -67,9 +67,9 @@ While the limit is on, events lose their details as they turn a month old, every
 
 | Variable | Default | |
 |---|---|---|
-| `MAX_DATABASE_SIZE` | `2GB` | Once the database reaches it, the least useful data is deleted until the database is at 80%. Takes `KB`, `MB`, `GB`; `0` turns the limit off, and nothing is deleted or thinned. |
+| `MAX_DATABASE_SIZE` | `2GB` | Once the database reaches it, the least useful data is deleted until the database is at 80%. Takes `KB`, `MB`, `GB`; `0` turns the limit off, and nothing is deleted or thinned. Envelopes waiting to be stored may take 20% of it (of `2GB` when it is off); beyond that new ones get `429` until the queue drains. |
 
-The size is checked at startup, every 10 minutes and after every 50 MB written. The ingest queue is compacted at startup and every 10 minutes halfway between the checks, limit or not, so envelopes that waited there as the SDKs sent them, credentials included, leave the files; not after the writes of a peak, where it would add a quarter to the disk writes. Only the database files in use count (`DATA_DIR/leveldb`). At the limit the parts that collect deleted data as the server works (the ingest queue, issues) are first compacted, since deleted data keeps its space until then; if the database is still at the limit, the cleanup runs and always deletes:
+The size is checked at startup, every 10 minutes and after every 50 MB written. The ingest queue is compacted at startup and every 10 minutes halfway between the checks, limit or not, so envelopes that waited there as the SDKs sent them, credentials included, leave the files. It waits until no envelope has come for 2 seconds: under steady traffic the database merges its files anyway, and a compaction started then would run for as long as the traffic lasts. For the same reason the cleanup compacts before deleting only when ingest is quiet. Only the database files in use count (`DATA_DIR/leveldb`). At the limit the parts that collect deleted data as the server works (the ingest queue, issues) are first compacted, since deleted data keeps its space until then; if the database is still at the limit, the cleanup runs and always deletes:
 
 1. Logs older than a month.
 2. Events older than a month beyond the newest 20 of their issue.

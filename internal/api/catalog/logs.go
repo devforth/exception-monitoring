@@ -39,7 +39,7 @@ func (handler *handlers) listLogs(ctx context.Context, call Call, input listLogs
 
 	limit := filter.Limit
 	filter.Limit++
-	logs, err := handler.store.ListLogs(ctx, filter)
+	logs, err := handler.services.Logs.List(ctx, filter)
 
 	if err != nil {
 		return output, err
@@ -110,13 +110,13 @@ func (handler *handlers) listTrace(ctx context.Context, _ Call, input listTraceI
 	}
 
 	output := traceOutput{TraceID: traceID}
-	events, err := handler.store.ListEvents(ctx, store.EventFilter{TraceID: traceID, Limit: MaxLimit})
+	events, err := handler.services.Issues.Events(ctx, store.EventFilter{TraceID: traceID, Limit: MaxLimit})
 
 	if err != nil {
 		return output, err
 	}
 
-	logs, err := handler.store.ListLogs(ctx, store.LogFilter{TraceID: traceID, Limit: MaxLimit})
+	logs, err := handler.services.Logs.List(ctx, store.LogFilter{TraceID: traceID, Limit: MaxLimit})
 
 	if err != nil {
 		return output, err

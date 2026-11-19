@@ -3,12 +3,11 @@ package catalog
 import (
 	"github.com/devforth/exception-monitoring/internal/platform/config"
 	"github.com/devforth/exception-monitoring/internal/services"
-	"github.com/devforth/exception-monitoring/internal/storage/store"
 )
 
-// handlers holds what the handlers read; one per server.
+// handlers holds what the handlers read; one per server. Data is reached
+// only through the services, the same as the UI pages.
 type handlers struct {
-	store    store.Store
 	projects config.ProjectList
 	services *services.All
 }
@@ -17,8 +16,8 @@ type handlers struct {
 // and MCP pick it up. Descriptions say when to use an endpoint; the MCP
 // instructions and skills hold the workflow. Called with nil arguments it
 // serves only to read the definitions.
-func New(database store.Store, projects config.ProjectList, all *services.All) []Endpoint {
-	handler := &handlers{store: database, projects: projects, services: all}
+func New(projects config.ProjectList, all *services.All) []Endpoint {
+	handler := &handlers{projects: projects, services: all}
 
 	return append([]Endpoint{
 		Define(Endpoint{

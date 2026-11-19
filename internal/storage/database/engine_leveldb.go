@@ -12,4 +12,6 @@ const engineName = leveldb.Name
 
 func openEngine(dir string) (kv.Engine, error) { return leveldb.Open(dir) }
 
+func openEngineReadOnly(dir string) (kv.Engine, error) { return leveldb.OpenReadOnly(dir) }
+
 func openMemoryEngine() kv.Engine { return leveldb.OpenMemory() }

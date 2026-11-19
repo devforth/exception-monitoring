@@ -54,7 +54,7 @@ type processed struct {
 func NewPipeline(handler *Handler, db *database.Store, sink StoreSink) *Pipeline {
 	pipeline := &Pipeline{
 		handler: handler, store: db, sink: sink, logger: handler.logger,
-		MaxInboxBytes: 1 << 30, LogsPerMessage: config.LogsPerMessage, BatchSize: 512, BatchBytes: 4 << 20, BatchWait: 5 * time.Millisecond, Rescan: 10 * time.Second,
+		MaxInboxBytes: config.MaxInboxBytes(config.DefaultMaxDatabaseBytes), LogsPerMessage: config.LogsPerMessage, BatchSize: 512, BatchBytes: 4 << 20, BatchWait: 5 * time.Millisecond, Rescan: 10 * time.Second,
 		fresh: make(chan database.InboxEntry, 4*runtime.GOMAXPROCS(0)), wake: make(chan struct{}, 1),
 	}
 	handler.pipeline = pipeline

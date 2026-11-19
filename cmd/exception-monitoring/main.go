@@ -20,6 +20,7 @@ import (
 	"github.com/devforth/exception-monitoring/internal/api/rest"
 	"github.com/devforth/exception-monitoring/internal/ingest"
 	"github.com/devforth/exception-monitoring/internal/notify"
+	"github.com/devforth/exception-monitoring/internal/platform/background"
 	"github.com/devforth/exception-monitoring/internal/platform/config"
 	"github.com/devforth/exception-monitoring/internal/platform/logging"
 	"github.com/devforth/exception-monitoring/internal/platform/secret"
@@ -45,6 +46,16 @@ func main() {
 	// stopped (it holds the database), it is how a forgotten password is recovered.
 	if len(os.Args) > 1 && os.Args[1] == "reset-password" {
 		if err := resetPassword(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+
+		return
+	}
+
+	// `exception-monitoring backup <dir>`: through the running server, or alone when none runs.
+	if len(os.Args) > 1 && os.Args[1] == "backup" {
+		if err := backup(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
 			os.Exit(1)
 		}
@@ -158,8 +169,6 @@ func run() error {
 		RetryFor:   settings.Notifications.RetryFor,
 		KeepSent:   settings.Notifications.KeepSent,
 		KeepFailed: settings.Notifications.KeepFailed,
-		// After the first size check and before the first inbox compaction (config.CleanupInterval).
-		CleanupDelay: config.OutboxCleanupDelay,
 	})
 
 	defer func() {
@@ -173,28 +182,18 @@ func run() error {
 		}
 	}()
 
-	// The cleanup keeps the database under MAX_DATABASE_SIZE, in the
-	// background until shutdown; it stops before the database closes
-	// (defers run in reverse order).
-	cleanupCtx, stopCleanup := context.WithCancel(ctx)
-	cleanupDone := make(chan struct{})
+	// The periodic jobs stop before the notifier and the database close (defers run in reverse order).
+	jobs := lanes(database, notifier, settings.Retention.MaxDatabaseBytes, logger)
 
-	go func() {
-		defer close(cleanupDone)
+	logger.Info("background jobs", append([]any{logging.Block}, background.Describe(jobs...)...)...)
 
-		database.RunCleanup(cleanupCtx, settings.Retention.MaxDatabaseBytes, config.CleanupInterval, logger)
-	}()
-
-	defer func() {
-		stopCleanup()
-		<-cleanupDone
-	}()
+	defer background.Start(ctx, logger, jobs...)()
 
 	logRetention(logger, settings.Retention)
 
 	// One catalog of requests, served as the REST API and as MCP tools, on
 	// the same services as the UI.
-	endpoints := catalog.New(database, registry, all)
+	endpoints := catalog.New(registry, all)
 
 	sink := ingest.StoreSink{Store: database, Logger: logger, Notifier: notifier, PublicURL: settings.Notifications.PublicURL,
 		Recording: settings.Recording}
@@ -205,6 +204,7 @@ func run() error {
 	// reverse order), storing what it holds.
 	ingestHandler := ingest.New(logger, settings, registry, sink)
 	pipeline := ingest.NewPipeline(ingestHandler, database, sink)
+	pipeline.MaxInboxBytes = config.MaxInboxBytes(settings.Retention.MaxDatabaseBytes)
 	pipelineCtx, stopPipeline := context.WithCancel(context.Background())
 	pipelineDone := make(chan struct{})
 
@@ -218,6 +218,11 @@ func run() error {
 		stopPipeline()
 		<-pipelineDone
 	}()
+
+	// The backup command reaches the server here; it closes before the database (defers run in reverse order).
+	if controlServer := listenControl(settings.DataDir, database, logger); controlServer != nil {
+		defer func() { _ = controlServer.Close() }()
+	}
 
 	// Bind before logging "started" so a busy port fails here, not after a false start message.
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", settings.Port))

@@ -148,3 +148,14 @@ func TestProjectsLookup(t *testing.T) {
 		t.Error("ByID of an unknown project must fail")
 	}
 }
+
+// The ingest queue gets a fifth of the size limit, of the default one when the limit is off.
+func TestMaxInboxBytes(t *testing.T) {
+	if got := MaxInboxBytes(1000); got != 200 {
+		t.Errorf("of 1000: %d", got)
+	}
+
+	if got := MaxInboxBytes(0); got != DefaultMaxDatabaseBytes/5 {
+		t.Errorf("with no limit: %d", got)
+	}
+}

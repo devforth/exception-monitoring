@@ -52,3 +52,6 @@ type Iterator interface {
 
 // ErrNotFound is returned for a missing key.
 var ErrNotFound = errors.New("kv: not found")
+
+// ErrLocked is returned by an adapter's Open when another process holds the database.
+var ErrLocked = errors.New("the database is in use by another process")

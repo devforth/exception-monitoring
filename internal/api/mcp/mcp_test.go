@@ -78,7 +78,7 @@ func newTestServer(t *testing.T, configure ...func(*config.Config)) *testServer 
 		Logger:   logger,
 		Database: database,
 		Ingest:   ingest.New(logger, settings, registry, ingest.StoreSink{Store: database, Logger: logger}),
-		MCP:      mcp.New(logger, database, catalog.New(database, registry, all), authorization, config.DefaultAppName, "test"),
+		MCP:      mcp.New(logger, database, catalog.New(registry, all), authorization, config.DefaultAppName, "test"),
 	}).Handler()
 
 	for _, fixture := range fixtures.All(t) {

@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
@@ -415,10 +414,17 @@ func TestCleanupDoesNotRepeat(t *testing.T) {
 	checkCollections(t, database)
 }
 
+// The package's tests compact at once; TestCompactInboxWhenQuiet sets its own wait.
+func init() { quietFor = 0 }
+
 // The inbox holds envelopes as the SDKs sent them, credentials included; once
-// processed, their bytes leave the files at start and halfway between the
-// checks, limit or not.
-func TestRunCleanupCompactsTheInbox(t *testing.T) {
+// processed, their bytes leave the files at a compaction, which waits until
+// ingest is quiet (under writes goleveldb would repeat it for as long as they last).
+func TestCompactInboxWhenQuiet(t *testing.T) {
+	quietFor = 300 * time.Millisecond
+
+	t.Cleanup(func() { quietFor = 0 })
+
 	dir := t.TempDir()
 	database, err := Open(dir)
 
@@ -428,55 +434,33 @@ func TestRunCleanupCompactsTheInbox(t *testing.T) {
 
 	defer func() { _ = database.Close() }()
 
-	process := func(raw []byte) {
-		entry, err := database.Append(1, time.Now(), raw)
+	raw := []byte(`{"request":{"headers":{"Cookie":"sid=7f3a9c2e5b8d1046e9a2c7b4f0d3851a"}}}`)
+	entry, err := database.Append(1, time.Now(), raw)
 
-		if err != nil {
-			t.Fatal(err)
-		}
+	if err != nil {
+		t.Fatal(err)
+	}
 
-		if _, err := database.Write([]Envelope{{Sequence: entry.Sequence, InboxSize: entry.Size}}); err != nil {
-			t.Fatal(err)
-		}
+	if _, err := database.Write([]Envelope{{Sequence: entry.Sequence, InboxSize: entry.Size}}); err != nil {
+		t.Fatal(err)
+	}
 
-		if !filesHold(t, dir, raw) {
-			t.Fatal("the envelope never reached the files")
-		}
+	if err := database.CompactInbox(context.Background()); err != nil || !filesHold(t, dir, raw) {
+		t.Fatalf("compacted while ingest was busy: %v", err)
+	}
+
+	time.Sleep(quietFor)
+
+	if err := database.CompactInbox(context.Background()); err != nil {
+		t.Fatal(err)
 	}
 
 	// goleveldb removes replaced files in the background.
-	waitGone := func(raw []byte, when string) {
-		for deadline := time.Now().Add(10 * time.Second); filesHold(t, dir, raw); time.Sleep(10 * time.Millisecond) {
-			if time.Now().After(deadline) {
-				t.Fatalf("a processed envelope is still in the database files %s", when)
-			}
+	for deadline := time.Now().Add(10 * time.Second); filesHold(t, dir, raw); time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("a processed envelope is still in the database files")
 		}
 	}
-
-	first := []byte(`{"request":{"headers":{"Cookie":"sid=7f3a9c2e5b8d1046e9a2c7b4f0d3851a"}}}`)
-
-	process(first)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	stopped := make(chan struct{})
-
-	go func() {
-		defer close(stopped)
-
-		database.RunCleanup(ctx, 0, 400*time.Millisecond, slog.New(slog.DiscardHandler))
-	}()
-
-	defer func() {
-		cancel()
-		<-stopped
-	}()
-
-	waitGone(first, "after the start")
-
-	second := []byte(`{"request":{"headers":{"Cookie":"sid=0e4b9d1c7a3f5826b1d9e0c4a7f3b258"}}}`)
-
-	process(second)
-	waitGone(second, "halfway between the checks")
 }
 
 // filesHold says whether a file of the database holds data.

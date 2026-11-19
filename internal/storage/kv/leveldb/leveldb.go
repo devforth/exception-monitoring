@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/filter"
@@ -39,8 +40,22 @@ func options() *opt.Options {
 }
 
 // Open opens (or creates) the database in dir.
-func Open(dir string) (kv.Engine, error) {
-	db, err := leveldb.OpenFile(dir, options())
+func Open(dir string) (kv.Engine, error) { return openFile(dir, options()) }
+
+// OpenReadOnly opens the database in dir without writing to it; a writer holding it gives kv.ErrLocked.
+func OpenReadOnly(dir string) (kv.Engine, error) {
+	settings := options()
+	settings.ReadOnly = true
+
+	return openFile(dir, settings)
+}
+
+func openFile(dir string, settings *opt.Options) (kv.Engine, error) {
+	db, err := leveldb.OpenFile(dir, settings)
+
+	if errors.Is(err, syscall.EWOULDBLOCK) {
+		return nil, fmt.Errorf("%w: %w", kv.ErrLocked, err)
+	}
 
 	if err != nil {
 		return nil, err
@@ -66,10 +81,13 @@ type levelGetter interface {
 	NewIterator(slice *util.Range, ro *opt.ReadOptions) iterator.Iterator
 }
 
-type levelReader struct{ db levelGetter }
+type levelReader struct {
+	db      levelGetter
+	options *opt.ReadOptions
+}
 
 func (reader levelReader) Get(key []byte) ([]byte, error) {
-	value, err := reader.db.Get(key, nil)
+	value, err := reader.db.Get(key, reader.options)
 
 	if errors.Is(err, leveldb.ErrNotFound) {
 		return nil, kv.ErrNotFound
@@ -79,7 +97,7 @@ func (reader levelReader) Get(key []byte) ([]byte, error) {
 }
 
 func (reader levelReader) Iterate(lower, upper []byte) kv.Iterator {
-	return levelIterator{reader.db.NewIterator(&util.Range{Start: lower, Limit: upper}, nil)}
+	return levelIterator{reader.db.NewIterator(&util.Range{Start: lower, Limit: upper}, reader.options)}
 }
 
 type levelIterator struct{ iterator.Iterator }
@@ -113,7 +131,10 @@ func (engine *levelEngine) Snapshot() (kv.Snapshot, error) {
 		return nil, err
 	}
 
-	return levelSnapshot{levelReader: levelReader{db: snapshot}, snapshot: snapshot}, nil
+	// Snapshots serve backups, whose reads should not evict the blocks ingest uses.
+	reader := levelReader{db: snapshot, options: &opt.ReadOptions{DontFillCache: true}}
+
+	return levelSnapshot{levelReader: reader, snapshot: snapshot}, nil
 }
 
 type levelSnapshot struct {

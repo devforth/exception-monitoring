@@ -2,7 +2,7 @@ IMAGE ?= devforth/exception-monitoring
 VERSION ?= dev
 MAX_IMAGE_MB ?= 50
 
-.PHONY: test lint fix build run docker image-size
+.PHONY: test lint fix build run backup docker image-size
 
 test:
 	go test -race ./...
@@ -25,6 +25,11 @@ build:
 run:
 	@set -a; [ -f .env ] && . ./.env; [ -f .env.local ] && . ./.env.local; set +a; \
 	go run ./cmd/exception-monitoring
+
+# A backup through the running server (or of the stopped database): DIR=/abs/path, by default DATA_DIR/backups/<time>.
+backup:
+	@set -a; [ -f .env ] && . ./.env; [ -f .env.local ] && . ./.env.local; set +a; \
+	go run ./cmd/exception-monitoring backup $(DIR)
 
 docker:
 	docker build --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION) .

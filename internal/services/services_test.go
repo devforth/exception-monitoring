@@ -179,6 +179,31 @@ func TestSelectedEvent(t *testing.T) {
 	}
 }
 
+// Delete says when there was nothing to delete: the tools answer not found.
+func TestDeleteIssue(t *testing.T) {
+	ctx := context.Background()
+	database := openStore(t)
+	issues := NewIssues(database)
+	now := time.Now().UTC()
+
+	result, err := database.SaveEvent(ctx, store.NewEvent{
+		ProjectID: 1, EventID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Fingerprint: "first", Title: "first", Level: "error",
+		Timestamp: now, ReceivedAt: now, Payload: []byte(`{}`),
+	})
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := issues.Delete(ctx, result.IssueID); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+
+	if err := issues.Delete(ctx, result.IssueID); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("deleting again: %v, want store.ErrNotFound", err)
+	}
+}
+
 // Saving an active connection retries its waiting messages now: a save is
 // usually the fix for why they failed.
 func TestSaveRetriesWaitingMessages(t *testing.T) {

@@ -480,11 +480,14 @@ func TestOldMessagesAreCleaned(t *testing.T) {
 
 	notifier := setup.start(Options{KeepSent: time.Hour, KeepFailed: 24 * time.Hour})
 
-	waitFor(t, "the cleanup at start", func() bool {
-		counts := setup.outboxCounts()
+	if err := notifier.CleanOutbox(ctx); err != nil {
+		t.Fatal(err)
+	}
 
-		return counts["sent"] == 1 && counts["failed"] == 1
-	})
+	if counts := setup.outboxCounts(); counts["sent"] != 1 || counts["failed"] != 1 {
+		t.Errorf("after the cleanup: %v", counts)
+	}
+
 	closeNotifier(t, notifier)
 }
 

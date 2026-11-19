@@ -48,6 +48,22 @@ func (issues *Issues) Get(ctx context.Context, issueID string) (store.Issue, err
 	return issues.store.GetIssue(ctx, issueID)
 }
 
+// GetMany reads the issues of ids that exist, in no order.
+func (issues *Issues) GetMany(ctx context.Context, issueIDs []string) ([]store.Issue, error) {
+	return issues.store.GetIssues(ctx, issueIDs)
+}
+
+// Event reads an event of a project by the ID its SDK reported, in UUID or
+// hex form; store.ErrNotFound when it does not exist.
+func (issues *Issues) Event(ctx context.Context, projectID int, eventID string) (store.Event, error) {
+	return issues.store.GetEvent(ctx, projectID, sentry.NormalizeEventID(eventID))
+}
+
+// Events lists the events that match filter (an issue's or a trace's), newest first.
+func (issues *Issues) Events(ctx context.Context, filter store.EventFilter) ([]store.EventSummary, error) {
+	return issues.store.ListEvents(ctx, filter)
+}
+
 // recentEventsShown is how many events of an issue its page lists.
 const recentEventsShown = 20
 
@@ -65,7 +81,7 @@ func (issues *Issues) SelectedEvent(ctx context.Context, issue store.Issue, even
 		return issues.store.LatestEvent(ctx, issue.ID)
 	}
 
-	event, err := issues.store.GetEvent(ctx, issue.ProjectID, sentry.NormalizeEventID(eventID))
+	event, err := issues.Event(ctx, issue.ProjectID, eventID)
 
 	if err == nil && event.IssueID != issue.ID {
 		return store.Event{}, store.ErrNotFound
@@ -148,6 +164,27 @@ func (issues *Issues) setStatus(ctx context.Context, issueIDs []string, status s
 			return err
 		}
 	}
+}
+
+// SetStatus sets the status of every issue of ids at once, recorded with
+// actor, and returns them: all or nothing, so one missing ID changes none
+// (store.ErrNotFound). The agents' tools use it; the UI's ApplyAction skips
+// issues deleted meanwhile instead.
+func (issues *Issues) SetStatus(ctx context.Context, issueIDs []string, status string, actor store.Actor) ([]store.Issue, error) {
+	return issues.store.SetIssuesStatus(ctx, issueIDs, status, actor)
+}
+
+// Delete deletes an issue with its events; store.ErrNotFound when it does not
+// exist. Who may delete is checked by the caller: ApplyAction for the UI, the
+// Admin flag of the tool for agents and the API token.
+func (issues *Issues) Delete(ctx context.Context, issueID string) error {
+	deleted, err := issues.store.DeleteIssues(ctx, []string{issueID})
+
+	if err == nil && deleted == 0 {
+		err = store.ErrNotFound
+	}
+
+	return err
 }
 
 // History lists the status changes of an issue, newest first.

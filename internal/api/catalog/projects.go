@@ -38,7 +38,7 @@ func (handler *handlers) listProjects(ctx context.Context, call Call, input list
 		return output, nil
 	}
 
-	counts, err := handler.store.UnresolvedCounts(ctx)
+	counts, err := handler.services.Projects.UnresolvedCounts(ctx)
 
 	if err != nil {
 		return output, err

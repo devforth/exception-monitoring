@@ -133,7 +133,7 @@ func startServer(t *testing.T, database store.Store, adminUsername, adminPasswor
 		Database: database,
 		Ingest:   ingest.New(logger, settings, registry, ingest.StoreSink{Store: database, Logger: logger}),
 		UI:       webUI,
-		MCP:      mcp.New(logger, database, catalog.New(database, registry, all), authorization, config.DefaultAppName, "test"),
+		MCP:      mcp.New(logger, database, catalog.New(registry, all), authorization, config.DefaultAppName, "test"),
 	}).Handler()
 
 	return &testServer{t: t, handler: handler, mails: mails}
