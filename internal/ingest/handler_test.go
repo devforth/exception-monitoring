@@ -423,3 +423,44 @@ func TestCredentialsAreScrubbed(t *testing.T) {
 		}
 	}
 }
+
+// A device whose clock is off: the times of its events and logs are moved by
+// how far sent_at is from the receive time; under a minute, or without a time
+// of their own, they stay.
+func TestClockDrift(t *testing.T) {
+	received := time.Date(2026, 11, 19, 13, 0, 0, 0, time.UTC)
+	behind := received.Add(-3 * time.Hour)
+	handler := New(slog.New(slog.DiscardHandler), &config.Config{}, config.Projects{}, nil)
+	body := func(sentAt time.Time, eventTime string) []byte {
+		return []byte(fmt.Sprintf(`{"sent_at":%q}`, sentAt.Format(time.RFC3339Nano)) + "\n" +
+			`{"type":"event"}` + "\n" + `{"message":"slow"` + eventTime + `}` + "\n" +
+			`{"type":"log"}` + "\n" + fmt.Sprintf(`{"items":[{"timestamp":%d,"level":"info","body":"line"}]}`, behind.Add(-time.Minute).Unix()))
+	}
+
+	for _, test := range []struct {
+		name            string
+		sentAt          time.Time
+		eventTime       string
+		event, logEntry time.Time
+	}{
+		{"3 hours behind", behind, fmt.Sprintf(`,"timestamp":%d`, behind.Add(-time.Minute).Unix()), received.Add(-time.Minute), received.Add(-time.Minute)},
+		{"within a minute", received.Add(-30 * time.Second), fmt.Sprintf(`,"timestamp":%d`, behind.Unix()), behind, behind.Add(-time.Minute)},
+		{"no event time", behind, "", received, received.Add(-time.Minute)},
+	} {
+		envelope, err := sentry.ParseEnvelope(body(test.sentAt, test.eventTime))
+
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		events, logs, err := handler.parseItems(config.Project{ID: 1}, envelope, received)
+
+		if err != nil || len(events) != 1 || len(logs) != 1 {
+			t.Fatalf("%s: %v", test.name, err)
+		}
+
+		if !events[0].Timestamp.Equal(test.event) || !logs[0].Timestamp.Equal(test.logEntry) {
+			t.Errorf("%s: event %s, log %s", test.name, events[0].Timestamp.UTC(), logs[0].Timestamp.UTC())
+		}
+	}
+}

@@ -159,8 +159,9 @@ func TestLogs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(logs) != envelope.Items[0].Header.ItemCount {
-		t.Fatalf("got %d logs, header says %d", len(logs), envelope.Items[0].Header.ItemCount)
+	// The item header of node-logs says item_count 11.
+	if len(logs) != 11 {
+		t.Fatalf("got %d logs, want 11", len(logs))
 	}
 
 	for _, record := range logs {

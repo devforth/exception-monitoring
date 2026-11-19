@@ -59,6 +59,15 @@ type IssueData struct {
 	History []store.StatusChange
 }
 
+// ClockDrift is how far the device's clock was off: the stored time is the payload's moved by it.
+func (data IssueData) ClockDrift() time.Duration {
+	if data.Parsed == nil || data.Parsed.Timestamp.IsZero() {
+		return 0
+	}
+
+	return data.Event.Timestamp.Sub(data.Parsed.Timestamp.Time).Round(time.Minute)
+}
+
 // LastChange is the latest status change, for the header; nil without one.
 func (data IssueData) LastChange() *store.StatusChange {
 	if len(data.History) == 0 {

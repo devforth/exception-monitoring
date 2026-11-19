@@ -23,23 +23,12 @@ type EnvelopeHeader struct {
 	EventID string `json:"event_id"`
 	SentAt  string `json:"sent_at"`
 	// DSN is set when the SDK sends through a tunnel, which has no auth in the request itself.
-	DSN   string        `json:"dsn"`
-	SDK   *SDK          `json:"sdk"`
-	Trace *TraceContext `json:"trace"`
+	DSN string `json:"dsn"`
 }
 
 type SDK struct {
 	Name    string `json:"name"`
 	Version string `json:"version"`
-}
-
-// TraceContext is the envelope's dynamic sampling context.
-type TraceContext struct {
-	TraceID     string `json:"trace_id"`
-	PublicKey   string `json:"public_key"`
-	Environment string `json:"environment"`
-	Release     string `json:"release"`
-	Transaction string `json:"transaction"`
 }
 
 type Item struct {
@@ -48,10 +37,8 @@ type Item struct {
 }
 
 type ItemHeader struct {
-	Type        string `json:"type"`
-	Length      *int   `json:"length"`
-	ContentType string `json:"content_type"`
-	ItemCount   int    `json:"item_count"`
+	Type   string `json:"type"`
+	Length *int   `json:"length"`
 }
 
 // Item types the server stores. Everything else (span, transaction, session,

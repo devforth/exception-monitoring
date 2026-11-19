@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/devforth/exception-monitoring/internal/fixtures"
 )
@@ -489,5 +490,26 @@ func TestIssueRowsShowStatus(t *testing.T) {
 		if !strings.Contains(row(id), want) {
 			t.Errorf("issue %s: %q missing in %q", id, want, row(id))
 		}
+	}
+}
+
+// An event from a device whose clock is 3 hours behind shows the corrected
+// time and says how far the clock was off.
+func TestEventPageCorrectsTheDeviceClock(t *testing.T) {
+	server := newTestServer(t, password)
+	server.login()
+
+	behind := time.Now().Add(-3 * time.Hour)
+	server.sendEnvelope(fixtures.BackendEnvelopeURL, []byte(fmt.Sprintf(`{"sent_at":%q}`, behind.Format(time.RFC3339Nano))+"\n"+
+		`{"type":"event"}`+"\n"+fmt.Sprintf(`{"message":"device clock","level":"error","timestamp":%d}`, behind.Unix())))
+
+	ids := issueIDs(server.page("/issues"))
+
+	if len(ids) != 1 {
+		t.Fatalf("issues %v", ids)
+	}
+
+	if page := server.page("/issues/" + ids[0]); !strings.Contains(page, "the device's clock was off by 3h0m0s") {
+		t.Error("the clock drift is not shown")
 	}
 }

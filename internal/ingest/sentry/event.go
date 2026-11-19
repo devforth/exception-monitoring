@@ -20,7 +20,6 @@ type Event struct {
 	Timestamp   Timestamp                  `json:"timestamp"`
 	Level       string                     `json:"level"`
 	Platform    string                     `json:"platform"`
-	Logger      string                     `json:"logger"`
 	Environment string                     `json:"environment"`
 	Release     string                     `json:"release"`
 	ServerName  string                     `json:"server_name"`
@@ -42,7 +41,6 @@ type Event struct {
 type Exception struct {
 	Type       string      `json:"type"`
 	Value      string      `json:"value"`
-	Module     string      `json:"module"`
 	Mechanism  *Mechanism  `json:"mechanism"`
 	Stacktrace *Stacktrace `json:"stacktrace"`
 }

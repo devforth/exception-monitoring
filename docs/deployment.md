@@ -73,6 +73,20 @@ server {
 
 Events and logs are kept until the database nears [its size limit](configuration.md#retention). What takes effort to set up again lives in the same database: projects and their keys (keep them in `PROJECTS` and the DSNs survive any loss), users, notification connections and connected agents. Keep the `data` volume on a disk you trust, and back it up.
 
+## Resources
+
+Measured on a laptop with 20 threads and an NVMe disk, with the peak of 50 projects each sending 1,000 errors and 2,200 log lines at once:
+
+| | |
+|---|---|
+| Memory | About 200 MB at the peak (the default `GOMEMLIMIT`), less when idle. |
+| CPU | The errors are stored in about 14 s (3,600 a second) on 5 cores on average. With fewer cores it takes longer; SDKs still get their answers in milliseconds, since envelopes wait in the queue. |
+| Disk space | `MAX_DATABASE_SIZE` plus free room: merging its files, the database writes new ones before it deletes the old. |
+| Disk writes | The database writes data several times as it merges its files: the 366 MB of that peak wrote 1.8 GB. Use an SSD; a slow network volume becomes the limit. |
+| At the size limit | The same peak while the cleanup runs is stored in about a minute, with answers under 0.5 s and nothing refused; the cleanup took 2 GB down to 0.5 GB in 3 minutes. |
+
+A crash of the process loses nothing the server has answered. A power cut may lose the envelopes of the last few milliseconds: the queue is written without a disk sync of its own, and the next stored batch syncs it.
+
 ## Backup and restore
 
 ```sh

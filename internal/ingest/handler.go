@@ -209,6 +209,7 @@ func (handler *Handler) parseItems(project config.Project, envelope *sentry.Enve
 	)
 
 	dropped := map[string]int{}
+	drift := clockDrift(envelope.Header.SentAt, received)
 
 	for index, item := range envelope.Items {
 		switch item.Header.Type {
@@ -222,12 +223,22 @@ func (handler *Handler) parseItems(project config.Project, envelope *sentry.Enve
 				return nil, nil, reject(http.StatusBadRequest, "item %d: %v", index+1, err)
 			}
 
+			if !event.Timestamp.Equal(received) { // received: the event had no time of its own
+				event.Timestamp.Time = event.Timestamp.Add(drift)
+			}
+
 			events = append(events, event)
 		case sentry.ItemLog:
 			batch, err := sentry.ParseLogs(scrub.JSON(item.Payload), received)
 
 			if err != nil {
 				return nil, nil, reject(http.StatusBadRequest, "item %d: %v", index+1, err)
+			}
+
+			for index := range batch {
+				if !batch[index].Timestamp.Equal(received) {
+					batch[index].Timestamp.Time = batch[index].Timestamp.Add(drift)
+				}
 			}
 
 			logs = append(logs, batch...)
@@ -272,4 +283,21 @@ func writeRateLimited(w http.ResponseWriter, retryAfter string) {
 	w.Header().Set("Retry-After", retryAfter)
 	w.Header().Set("X-Sentry-Rate-Limits", retryAfter+"::project")
 	writeError(w, http.StatusTooManyRequests, "rate limit exceeded")
+}
+
+// clockDrift is how far the SDK's clock was behind the server's when it sent
+// the envelope (sent_at), so the times of its events and logs can be moved by
+// it; nothing under a minute, which network delays explain.
+func clockDrift(sentAt string, received time.Time) time.Duration {
+	sent, err := time.Parse(time.RFC3339Nano, sentAt)
+
+	if err != nil {
+		return 0
+	}
+
+	if drift := received.Sub(sent); drift.Abs() >= time.Minute {
+		return drift
+	}
+
+	return 0
 }

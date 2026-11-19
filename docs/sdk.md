@@ -89,6 +89,8 @@ Go, PHP, Ruby, Java, .NET and the rest: follow the SDK's own guide and use the D
 - **Logs** of every level by default (`RECORD_LOG_LEVELS`).
 - Tracing spans, transactions, session replays, profiles, attachments and client reports are accepted and dropped.
 
+An event or log keeps the time it happened by the device's clock; when that clock is off by a minute or more (the SDK's `sent_at` against the time the server got the envelope), the time is corrected and the event's page says by how much. Issues list when the server received their events.
+
 Before an event or log is stored, values under names like password, token, secret, cookie, session or authorization are removed, as are credentials in URLs and headers. Large parts that do not help a fix (library source code, module lists, more than 50 breadcrumbs) are dropped too. Until then a received envelope waits in the ingest queue as it was sent, usually for milliseconds; the queue's part of the database files is compacted every 10 minutes when ingest is quiet (and merged anyway under steady traffic), so the files do not keep it for long.
 
 ## Grouping
