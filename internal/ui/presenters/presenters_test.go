@@ -53,8 +53,8 @@ func TestEmailStepState(t *testing.T) {
 		fixed      bool
 	}{
 		{"new", store.Connection{Type: config.ChannelEmail}, "input", false},
-		{"existing, not confirmed", store.Connection{ID: 3, Type: config.ChannelEmail}, "unconfirmed", true},
-		{"existing, confirmed", store.Connection{ID: 3, Type: config.ChannelEmail, Verified: true}, "verified", true},
+		{"existing, not confirmed", store.Connection{ID: "con00003", Type: config.ChannelEmail}, "unconfirmed", true},
+		{"existing, confirmed", store.Connection{ID: "con00003", Type: config.ChannelEmail, Verified: true}, "verified", true},
 	} {
 		view := presenter.Form(test.connection)
 
@@ -65,14 +65,14 @@ func TestEmailStepState(t *testing.T) {
 
 	// A new email form shown again: a confirmed address stays confirmed, a
 	// taken one goes back to the address field with a link.
-	confirmed := presenter.FormAgain(store.Connection{Type: config.ChannelEmail, DestinationID: 4}, map[string]string{"levels": "x"}, "", nil, "dev@example.com")
+	confirmed := presenter.FormAgain(store.Connection{Type: config.ChannelEmail, DestinationID: "dst00004"}, map[string]string{"levels": "x"}, "", nil, "dev@example.com")
 
 	if confirmed.Email.State != "verified" || confirmed.Email.Address != "dev@example.com" || confirmed.Errors["levels"] == "" {
 		t.Errorf("form again = %+v, want the confirmed step and the errors", confirmed.Email)
 	}
 
-	existing := &services.Duplicate{ID: 9, Name: "dev"}
-	taken := presenter.FormAgain(store.Connection{Type: config.ChannelEmail, Address: "dev@example.com", DestinationID: 4}, nil, "", existing, "dev@example.com")
+	existing := &services.Duplicate{ID: "con00009", Name: "dev"}
+	taken := presenter.FormAgain(store.Connection{Type: config.ChannelEmail, Address: "dev@example.com", DestinationID: "dst00004"}, nil, "", existing, "dev@example.com")
 
 	if taken.Email.State != "input" || taken.Email.Duplicate != existing || taken.Duplicate != nil {
 		t.Errorf("taken address: step %+v, form duplicate %v; want the link in the email step", taken.Email, taken.Duplicate)

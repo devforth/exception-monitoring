@@ -1,6 +1,8 @@
-// Package access protects the admin parts of the server (REST API, later the
-// UI) with an IP allowlist and credentials. Ingest is not protected here: SDKs
-// in browsers send from anywhere, and they authenticate with DSN keys.
+// Package access guards the parts of the server other than ingest and /health:
+// the IP allowlist (RequireAllowedIP) for the UI, MCP and the REST API, and the
+// token (RequireToken) for the REST API. ClientIP, IsHTTPS and PublicURL read the
+// client's address and scheme behind trusted proxies. Ingest is not protected
+// here: SDKs in browsers send from anywhere, and they authenticate with DSN keys.
 package access
 
 import (
@@ -81,7 +83,7 @@ func IsHTTPS(r *http.Request, trustedProxies []netip.Prefix) bool {
 }
 
 // PublicURL is where clients reach this server: publicURL (PUBLIC_URL) when
-// set, since SDKs and agents may use another address than the admin's
+// set, since SDKs and agents may use another address than the user's
 // browser, otherwise the address of this request.
 func PublicURL(r *http.Request, publicURL string, trustedProxies []netip.Prefix) *url.URL {
 	if public, err := url.Parse(publicURL); err == nil && public.Host != "" {

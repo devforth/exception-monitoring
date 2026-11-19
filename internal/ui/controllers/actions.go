@@ -23,7 +23,7 @@ func (controller *Controllers) IssueAction(w http.ResponseWriter, r *http.Reques
 
 	action := r.FormValue("action")
 
-	if !controller.runAction(w, r, action, []int64{issue.ID}) {
+	if !controller.runAction(w, r, action, []string{issue.ID}) {
 		return
 	}
 
@@ -34,7 +34,7 @@ func (controller *Controllers) IssueAction(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Reload the page: the status shows up in the header and in the buttons.
-	redirectAfterPost(w, r, fmt.Sprintf("/issues/%d", issue.ID))
+	redirectAfterPost(w, r, fmt.Sprintf("/issues/%s", issue.ID))
 }
 
 // BulkIssueAction handles POST /issues/bulk from the issues list: "action",
@@ -57,7 +57,7 @@ func (controller *Controllers) BulkIssueAction(w http.ResponseWriter, r *http.Re
 }
 
 // runAction applies the action and writes an error response if it fails.
-func (controller *Controllers) runAction(w http.ResponseWriter, r *http.Request, action string, issueIDs []int64) bool {
+func (controller *Controllers) runAction(w http.ResponseWriter, r *http.Request, action string, issueIDs []string) bool {
 	err := controller.issues.ApplyAction(r.Context(), requests.Viewer(r), action, issueIDs)
 
 	switch {

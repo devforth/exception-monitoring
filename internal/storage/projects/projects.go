@@ -1,11 +1,5 @@
-// Package projects keeps the list of projects: stored in the database,
-// seeded from PROJECTS at startup, editable in the UI, and cached in memory
-// so ingest reads it without a query per envelope.
-//
-// The projects in PROJECTS are written to the database at every start with
-// the same id, name and key, so their DSNs never change and env stays the
-// source of truth for them: the UI can change only their retention.
-// Projects added in the UI are fully editable and can be deleted.
+// Package projects keeps the list of projects: seeded from PROJECTS at
+// startup, editable in the UI, cached in memory.
 package projects
 
 import (
@@ -153,14 +147,14 @@ func (registry *Registry) Create(ctx context.Context, project store.Project) (in
 	return id, registry.Reload(ctx)
 }
 
-// Update saves a project. For a project from PROJECTS only the retention
-// changes: its name and key are kept as env has them.
+// Update saves a project. For a project from PROJECTS only the color and levels
+// change: its name and key are kept as env has them.
 func (registry *Registry) Update(ctx context.Context, project store.Project) error {
 	if envProject, ok := registry.env.ByID(project.ID); ok {
 		project.Name, project.PublicKey = envProject.Name, envProject.PublicKey
 	}
 
-	if err := registry.store.UpdateProject(ctx, project, time.Now()); err != nil {
+	if err := registry.store.UpdateProject(ctx, project); err != nil {
 		return err
 	}
 

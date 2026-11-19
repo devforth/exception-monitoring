@@ -28,7 +28,6 @@
 </section>
 
 {{with .Parsed}}
-{{$event := .}}
 <section>
   <h2>Event <code>{{.EventID}}</code></h2>
   {{if $.Data.Event.Thinned}}<p class="muted small">Details of this old event (breadcrumbs, request, tags, contexts) were removed to save space; the error, its stack trace and message stay.</p>{{end}}
@@ -128,7 +127,7 @@
 <section><details class="section">
   <summary><h2>{{if $.Data.LogsFromRequest}}Logs from the same request{{else}}Logs from the same trace{{end}}</h2> <span class="muted">{{len .}}</span></summary>
   {{if not $.Data.LogsFromRequest}}<p class="muted small">Not linked to this request exactly: logs of the same trace within a minute of the error.</p>{{end}}
-  <div class="table-scroll"><table class="list compact logs">
+  <div class="table-scroll"><table class="list compact">
     <tbody>
       {{range .}}
       <tr>

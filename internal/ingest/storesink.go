@@ -20,7 +20,6 @@ import (
 type StoreSink struct {
 	Store  store.Store
 	Logger *slog.Logger
-	Now    func() time.Time // nil means time.Now
 	// Notifier is told about new and regressed issues. Nil sends nothing.
 	Notifier Notifier
 	// PublicURL is the UI address for links in notifications; empty means no link.
@@ -33,14 +32,6 @@ type StoreSink struct {
 // Notifier queues alerts without blocking ingest (see package notify).
 type Notifier interface {
 	Notify(notification notify.Notification)
-}
-
-func (sink StoreSink) now() time.Time {
-	if sink.Now != nil {
-		return sink.Now()
-	}
-
-	return time.Now()
 }
 
 // eventRecord maps an event to what is stored, or reports false when its
@@ -70,7 +61,7 @@ func (sink StoreSink) eventRecord(project config.Project, event *sentry.Event) (
 		SpanID:       trace.SpanID,
 		ParentSpanID: trace.ParentSpanID,
 		Timestamp:    event.Timestamp.Time,
-		ReceivedAt:   sink.now(),
+		ReceivedAt:   time.Now(),
 		Payload:      event.Raw,
 	}, true
 }
@@ -112,7 +103,7 @@ func (sink StoreSink) report(project config.Project, event *sentry.Event, result
 	}
 }
 
-func (sink StoreSink) notify(kind notify.Kind, project config.Project, issueID int64, event *sentry.Event, receivedAt time.Time) {
+func (sink StoreSink) notify(kind notify.Kind, project config.Project, issueID string, event *sentry.Event, receivedAt time.Time) {
 	if sink.Notifier == nil {
 		return
 	}
@@ -120,7 +111,7 @@ func (sink StoreSink) notify(kind notify.Kind, project config.Project, issueID i
 	issueURL := ""
 
 	if sink.PublicURL != "" {
-		issueURL = fmt.Sprintf("%s/issues/%d", sink.PublicURL, issueID)
+		issueURL = fmt.Sprintf("%s/issues/%s", sink.PublicURL, issueID)
 	}
 
 	sink.Notifier.Notify(notify.Notification{

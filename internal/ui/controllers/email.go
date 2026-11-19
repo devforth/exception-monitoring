@@ -2,7 +2,6 @@ package controllers
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/devforth/exception-monitoring/internal/services"
 )
@@ -32,8 +31,7 @@ func (controller *Controllers) EmailStart(w http.ResponseWriter, r *http.Request
 }
 
 func (controller *Controllers) EmailResend(w http.ResponseWriter, r *http.Request) {
-	id, _ := strconv.ParseInt(r.PostFormValue("destination_id"), 10, 64)
-	step, err := controller.verification.ResendCode(r.Context(), id)
+	step, err := controller.verification.ResendCode(r.Context(), r.PostFormValue("destination_id"))
 
 	if err != nil {
 		controller.serverError(w, r, err)
@@ -45,8 +43,7 @@ func (controller *Controllers) EmailResend(w http.ResponseWriter, r *http.Reques
 }
 
 func (controller *Controllers) EmailConfirm(w http.ResponseWriter, r *http.Request) {
-	id, _ := strconv.ParseInt(r.PostFormValue("destination_id"), 10, 64)
-	step, err := controller.verification.ConfirmCode(r.Context(), id, r.PostFormValue("code"))
+	step, err := controller.verification.ConfirmCode(r.Context(), r.PostFormValue("destination_id"), r.PostFormValue("code"))
 
 	if err != nil {
 		controller.serverError(w, r, err)

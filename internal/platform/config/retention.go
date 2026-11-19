@@ -19,6 +19,15 @@ const (
 	// with other numbers or IDs) as it is written: its newest copies stay.
 	LogsPerMessage = 10
 
+	// The periodic jobs start apart: the size checks at start and every
+	// CleanupInterval (and after CleanupWritten bytes), the inbox compactions at
+	// start and halfway between the checks, the outbox cleanups a quarter of
+	// an interval after them and every OutboxCleanupInterval, a multiple of it.
+	CleanupInterval       = 10 * time.Minute
+	CleanupWritten        = 50 << 20
+	OutboxCleanupDelay    = CleanupInterval / 4
+	OutboxCleanupInterval = 6 * CleanupInterval
+
 	// The cleanup (database/cleanup.go; order in docs/configuration.md).
 	CleanupStartPercent = 100
 	CleanupStopPercent  = 80
@@ -46,42 +55,6 @@ func parseRetention(getenv func(string) string) (Retention, error) {
 	return retention, nil
 }
 
-// ParseCount reads a limit: 0 (no limit) or a positive integer.
-func ParseCount(value string) (int, error) {
-	count, err := strconv.Atoi(strings.TrimSpace(value))
-
-	if err != nil || count < 0 {
-		return 0, fmt.Errorf("invalid value %q (0 or a positive integer)", value)
-	}
-
-	return count, nil
-}
-
-// FormatDuration writes a duration the way the settings take it ("30d",
-// "12h", "1h30m", "0"): the inverse of ParseOptionalDuration.
-func FormatDuration(duration time.Duration) string {
-	if duration == 0 {
-		return "0"
-	}
-
-	if duration%(24*time.Hour) == 0 {
-		return strconv.Itoa(int(duration/(24*time.Hour))) + "d"
-	}
-
-	// "12h0m0s" → "12h", "1h30m0s" → "1h30m".
-	text := duration.String()
-
-	if strings.HasSuffix(text, "m0s") {
-		text = strings.TrimSuffix(text, "0s")
-	}
-
-	if strings.HasSuffix(text, "h0m") {
-		text = strings.TrimSuffix(text, "0m")
-	}
-
-	return text
-}
-
 // HumanDuration writes a duration for people, in its largest whole unit:
 // "15 minutes", "1 hour", "30 days" (or as Go writes it when none fits).
 func HumanDuration(duration time.Duration) string {
@@ -103,15 +76,6 @@ func HumanDuration(duration time.Duration) string {
 	}
 
 	return duration.String()
-}
-
-// ParseOptionalDuration is parseDuration that also accepts "0" (no limit).
-func ParseOptionalDuration(value string) (time.Duration, error) {
-	if value == "0" {
-		return 0, nil
-	}
-
-	return parseDuration(value)
 }
 
 var sizeUnits = []struct {

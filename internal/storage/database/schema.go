@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/devforth/exception-monitoring/internal/storage/kv"
@@ -22,6 +23,18 @@ type collections struct {
 	marks    *kv.Collection[timeMark]
 	thin     *kv.Collection[thinProgress]
 	cleanups *kv.Collection[CleanupRun]
+
+	users        *kv.Collection[userRecord]
+	sessions     *kv.Collection[sessionRecord]
+	oauthClients *kv.Collection[model.OAuthClient]
+	oauthCodes   *kv.Collection[codeRecord]
+	grants       *kv.Collection[grantRecord]
+	spentTokens  *kv.Collection[spentToken]
+
+	projects     *kv.Collection[model.Project]
+	destinations *kv.Collection[destinationRecord]
+	connections  *kv.Collection[connectionRecord]
+	outbox       *kv.Collection[outboxRecord]
 }
 
 // Kinds of the byte counters.
@@ -47,21 +60,21 @@ func defineCollections(schema *kv.Schema) collections {
 		// issue/<id>; also kept in memory.
 		issues: kv.Define(schema, kv.Definition[issueRecord]{
 			Name:    "issue",
-			Key:     func(issue issueRecord) kv.Key { return kv.K(kv.U64(uint64(issue.ID))) },
+			Key:     func(issue issueRecord) kv.Key { return kv.K(kv.Text(issue.ID)) },
 			Counter: func(issueRecord) kv.Key { return sizeCounter(kindIssue, 0, 0) },
 		}),
 		// status/<issue>/<seq>: the status changes of an issue, oldest first.
 		status: kv.Define(schema, kv.Definition[statusRecord]{
 			Name: "status",
 			Key: func(change statusRecord) kv.Key {
-				return kv.K(kv.U64(uint64(change.IssueID)), kv.U64(change.Sequence))
+				return kv.K(kv.Text(change.IssueID), kv.U64(change.Sequence))
 			},
 		}),
 		// event/<issue>/<seq>: the events of an issue, oldest first.
 		events: kv.Define(schema, kv.Definition[eventRecord]{
 			Name: "event",
 			Key: func(event eventRecord) kv.Key {
-				return kv.K(kv.U64(uint64(event.IssueID)), kv.U64(event.Sequence))
+				return kv.K(kv.Text(event.IssueID), kv.U64(event.Sequence))
 			},
 			Indexes: []kv.Index[eventRecord]{
 				// The SDK's event_id per project, so a retry is recognized.
@@ -80,8 +93,9 @@ func defineCollections(schema *kv.Schema) collections {
 					return kv.KIf(event.ParentSpanID != "", kv.Text(event.ParentSpanID), kv.U64(event.Sequence))
 				}},
 			},
-			Encode: encodeEvent,
-			Decode: decodeEvent,
+			Encode:     encodeEvent,
+			Decode:     decodeEvent,
+			DecodeHead: decodeEventHead,
 			Counter: func(event eventRecord) kv.Key {
 				return sizeCounter(kindEvent, levelRank(event.Level), dayOf(event.ReceivedAt))
 			},
@@ -116,15 +130,122 @@ func defineCollections(schema *kv.Schema) collections {
 			Name: "mark",
 			Key:  func(mark timeMark) kv.Key { return kv.K(kv.U64(mark.Interval)) },
 		}),
-		// thin/<level>: how far the cleanup has thinned old events.
 		// cleanup/<seq>: the latest runs of the cleanup (cleanup.go).
 		cleanups: kv.Define(schema, kv.Definition[CleanupRun]{
 			Name: "cleanup",
 			Key:  func(run CleanupRun) kv.Key { return kv.K(kv.U64(run.Sequence)) },
 		}),
+		// thin/<level>: how far old events are thinned.
 		thin: kv.Define(schema, kv.Definition[thinProgress]{
 			Name: "thin",
 			Key:  func(progress thinProgress) kv.Key { return kv.K(kv.U8(progress.Rank)) },
+		}),
+		// user/<id>: a user of the panel with the password hash.
+		users: kv.Define(schema, kv.Definition[userRecord]{
+			Name: "user",
+			Key:  func(user userRecord) kv.Key { return kv.K(kv.Text(user.ID)) },
+			Indexes: []kv.Index[userRecord]{
+				// Usernames are unique in any case.
+				{Name: "name", Unique: true, Key: func(user userRecord) kv.Key { return kv.K(kv.Text(strings.ToLower(user.Username))) }},
+				// There is one superadmin.
+				{Name: "superadmin", Unique: true, Key: func(user userRecord) kv.Key {
+					return kv.KIf(user.Role == model.RoleSuperadmin, kv.U8(0))
+				}},
+			},
+		}),
+		// session/<hash of the cookie>: a login to the UI.
+		sessions: kv.Define(schema, kv.Definition[sessionRecord]{
+			Name: "session",
+			Key:  func(session sessionRecord) kv.Key { return kv.K(kv.Text(session.TokenHash)) },
+			Indexes: []kv.Index[sessionRecord]{
+				{Name: "user", Key: func(session sessionRecord) kv.Key {
+					return kv.K(kv.Text(session.UserID), kv.Text(session.TokenHash))
+				}},
+			},
+		}),
+		// oauth_client/<client id>: an agent registered for MCP.
+		oauthClients: kv.Define(schema, kv.Definition[model.OAuthClient]{
+			Name: "oauth_client",
+			Key:  func(client model.OAuthClient) kv.Key { return kv.K(kv.Text(client.ID)) },
+		}),
+		// oauth_code/<hash>: an authorization code, used once.
+		oauthCodes: kv.Define(schema, kv.Definition[codeRecord]{
+			Name: "oauth_code",
+			Key:  func(code codeRecord) kv.Key { return kv.K(kv.Text(code.Hash)) },
+			Indexes: []kv.Index[codeRecord]{
+				{Name: "client", Key: func(code codeRecord) kv.Key { return kv.K(kv.Text(code.ClientID), kv.Text(code.Hash)) }},
+				{Name: "user", Key: func(code codeRecord) kv.Key { return kv.K(kv.Text(code.UserID), kv.Text(code.Hash)) }},
+			},
+		}),
+		// grant/<id>: a connected agent or a personal token, with its token hashes.
+		grants: kv.Define(schema, kv.Definition[grantRecord]{
+			Name: "grant",
+			Key:  func(grant grantRecord) kv.Key { return kv.K(kv.Text(grant.ID)) },
+			Indexes: []kv.Index[grantRecord]{
+				{Name: "access", Unique: true, Key: func(grant grantRecord) kv.Key { return kv.K(kv.Text(grant.AccessHash)) }},
+				{Name: "refresh", Unique: true, Key: func(grant grantRecord) kv.Key {
+					return kv.KIf(grant.RefreshHash != "", kv.Text(grant.ClientID), kv.Text(grant.RefreshHash))
+				}},
+				{Name: "user", Key: func(grant grantRecord) kv.Key { return kv.K(kv.Text(grant.UserID), kv.Text(grant.ID)) }},
+				{Name: "client", Key: func(grant grantRecord) kv.Key {
+					return kv.KIf(grant.ClientID != "", kv.Text(grant.ClientID), kv.Text(grant.ID))
+				}},
+				// One personal token per user.
+				{Name: "token", Unique: true, Key: func(grant grantRecord) kv.Key {
+					return kv.KIf(grant.Kind == model.GrantToken, kv.Text(grant.UserID))
+				}},
+			},
+		}),
+		// oauth_spent/<hash>: a refresh token already used; presented again, it revokes its grant.
+		spentTokens: kv.Define(schema, kv.Definition[spentToken]{
+			Name: "oauth_spent",
+			Key:  func(spent spentToken) kv.Key { return kv.K(kv.Text(spent.Hash)) },
+		}),
+		// project/<id>: a project; its id is part of the DSN.
+		projects: kv.Define(schema, kv.Definition[model.Project]{
+			Name: "project",
+			Key:  func(project model.Project) kv.Key { return kv.K(kv.U32(uint32(project.ID))) },
+			Indexes: []kv.Index[model.Project]{
+				{Name: "name", Unique: true, Key: func(project model.Project) kv.Key { return kv.K(kv.Text(project.Name)) }},
+				{Name: "key", Unique: true, Key: func(project model.Project) kv.Key { return kv.K(kv.Text(project.PublicKey)) }},
+			},
+		}),
+		// destination/<id>: where notifications go, an email address or a chat.
+		destinations: kv.Define(schema, kv.Definition[destinationRecord]{
+			Name: "destination",
+			Key:  func(destination destinationRecord) kv.Key { return kv.K(kv.Text(destination.ID)) },
+			Indexes: []kv.Index[destinationRecord]{
+				// The destinations of an address, a confirmed one first.
+				{Name: "email", Key: func(destination destinationRecord) kv.Key {
+					confirmed := byte(1)
+
+					if destination.Verified {
+						confirmed = 0
+					}
+
+					return kv.KIf(destination.Type == "email", kv.Text(destination.Address), kv.U8(confirmed), kv.Text(destination.ID))
+				}},
+			},
+		}),
+		// connection/<id>: a notification rule.
+		connections: kv.Define(schema, kv.Definition[connectionRecord]{
+			Name: "connection",
+			Key:  func(connection connectionRecord) kv.Key { return kv.K(kv.Text(connection.ID)) },
+		}),
+		// outbox/<seq>: a notification message for one connection.
+		outbox: kv.Define(schema, kv.Definition[outboxRecord]{
+			Name: "outbox",
+			Key:  func(message outboxRecord) kv.Key { return kv.K(kv.U64(uint64(message.ID))) },
+			Indexes: []kv.Index[outboxRecord]{
+				{Name: "channel", Key: func(message outboxRecord) kv.Key { return kv.K(kv.Text(message.Channel), kv.U64(uint64(message.ID))) }},
+				// The messages still to send, per channel, oldest first.
+				{Name: "pending", Key: func(message outboxRecord) kv.Key {
+					return kv.KIf(message.Status == model.OutboxPending, kv.Text(message.Channel), kv.U64(uint64(message.ID)))
+				}},
+				{Name: "status", Key: func(message outboxRecord) kv.Key { return kv.K(kv.Text(message.Status), kv.U64(uint64(message.ID))) }},
+			},
+			Encode: encodeOutbox,
+			Decode: decodeOutbox,
 		}),
 	}
 }
@@ -177,7 +298,7 @@ func decodeInbox(value []byte) (InboxEntry, error) {
 
 // statusRecord is a status change of an issue.
 type statusRecord struct {
-	IssueID  int64  `json:"issue_id"`
+	IssueID  string `json:"issue_id"`
 	Sequence uint64 `json:"seq"`
 	model.StatusChange
 }
@@ -191,7 +312,7 @@ type eventRecord struct {
 type eventMeta struct {
 	Sequence     uint64    `json:"seq"`
 	ProjectID    int       `json:"project_id"`
-	IssueID      int64     `json:"issue_id"`
+	IssueID      string    `json:"issue_id"`
 	EventID      string    `json:"event_id"`
 	Level        string    `json:"level"`
 	Environment  string    `json:"environment,omitempty"`
@@ -213,6 +334,17 @@ func decodeEvent(value []byte) (eventRecord, error) {
 	event.Payload = tail
 
 	return event, err
+}
+
+// decodeEventHead decodes the metadata of an event without its payload.
+func decodeEventHead(value []byte) (eventRecord, error) {
+	var event eventRecord
+
+	if len(value) < 4 || int(binary.BigEndian.Uint32(value)) > len(value)-4 {
+		return event, errShortRecord
+	}
+
+	return event, json.Unmarshal(value[4:4+int(binary.BigEndian.Uint32(value))], &event.eventMeta)
 }
 
 // logRecord is the log fields, then its attributes as JSON.

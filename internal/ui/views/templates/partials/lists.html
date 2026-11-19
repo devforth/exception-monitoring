@@ -6,7 +6,7 @@
      so it is not sent. app.js keeps the field in sync, unchecks "All" or the
      values, and closes the dropdown on an outside click; without JS it still
      opens and submits. */}}
-{{define "picker"}}
+{{define "picker"}}{{if .Shown}}
 <details class="picker">
   <summary class="picker-summary" data-all="{{.All}}" data-name="{{.Label}}">{{if .Count}}{{.Label}}: {{.Count}}{{else}}{{.All}}{{end}}</summary>
   <div class="picker-menu">
@@ -14,7 +14,7 @@
     {{range .Options}}<label class="option"><input type="checkbox" name="{{$.Param}}" value="{{.Name}}" {{if .Selected}}checked{{end}}> {{template "badge" (label $.Kind .Name)}}</label>{{end}}
   </div>
 </details>
-{{end}}
+{{end}}{{end}}
 
 {{/* "date-range" takes the page's .Dates; app.js turns the two dates into
      one range picker. */}}

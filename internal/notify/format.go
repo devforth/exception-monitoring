@@ -40,7 +40,7 @@ func (notification Notification) details() string {
 // attached prompt (see agentprompt.MCPReference); none for a test message.
 // It works even when the panel's links are hidden.
 func mcpReference(appName string, notification Notification) string {
-	if notification.IssueID <= 0 || notification.Kind == Test {
+	if notification.IssueID == "" || notification.Kind == Test {
 		return ""
 	}
 
@@ -84,13 +84,12 @@ const (
 
 // Description is what the delivery log shows of an outbox message.
 type Description struct {
-	Label        string // "New issue", "Regression", "Test message" or "Summary"
-	Project      string
-	ProjectColor string
-	Title        string // the issue; for a summary, how many issues it covers
-	IssueID      int64
-	Items        []Description // a summary's first issues
-	More         int           // issues of a summary not in Items
+	Label   string // "New issue", "Regression", "Test message" or "Summary"
+	Project string
+	Title   string // the issue; for a summary, how many issues it covers
+	IssueID string
+	Items   []Description // a summary's first issues
+	More    int           // issues of a summary not in Items
 }
 
 // Describe reads an outbox message (kind "notification" or "summary") for
@@ -119,7 +118,7 @@ func Describe(kind string, payload []byte) Description {
 
 func describeNotification(notification Notification) Description {
 	return Description{
-		Label: notification.Kind.label(), Project: notification.Project, ProjectColor: notification.ProjectColor,
+		Label: notification.Kind.label(), Project: notification.Project,
 		Title: notification.Title, IssueID: notification.IssueID,
 	}
 }

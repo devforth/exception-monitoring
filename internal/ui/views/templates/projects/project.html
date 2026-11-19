@@ -7,7 +7,7 @@
 
 {{with .Notice}}<p class="notice-success" role="status">{{.}}</p>{{end}}
 
-<form class="connection-form project-form" method="post" action="{{if .New}}/projects{{else}}/projects/{{.ID}}{{end}}">
+<form class="connection-form" method="post" action="{{if .New}}/projects{{else}}/projects/{{.ID}}{{end}}">
   {{if .FromEnv}}
   <p class="muted">Name and key are set in <code>PROJECTS</code>; change them there.</p>
   {{end}}

@@ -7,7 +7,8 @@ package requests
 import (
 	"fmt"
 	"net/http"
-	"strconv"
+
+	"github.com/devforth/exception-monitoring/internal/storage/store"
 )
 
 // maxBulkIssues: one page of the largest size, with room to spare.
@@ -15,7 +16,7 @@ const maxBulkIssues = 1000
 
 // ReadBulkIssues reads the selected "issue" IDs of the issues list. problem
 // is the reason the form is rejected (400), empty when it is valid.
-func ReadBulkIssues(r *http.Request) (issueIDs []int64, problem string) {
+func ReadBulkIssues(r *http.Request) (issueIDs []string, problem string) {
 	if err := r.ParseForm(); err != nil {
 		return nil, "invalid form"
 	}
@@ -26,16 +27,14 @@ func ReadBulkIssues(r *http.Request) (issueIDs []int64, problem string) {
 		return nil, fmt.Sprintf("at most %d issues at once", maxBulkIssues)
 	}
 
-	issueIDs = make([]int64, 0, len(r.PostForm["issue"]))
+	issueIDs = make([]string, 0, len(r.PostForm["issue"]))
 
 	for _, value := range r.PostForm["issue"] {
-		issueID, err := strconv.ParseInt(value, 10, 64)
-
-		if err != nil {
+		if !store.ValidID(value) {
 			return nil, "invalid issue id"
 		}
 
-		issueIDs = append(issueIDs, issueID)
+		issueIDs = append(issueIDs, value)
 	}
 
 	return issueIDs, ""

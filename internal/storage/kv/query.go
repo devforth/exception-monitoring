@@ -16,6 +16,8 @@ type Query[T any] struct {
 	newest       bool
 	limit        int
 	where        func(T) bool
+	raw          func(value []byte) bool
+	head         bool
 }
 
 // Primary walks the records whose key starts with parts.
@@ -61,6 +63,22 @@ func (query Query[T]) Limit(n int) Query[T] {
 // Where keeps the records match accepts; the walk still reads every record.
 func (query Query[T]) Where(match func(T) bool) Query[T] {
 	query.where = match
+
+	return query
+}
+
+// Head decodes only the head of each record (Definition.DecodeHead) when the
+// collection has one; such a record can be deleted but not written back.
+func (query Query[T]) Head() Query[T] {
+	query.head = true
+
+	return query
+}
+
+// Raw skips, before decoding, the records whose stored value match refuses:
+// a cheap prefilter; Where still decides on the record.
+func (query Query[T]) Raw(match func(value []byte) bool) Query[T] {
+	query.raw = match
 
 	return query
 }
@@ -217,7 +235,17 @@ func (query Query[T]) read(reader Reader, iterator Iterator) (Entry[T], bool, er
 		key, value = primary, stored
 	}
 
-	record, err := query.collection.definition.Decode(value)
+	if query.raw != nil && !query.raw(value) {
+		return Entry[T]{}, false, nil
+	}
+
+	decode := query.collection.definition.Decode
+
+	if query.head && query.collection.definition.DecodeHead != nil {
+		decode = query.collection.definition.DecodeHead
+	}
+
+	record, err := decode(value)
 
 	if err != nil {
 		return Entry[T]{}, false, fmt.Errorf("kv: %s %x: %w", query.collection.name, key, err)
@@ -261,18 +289,25 @@ func (query Query[T]) First(reader Reader) (Entry[T], error) {
 }
 
 // Count counts the records up to most (0: all); more says there are more.
+// Without Where it counts keys and reads no record.
 func (query Query[T]) Count(reader Reader, most int) (count int, more bool, err error) {
-	err = query.Limit(0).Each(reader, func(Entry[T]) (bool, error) {
+	visit := func() bool {
 		if most > 0 && count == most {
 			more = true
 
-			return false, nil
+			return false
 		}
 
 		count++
 
-		return true, nil
-	})
+		return true
+	}
+
+	if query.where == nil {
+		err = query.Limit(0).Keys(reader, func(Key) (bool, error) { return visit(), nil })
+	} else {
+		err = query.Limit(0).Each(reader, func(Entry[T]) (bool, error) { return visit(), nil })
+	}
 
 	return count, more, err
 }

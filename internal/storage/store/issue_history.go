@@ -12,10 +12,10 @@ const (
 	SourceEvent = "event" // a resolved issue happened again
 )
 
-// Actor is who changes a status: a user (UserID 0 for the API token, an
+// Actor is who changes a status: a user (UserID empty for the API token, an
 // event, or a deleted user, whose Name stays) and through what.
 type Actor struct {
-	UserID int64
+	UserID string
 	Name   string
 	Source string
 }

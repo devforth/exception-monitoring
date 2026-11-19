@@ -35,14 +35,8 @@ func (presenter Connections) List(connections []store.Connection, health map[str
 
 	for _, connection := range connections {
 		row := presenter.Row(connection)
-		row.Delivery = health[strconv.FormatInt(connection.ID, 10)]
+		row.Delivery = health[connection.ID]
 		view.Rows = append(view.Rows, row)
-	}
-
-	for _, channelType := range config.AllChannelTypes {
-		if available, _ := presenter.Notifications.ChannelAvailable(channelType); available {
-			view.CanCreate = true
-		}
 	}
 
 	return view
@@ -110,7 +104,7 @@ func (presenter Connections) NewConnection() store.Connection {
 // Form fills the form from a connection (empty for a new one).
 func (presenter Connections) Form(connection store.Connection) contracts.ConnectionView {
 	view := contracts.ConnectionView{
-		ID: connection.ID, New: connection.ID == 0, Name: connection.Name, Type: connection.Type,
+		ID: connection.ID, New: connection.ID == "", Name: connection.Name, Type: connection.Type,
 		TypeLabel: channelLabels[connection.Type], AllProjects: connection.AllProjects,
 		HideIssueLink: connection.HideIssueLink,
 		Active:        connection.Active, Verified: connection.Verified, Errors: map[string]string{},
@@ -178,10 +172,10 @@ func (presenter Connections) FormAgain(connection store.Connection, problems map
 	}
 
 	// Keep the email step where it was: a confirmed address stays confirmed.
-	if connection.ID == 0 && connection.Type == config.ChannelEmail {
+	if connection.ID == "" && connection.Type == config.ChannelEmail {
 		view.Email.Address = typedAddress
 
-		if connection.DestinationID != 0 {
+		if connection.DestinationID != "" {
 			view.Email.State = "verified"
 		}
 

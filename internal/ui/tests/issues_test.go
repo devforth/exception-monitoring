@@ -64,8 +64,8 @@ func TestIssueDetails(t *testing.T) {
 		t.Fatal("copy prompt button must not submit the issue action form")
 	}
 
-	// The issue's ID and the MCP request of notifications, on the list and the page.
-	reference := `data-copy-text="Exception Monitoring MCP: get_issue {"issue_id":` + ids[0] + `}"`
+	// The MCP request of notifications, on the list and the page.
+	reference := `data-copy-text="Exception Monitoring MCP: get_issue {"issue_id":"` + ids[0] + `"}"`
 
 	for name, page := range map[string]string{"list": list, "issue page": body} {
 		if !strings.Contains(html.UnescapeString(page), reference) {
@@ -73,14 +73,19 @@ func TestIssueDetails(t *testing.T) {
 		}
 	}
 
-	// Columns: checkbox, ID, then the issue; the row shows the status (its
-	// meaning on hover).
+	// Columns: checkbox, then the issue (the ID is on the issue page only);
+	// the row shows the status (its meaning on hover).
 	row := `<tr class="issue-unresolved" title="Unresolved: still happening or not looked at yet">
   <td class="check"><input type="checkbox" name="issue" value="` + ids[0] + `" aria-label="Select issue ` + ids[0] + `"></td>
-  <td class="number"><a class="issue-id" href="/issues/` + ids[0] + `">` + ids[0] + `</a></td>`
+  <td>
+    `
 
-	if !strings.Contains(list, row) || !strings.Contains(body, "<dt>ID</dt><dd>"+ids[0]+"</dd>") {
-		t.Error("the issue ID is not shown")
+	if !strings.Contains(list, row) || strings.Contains(list, "<th>ID</th>") {
+		t.Error("the issue list is not checkbox, then the issue")
+	}
+
+	if !strings.Contains(body, "<dt>ID</dt><dd>"+ids[0]+"</dd>") {
+		t.Error("the issue page does not show the issue ID")
 	}
 
 	for _, want := range []string{
@@ -384,7 +389,7 @@ func TestBulkIssueActions(t *testing.T) {
 	}
 
 	// Deleting includes an issue that is already gone: the rest is still processed.
-	if response := bulk("delete", ids[2], "999999"); response.Code != http.StatusSeeOther {
+	if response := bulk("delete", ids[2], "missing0"); response.Code != http.StatusSeeOther {
 		t.Fatalf("bulk delete: %d", response.Code)
 	}
 

@@ -15,7 +15,7 @@ import (
 	"github.com/devforth/exception-monitoring/internal/storage/store"
 )
 
-// Pipeline stores envelopes through the inbox: processors parse them, one writer stores them (docs/storage-plan.md).
+// Pipeline stores envelopes through the inbox: processors parse them, one writer stores them.
 type Pipeline struct {
 	handler *Handler
 	store   *database.Store
@@ -24,8 +24,6 @@ type Pipeline struct {
 
 	// MaxInboxBytes: beyond it new envelopes get 429.
 	MaxInboxBytes int64
-	// Workers parse envelopes; 0 means one per core.
-	Workers int
 	// BatchSize, BatchBytes and BatchWait bound one write.
 	BatchSize  int
 	BatchBytes int
@@ -98,11 +96,7 @@ func (pipeline *Pipeline) accept(project config.Project, envelope *sentry.Envelo
 }
 
 func (pipeline *Pipeline) Run(ctx context.Context) {
-	workers := pipeline.Workers
-
-	if workers <= 0 {
-		workers = runtime.GOMAXPROCS(0)
-	}
+	workers := runtime.GOMAXPROCS(0)
 
 	// Small queues: envelopes wait in the inbox on disk, not in memory.
 	entries := make(chan database.InboxEntry, workers*2)

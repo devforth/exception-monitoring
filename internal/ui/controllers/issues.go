@@ -17,9 +17,17 @@ import (
 // "issue-list" part they replace.
 func (controller *Controllers) IssuesPage(w http.ResponseWriter, r *http.Request) {
 	query := lists.CleanListQuery(r.URL.Query(), lists.IssueListParams, controller.registry)
+	present, err := controller.issues.Levels(r.Context())
+
+	if err != nil {
+		controller.serverError(w, r, err)
+
+		return
+	}
+
 	data := contracts.IssuesData{
 		Status: query.Get("status"),
-		Levels: lists.NewPicker("level", "level", "All levels", "Levels", lists.EventLevels, query["level"]),
+		Levels: lists.NewLevelPicker(lists.EventLevels, present, query["level"]),
 		Query:  query.Get("query"),
 		Dates:  lists.ParseDateRange(query),
 		Sort:   query.Get("sort"),

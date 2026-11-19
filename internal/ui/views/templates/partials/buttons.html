@@ -23,8 +23,9 @@
      Return is the page to go back to ("" = the connection page). */}}
 {{define "retry-now"}}<form class="inline-action" method="post" action="/notifications/{{.ID}}/retry">{{with .Return}}<input type="hidden" name="return" value="{{.}}">{{end}}<button type="submit" title="{{.Count}} message(s) wait for a retry: send them again now">Retry now ({{.Count}})</button></form>{{end}}
 
-{{/* Issue action buttons, posted as "action" (see controllers/actions.go). The argument is
-     the issue status on the issue page, or "bulk" on the list, where all apply.
+{{/* Issue action buttons, posted as "action" (see controllers/actions.go). The argument
+     is issueActions: Status, the issue status on the issue page or "bulk" on the list
+     (where all apply), and CanDelete, whether the Delete button is shown.
      Every action asks first (data-confirm in app.js); {count} becomes the
      number of checked issues. */}}
 {{define "issue-action-buttons"}}

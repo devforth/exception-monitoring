@@ -2,7 +2,6 @@ package kv
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 	"sync"
 )
@@ -40,20 +39,4 @@ func (schema *Schema) register(prefix, owner string) {
 	}
 
 	schema.prefixes[prefix] = owner
-}
-
-// Prefixes lists the registered prefixes in order.
-func (schema *Schema) Prefixes() []string {
-	schema.mutex.Lock()
-	defer schema.mutex.Unlock()
-
-	prefixes := make([]string, 0, len(schema.prefixes))
-
-	for prefix := range schema.prefixes {
-		prefixes = append(prefixes, prefix)
-	}
-
-	sort.Strings(prefixes)
-
-	return prefixes
 }

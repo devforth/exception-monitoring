@@ -6,10 +6,11 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/devforth/exception-monitoring/internal/storage/storetest"
 
 	"github.com/devforth/exception-monitoring/internal/ingest/grouping"
 	"github.com/devforth/exception-monitoring/internal/ingest/sentry"
@@ -18,7 +19,7 @@ import (
 
 var (
 	temporaryPasswordField = regexp.MustCompile(`id="temporary-password" value="([^"]+)"`)
-	userAction             = regexp.MustCompile(`action="/users/(\d+)"`)
+	userAction             = regexp.MustCompile(`action="/users/([a-z0-9]{8})"`)
 )
 
 const userPassword = "user password 123"
@@ -140,11 +141,13 @@ func TestAdminsManageUsers(t *testing.T) {
 	_, admin := server.createUser("ops", store.RoleAdmin)
 
 	// The admin edits the other admin, not the superadmin, whose page is read-only.
-	if users := admin.page("/users"); !strings.Contains(users, `href="/users/`+otherID+`" title="Edit`) || strings.Contains(users, `href="/users/1" title="Edit`) {
+	root := superadminID(t, admin)
+
+	if users := admin.page("/users"); !strings.Contains(users, `href="/users/`+otherID+`" title="Edit`) || strings.Contains(users, `href="/users/`+root+`" title="Edit`) {
 		t.Errorf("edit links:\n%s", users)
 	}
 
-	if page := admin.page("/users/1"); strings.Contains(page, `action="/users/1"`) || !strings.Contains(page, "cannot change this user") {
+	if page := admin.page("/users/" + root); strings.Contains(page, `action="/users/`+root+`"`) || !strings.Contains(page, "cannot change this user") {
 		t.Errorf("superadmin page for an admin:\n%s", page)
 	}
 
@@ -152,9 +155,9 @@ func TestAdminsManageUsers(t *testing.T) {
 		path string
 		form url.Values
 	}{
-		{"/users/1", url.Values{"name": {"Boss"}, "role": {"user"}}},
-		{"/users/1/password", nil},
-		{"/users/1/delete", nil},
+		{"/users/" + root, url.Values{"name": {"Boss"}, "role": {"user"}}},
+		{"/users/" + root + "/password", nil},
+		{"/users/" + root + "/delete", nil},
 		{"/users", url.Values{"username": {"second"}, "role": {"superadmin"}}},
 	} {
 		response := admin.post(request.path, request.form)
@@ -258,9 +261,19 @@ func TestAgentsOfOtherUsers(t *testing.T) {
 	token := personalToken(t, user)
 	agentAccess(t, server, token, http.StatusOK)
 
-	if page := server.page("/agents"); strings.Contains(page, "/disconnect") || !strings.Contains(page, `<select name="user"`) {
+	own := server.page("/agents")
+
+	if strings.Contains(own, "/disconnect") || !strings.Contains(own, `<select name="user"`) {
 		t.Error("the superadmin's own list shows another user's agent, or no user select")
 	}
+
+	selected := regexp.MustCompile(`<option value="([a-z0-9]{8})" selected>`).FindStringSubmatch(own)
+
+	if selected == nil {
+		t.Fatalf("the superadmin is not the selected owner:\n%s", own)
+	}
+
+	root := selected[1]
 
 	page := server.page("/agents?user=" + id)
 	disconnect := disconnectAction.FindStringSubmatch(page)
@@ -273,7 +286,7 @@ func TestAgentsOfOtherUsers(t *testing.T) {
 		t.Error("a user can choose whose agents to list")
 	}
 
-	if response := user.get("/agents?user=1"); !strings.Contains(response.Body.String(), disconnect[1]) {
+	if response := user.get("/agents?user=" + root); !strings.Contains(response.Body.String(), disconnect[1]) {
 		t.Error("?user= changed what a user sees")
 	}
 
@@ -297,7 +310,7 @@ func TestAgentsOfOtherUsers(t *testing.T) {
 // Every status change is in the issue's history: who, when and how; a
 // resolved issue that happens again is reopened by its event.
 func TestStatusHistory(t *testing.T) {
-	database := openDatabase(t)
+	database := storetest.Open(t)
 	server := startServer(t, database, "admin", password)
 	server.ingestFixtures()
 	server.login()
@@ -341,21 +354,20 @@ func TestStatusHistory(t *testing.T) {
 	}
 
 	// A resolved issue that happens again: reopened by its event.
-	issueID, _ := strconv.ParseInt(id, 10, 64)
 	ctx := context.Background()
 
-	if err := database.SetIssueStatus(ctx, issueID, store.StatusResolved, store.Actor{Name: "API token", Source: store.SourceAPI}); err != nil {
+	if _, err := database.SetIssuesStatus(ctx, []string{id}, store.StatusResolved, store.Actor{Name: "API token", Source: store.SourceAPI}); err != nil {
 		t.Fatal(err)
 	}
 
-	issue, err := database.GetIssue(ctx, issueID)
+	issue, err := database.GetIssue(ctx, id)
 
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// The fingerprint of the issue, from its stored event as ingest computes it.
-	latest, err := database.LatestEvent(ctx, issueID)
+	latest, err := database.LatestEvent(ctx, id)
 
 	if err != nil {
 		t.Fatal(err)
@@ -412,13 +424,27 @@ func TestAdminsCannotTouchSuperadminAgents(t *testing.T) {
 	agentAccess(t, server, personalToken(t, server), http.StatusOK)
 
 	_, admin := server.createUser("ops", store.RoleAdmin)
+	root := superadminID(t, admin)
 	superadminGrant := disconnectAction.FindStringSubmatch(server.page("/agents"))
 
-	if page := admin.page("/agents?user=1"); strings.Contains(page, superadminGrant[1]) || strings.Contains(page, `<option value="1"`) {
+	if page := admin.page("/agents?user=" + root); strings.Contains(page, superadminGrant[1]) || strings.Contains(page, `<option value="`+root+`"`) {
 		t.Errorf("an admin sees the superadmin's agents:\n%s", page)
 	}
 
 	if response := admin.post(superadminGrant[1], nil); response.Code != http.StatusNotFound {
 		t.Errorf("an admin disconnected the superadmin's agent: %d", response.Code)
 	}
+}
+
+// superadminID reads the id of the superadmin ("admin") from its link on the users page.
+func superadminID(t *testing.T, server *testServer) string {
+	t.Helper()
+
+	match := regexp.MustCompile(`href="/users/([a-z0-9]{8})"[^>]*>[^<]*admin<`).FindStringSubmatch(server.page("/users"))
+
+	if match == nil {
+		t.Fatal("no link to the superadmin on the users page")
+	}
+
+	return match[1]
 }

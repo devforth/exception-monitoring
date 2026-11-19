@@ -4,7 +4,6 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -15,11 +14,6 @@ import (
 // and pull it into every build.
 var adapters = map[string]string{
 	"github.com/syndtr/goleveldb": "internal/storage/kv/leveldb/",
-}
-
-// Store libraries the project does not use at all; none may come back.
-var unusedStores = []string{
-	"github.com/cockroachdb/pebble", "github.com/dgraph-io/badger", "go.etcd.io/bbolt", "github.com/jmhodges/levigo",
 }
 
 func TestOnlyAdaptersImportStores(t *testing.T) {
@@ -58,12 +52,6 @@ func TestOnlyAdaptersImportStores(t *testing.T) {
 					t.Errorf("%s imports %s; only %s may", relative, importPath, adapter)
 				}
 			}
-
-			for _, library := range unusedStores {
-				if strings.HasPrefix(importPath, library) {
-					t.Errorf("%s imports %s, a store the project does not use", relative, importPath)
-				}
-			}
 		}
 
 		return nil
@@ -71,17 +59,5 @@ func TestOnlyAdaptersImportStores(t *testing.T) {
 
 	if err != nil {
 		t.Fatal(err)
-	}
-
-	module, err := os.ReadFile(filepath.Join(root, "go.mod"))
-
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for _, library := range unusedStores {
-		if strings.Contains(string(module), library) {
-			t.Errorf("go.mod requires %s", library)
-		}
 	}
 }

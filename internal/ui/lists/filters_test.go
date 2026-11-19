@@ -62,8 +62,6 @@ func TestSortHeader(t *testing.T) {
 		{"", "project", "", "project"},
 		{"project", "project", "asc", "project_desc"},
 		{"project_desc", "project", "desc", "project"},
-		{"", "id", "", "id"},
-		{"id", "id", "desc", "id_asc"},
 	} {
 		query := url.Values{"page": {"3"}, "level": {"error"}}
 

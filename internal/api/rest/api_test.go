@@ -12,7 +12,6 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -123,7 +122,7 @@ func (server *testServer) decode(response *httptest.ResponseRecorder, request st
 }
 
 type issue struct {
-	ID         int64  `json:"id"`
+	ID         string `json:"id"`
 	Project    string `json:"project"`
 	Title      string `json:"title"`
 	Location   string `json:"location"`
@@ -271,7 +270,7 @@ func TestListIssues(t *testing.T) {
 	if len(search.Items) != 1 || !strings.HasPrefix(search.Items[0].Title, "ReferenceError") {
 		t.Fatalf("search = %+v", search.Items)
 	}
-	// LIKE wildcards in user input are literal.
+	// A % in the search is plain text.
 	var wildcard page[issue]
 	server.get("/api/v1/list_issues?query=%25", &wildcard)
 
@@ -280,7 +279,7 @@ func TestListIssues(t *testing.T) {
 	}
 
 	// Walk all pages two at a time: every issue exactly once.
-	seen := map[int64]bool{}
+	seen := map[string]bool{}
 	target := "/api/v1/list_issues?limit=2&sort=first_seen"
 
 	for pages := 0; ; pages++ {
@@ -293,7 +292,7 @@ func TestListIssues(t *testing.T) {
 
 		for _, item := range current.Items {
 			if seen[item.ID] {
-				t.Fatalf("issue %d on two pages", item.ID)
+				t.Fatalf("issue %s on two pages", item.ID)
 			}
 
 			seen[item.ID] = true
@@ -319,8 +318,8 @@ func TestListIssues(t *testing.T) {
 }
 
 type batch struct {
-	Issues          []issue `json:"issues"`
-	MissingIssueIDs []int64 `json:"missing_issue_ids"`
+	Issues          []issue  `json:"issues"`
+	MissingIssueIDs []string `json:"missing_issue_ids"`
 }
 
 func TestIssueLifecycle(t *testing.T) {
@@ -334,10 +333,10 @@ func TestIssueLifecycle(t *testing.T) {
 		t.Fatalf("got %d issues", len(list.Items))
 	}
 
-	id := itoa(list.Items[0].ID)
+	id := list.Items[0].ID
 
 	var updated batch
-	server.post("/api/v1/update_issue_status", `{"issue_ids":[`+id+`],"status":"resolved"}`, &updated)
+	server.post("/api/v1/update_issue_status", `{"issue_ids":["`+id+`"],"status":"resolved"}`, &updated)
 
 	if len(updated.Issues) != 1 || updated.Issues[0].Status != "resolved" {
 		t.Fatalf("resolve: %+v", updated)
@@ -352,13 +351,13 @@ func TestIssueLifecycle(t *testing.T) {
 
 	// A list field takes repeated or comma-separated values.
 	var summaries batch
-	server.get("/api/v1/get_issues?issue_ids="+id+",999&issue_ids="+id, &summaries)
+	server.get("/api/v1/get_issues?issue_ids="+id+",missing0&issue_ids="+id, &summaries)
 
-	if len(summaries.Issues) != 1 || summaries.Issues[0].Status != "resolved" || !slices.Equal(summaries.MissingIssueIDs, []int64{999}) {
+	if len(summaries.Issues) != 1 || summaries.Issues[0].Status != "resolved" || !slices.Equal(summaries.MissingIssueIDs, []string{"missing0"}) {
 		t.Fatalf("get_issues: %+v", summaries)
 	}
 
-	for _, body := range []string{`{"issue_ids":[` + id + `],"status":"closed"}`, `not json`, `{"issue_ids":[` + id + `],"status":"resolved","extra":1}`, `{"status":"resolved"}`} {
+	for _, body := range []string{`{"issue_ids":["` + id + `"],"status":"closed"}`, `not json`, `{"issue_ids":["` + id + `"],"status":"resolved","extra":1}`, `{"status":"resolved"}`} {
 		if response := server.do(http.MethodPost, "/api/v1/update_issue_status", body); response.Code != http.StatusBadRequest {
 			t.Errorf("POST %s: got %d, want 400", body, response.Code)
 		}
@@ -372,9 +371,9 @@ func TestIssueLifecycle(t *testing.T) {
 	}
 
 	var deleted struct {
-		Deleted int64 `json:"deleted"`
+		Deleted string `json:"deleted"`
 	}
-	server.post("/api/v1/delete_issue", `{"issue_id":`+id+`}`, &deleted)
+	server.post("/api/v1/delete_issue", `{"issue_id":"`+id+`"}`, &deleted)
 
 	for _, path := range []string{"/api/v1/get_issue?issue_id=" + id, "/api/v1/list_issue_events?issue_id=" + id} {
 		if response := server.do(http.MethodGet, path, ""); response.Code != http.StatusNotFound {
@@ -382,14 +381,14 @@ func TestIssueLifecycle(t *testing.T) {
 		}
 	}
 
-	if response := server.do(http.MethodPost, "/api/v1/delete_issue", `{"issue_id":`+id+`}`); response.Code != http.StatusNotFound {
+	if response := server.do(http.MethodPost, "/api/v1/delete_issue", `{"issue_id":"`+id+`"}`); response.Code != http.StatusNotFound {
 		t.Fatalf("delete twice: %d", response.Code)
 	}
 }
 
 type eventSummary struct {
 	EventID string `json:"event_id"`
-	IssueID int64  `json:"issue_id"`
+	IssueID string `json:"issue_id"`
 	TraceID string `json:"trace_id"`
 }
 
@@ -402,7 +401,7 @@ func TestEvents(t *testing.T) {
 	issueID := list.Items[0].ID
 
 	var events page[eventSummary]
-	server.get("/api/v1/list_issue_events?issue_id="+itoa(issueID), &events)
+	server.get("/api/v1/list_issue_events?issue_id="+issueID, &events)
 
 	if len(events.Items) != 1 {
 		t.Fatalf("events = %+v", events.Items)
@@ -530,8 +529,4 @@ func TestLogsAndTraces(t *testing.T) {
 			t.Fatalf("trace log %+v", record)
 		}
 	}
-}
-
-func itoa(value int64) string {
-	return strconv.FormatInt(value, 10)
 }

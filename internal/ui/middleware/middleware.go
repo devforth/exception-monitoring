@@ -21,7 +21,7 @@ func RequireLogin(auth *session.Auth) func(next http.HandlerFunc) http.HandlerFu
 
 	return func(next http.HandlerFunc) http.HandlerFunc {
 		return withSession(func(w http.ResponseWriter, r *http.Request) {
-			if requests.Viewer(r).ID == 0 {
+			if requests.Viewer(r).ID == "" {
 				redirect(w, r, "/login?next="+url.QueryEscape(r.URL.RequestURI()))
 
 				return
@@ -126,11 +126,6 @@ func StaticCache(next http.Handler) http.Handler {
 	})
 }
 
-// SecurityHeaders: scripts and styles only from our own /static/ (no inline
-// code), no framing by other sites (clickjacking), no MIME sniffing. Pages
-// hold error data and must not stay in any cache (StaticCache overrides this
-// for static files); the same URL serves a full page or an htmx fragment, so
-// caches must tell them apart (Vary).
 // ContentSecurityPolicy is the policy of every page. formTargets are other
 // origins a form of the page may send the browser to (the OAuth consent
 // page returns to the agent): browsers apply form-action to redirects too.
@@ -141,6 +136,11 @@ func ContentSecurityPolicy(formTargets ...string) string {
 		formAction + "; base-uri 'none'"
 }
 
+// SecurityHeaders: scripts and styles only from our own /static/ (no inline
+// code), no framing by other sites (clickjacking), no MIME sniffing. Pages
+// hold error data and must not stay in any cache (StaticCache overrides this
+// for static files); the same URL serves a full page or an htmx fragment, so
+// caches must tell them apart (Vary).
 func SecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		header := w.Header()

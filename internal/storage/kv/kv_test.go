@@ -115,14 +115,14 @@ func TestKeys(t *testing.T) {
 		t.Error("numbers do not sort by value")
 	}
 
-	key := K(U32(7), Text("x\x00y"), U8(3), U64(1<<60))
+	key := K(Text("x\x00y"), U8(3), U64(1<<60))
 	decoder := Decode(key, 0)
 
-	if decoder.U32() != 7 || decoder.Text() != "x\x00y" || decoder.U8() != 3 || decoder.U64() != 1<<60 || decoder.Err() != nil {
-		t.Fatalf("decode %x: %v", key, decoder.Err())
+	if decoder.Text() != "x\x00y" || decoder.U8() != 3 || decoder.U64() != 1<<60 {
+		t.Fatalf("decode %x", key)
 	}
 
-	if decoder := Decode(K(U8(1)), 0); decoder.U64() != 0 || !errors.Is(decoder.Err(), ErrBadKey) {
+	if decoder := Decode(K(U8(1)), 0); decoder.U64() != 0 || decoder.U8() != 0 {
 		t.Error("a short key decodes")
 	}
 }
@@ -151,10 +151,6 @@ func TestSchemaRefusesOverlaps(t *testing.T) {
 	schema := NewSchema()
 	defineItems(schema)
 	schema.Reserve("items") // "items/" and "item/" do not overlap
-
-	if prefixes := schema.Prefixes(); !slices.Equal(prefixes, []string{"item.name/", "item.project/", "item.trace/", "item/", "items/"}) {
-		t.Errorf("prefixes %v", prefixes)
-	}
 }
 
 // Records are found through every index, newest first, within bounds, and
@@ -367,5 +363,17 @@ func TestRestart(t *testing.T) {
 
 	if counter := store.db.Counter(K(Text("item"), U8(1))); counter != counted || counted == 0 {
 		t.Errorf("counter %d, before %d", counter, counted)
+	}
+}
+
+// Has finds a stored key and nothing else, a key that only starts like it included.
+func TestHas(t *testing.T) {
+	store := newStore(t)
+	store.insert(t, item{ID: 1, Project: 1})
+
+	for key, want := range map[string]bool{string(K(U64(1))): true, string(K(U64(2))): false, string(K(U64(1))[:7]): false} {
+		if found, err := store.items.Has(store.db, Key(key)); err != nil || found != want {
+			t.Errorf("Has(%x) = %v, %v; want %v", key, found, err, want)
+		}
 	}
 }

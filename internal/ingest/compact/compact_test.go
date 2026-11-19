@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/devforth/exception-monitoring/internal/ingest/scrub"
 )
 
 func TestEventDropsWhatDoesNotHelpAFix(t *testing.T) {
@@ -86,27 +88,12 @@ func TestEventLeavesOtherInputAlone(t *testing.T) {
 	}
 }
 
-// compactJSON runs EventFields on a payload the way ingest does: decoded with
-// UseNumber, written back without HTML escaping; anything but a JSON object
-// is returned unchanged.
+// compactJSON runs Event on a payload the way ingest does; anything that is
+// not JSON is returned unchanged.
 func compactJSON(payload []byte) []byte {
-	decoder := json.NewDecoder(bytes.NewReader(payload))
-	decoder.UseNumber()
-
-	var event map[string]any
-
-	if err := decoder.Decode(&event); err != nil || event == nil {
-		return payload
-	}
-
-	EventFields(event)
-
 	var output bytes.Buffer
 
-	encoder := json.NewEncoder(&output)
-	encoder.SetEscapeHTML(false)
-
-	if err := encoder.Encode(event); err != nil {
+	if err := Event(scrub.NewDecoder(payload), scrub.NewEncoder(&output)); err != nil {
 		return payload
 	}
 

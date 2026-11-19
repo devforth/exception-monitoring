@@ -143,12 +143,6 @@ func (it *memoryIterator) First() bool { it.position = 0; return it.valid() }
 
 func (it *memoryIterator) Last() bool { it.position = len(it.keys) - 1; return it.valid() }
 
-func (it *memoryIterator) Seek(key []byte) bool {
-	it.position = sort.SearchStrings(it.keys, string(key))
-
-	return it.valid()
-}
-
 func (it *memoryIterator) Next() bool { it.position++; return it.valid() }
 
 func (it *memoryIterator) Prev() bool { it.position--; return it.valid() }

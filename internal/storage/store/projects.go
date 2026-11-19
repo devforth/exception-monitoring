@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// Project is a row of the projects table.
+// Project is a stored project; its ID is part of the DSN.
 type Project struct {
 	ID        int
 	Name      string

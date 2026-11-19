@@ -15,13 +15,21 @@ import (
 // "log-list" for filters and page links.
 func (controller *Controllers) LogsPage(w http.ResponseWriter, r *http.Request) {
 	query := lists.CleanListQuery(r.URL.Query(), lists.LogListParams, controller.registry)
+	present, err := controller.logs.Levels(r.Context())
+
+	if err != nil {
+		controller.serverError(w, r, err)
+
+		return
+	}
+
 	projectIDs := controller.projects.IDs(query["project"])
 	data := contracts.LogsData{
 		Projects: lists.NewPicker("project", "project", "All projects", "Projects", controller.projects.Names(), query["project"]),
 		Query:    query.Get("query"),
 		Dates:    lists.ParseDateRange(query),
 		TraceID:  strings.TrimSpace(query.Get("trace_id")),
-		Levels:   lists.NewPicker("level", "level", "All levels", "Levels", lists.LogLevels, query["level"]),
+		Levels:   lists.NewLevelPicker(lists.LogLevels, present, query["level"]),
 		Filter:   lists.NewFilterLinks(r, query),
 	}
 

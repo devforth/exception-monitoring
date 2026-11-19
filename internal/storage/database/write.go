@@ -97,13 +97,7 @@ func (database *Store) SaveLogs(_ context.Context, logs []model.NewLog, keepPerM
 	return err
 }
 
-func (database *Store) SetIssueStatus(ctx context.Context, issueID int64, status string, actor model.Actor) error {
-	_, err := database.SetIssuesStatus(ctx, []int64{issueID}, status, actor)
-
-	return err
-}
-
-func (database *Store) SetIssuesStatus(_ context.Context, issueIDs []int64, status string, actor model.Actor) ([]model.Issue, error) {
+func (database *Store) SetIssuesStatus(_ context.Context, issueIDs []string, status string, actor model.Actor) ([]model.Issue, error) {
 	ids, err := model.NormalizeIssueIDs(issueIDs)
 
 	if err != nil {
@@ -154,24 +148,52 @@ func (database *Store) SetIssuesStatus(_ context.Context, issueIDs []int64, stat
 	return issues, err
 }
 
-func (database *Store) DeleteIssue(_ context.Context, issueID int64) error {
-	return database.update(func(writer *batchWriter) error {
-		issue, ok := writer.issue(issueID)
+// DeleteIssues deletes the issues that exist, several per batch of up to
+// cleanupChunk records; an issue goes with all its events in one batch.
+func (database *Store) DeleteIssues(ctx context.Context, issueIDs []string) (int, error) {
+	deleted := 0
 
-		if !ok {
-			return model.ErrNotFound
+	for len(issueIDs) > 0 && ctx.Err() == nil {
+		taken, gone := 0, 0
+
+		err := database.update(func(writer *batchWriter) error {
+			for records := 0; taken < len(issueIDs) && records < cleanupChunk; {
+				issue, ok := writer.issue(issueIDs[taken])
+				taken++
+
+				if !ok || writer.deleted[issue.ID] != nil {
+					continue
+				}
+
+				records += issue.Stored + 1
+
+				if err := writer.deleteIssueEvents(issue); err != nil {
+					return err
+				}
+
+				if err := writer.deleteIssue(issue); err != nil {
+					return err
+				}
+
+				gone++
+			}
+
+			return nil
+		})
+
+		if err != nil {
+			return deleted, err
 		}
 
-		if err := writer.deleteIssueEvents(issue); err != nil {
-			return err
-		}
+		deleted += gone
+		issueIDs = issueIDs[taken:]
+	}
 
-		return writer.deleteIssue(issue)
-	})
+	return deleted, ctx.Err()
 }
 
 func (writer *batchWriter) deleteIssueEvents(issue *issueRecord) error {
-	return writer.database.events.Primary(kv.U64(uint64(issue.ID))).Each(writer.database.db, func(entry kv.Entry[eventRecord]) (bool, error) {
+	return writer.database.events.Primary(kv.Text(issue.ID)).Head().Each(writer.database.db, func(entry kv.Entry[eventRecord]) (bool, error) {
 		writer.deleteEvent(entry)
 
 		return true, nil
@@ -180,7 +202,7 @@ func (writer *batchWriter) deleteIssueEvents(issue *issueRecord) error {
 
 // deleteIssue deletes an issue and its history; its events must be gone.
 func (writer *batchWriter) deleteIssue(issue *issueRecord) error {
-	err := writer.database.status.Primary(kv.U64(uint64(issue.ID))).Each(writer.database.db, func(entry kv.Entry[statusRecord]) (bool, error) {
+	err := writer.database.status.Primary(kv.Text(issue.ID)).Each(writer.database.db, func(entry kv.Entry[statusRecord]) (bool, error) {
 		writer.database.status.DeleteEntry(writer.batch, entry)
 
 		return true, nil
@@ -193,10 +215,10 @@ func (writer *batchWriter) deleteIssue(issue *issueRecord) error {
 	return err
 }
 
-func (database *Store) IssueStatusHistory(_ context.Context, issueID int64) ([]model.StatusChange, error) {
+func (database *Store) IssueStatusHistory(_ context.Context, issueID string) ([]model.StatusChange, error) {
 	changes := []model.StatusChange{}
 
-	err := database.status.Primary(kv.U64(uint64(issueID))).Newest().Each(database.db, func(entry kv.Entry[statusRecord]) (bool, error) {
+	err := database.status.Primary(kv.Text(issueID)).Newest().Each(database.db, func(entry kv.Entry[statusRecord]) (bool, error) {
 		changes = append(changes, entry.Record.StatusChange)
 
 		return true, nil
@@ -209,13 +231,11 @@ func (database *Store) IssueStatusHistory(_ context.Context, issueID int64) ([]m
 type batchWriter struct {
 	database *Store
 	batch    *kv.Batch
-	issues   map[int64]*issueRecord // changed by this batch
-	stored   map[int64]*issueRecord // their versions as stored, for Write
-	deleted  map[int64]*issueRecord
+	issues   map[string]*issueRecord // changed by this batch
+	stored   map[string]*issueRecord // their versions as stored, for Write
+	deleted  map[string]*issueRecord
 	created  map[string]*issueRecord // new, by fingerprint key
 	messages map[string]*messageGroup
-	// written are this batch's events per issue, oldest first.
-	written map[int64][]eventRecord
 	// removed are events this batch deletes; reads still see them until it is written.
 	removed      map[string]bool
 	newMark      *timeMark
@@ -227,9 +247,9 @@ type batchWriter struct {
 // update runs change in one batch; its changes reach memory before the next batch.
 func (database *Store) update(change func(writer *batchWriter) error) error {
 	writer := &batchWriter{
-		database: database, issues: map[int64]*issueRecord{}, stored: map[int64]*issueRecord{}, deleted: map[int64]*issueRecord{},
+		database: database, issues: map[string]*issueRecord{}, stored: map[string]*issueRecord{}, deleted: map[string]*issueRecord{},
 		created:  map[string]*issueRecord{},
-		messages: map[string]*messageGroup{}, written: map[int64][]eventRecord{}, removed: map[string]bool{},
+		messages: map[string]*messageGroup{}, removed: map[string]bool{},
 		messageStart: map[string]uint64{},
 	}
 
@@ -312,7 +332,22 @@ func (writer *batchWriter) apply() {
 	}
 }
 
-func (writer *batchWriter) issue(id int64) (*issueRecord, bool) {
+// newIssueID returns a random ID no issue has, stored or new in this batch.
+func (writer *batchWriter) newIssueID() string {
+	for {
+		id := model.NewID()
+
+		writer.database.issuesMutex.RLock()
+		_, stored := writer.database.table.byID[id]
+		writer.database.issuesMutex.RUnlock()
+
+		if _, created := writer.issues[id]; !stored && !created {
+			return id
+		}
+	}
+}
+
+func (writer *batchWriter) issue(id string) (*issueRecord, bool) {
 	if issue, ok := writer.issues[id]; ok {
 		return issue, true
 	}
@@ -379,10 +414,7 @@ func (writer *batchWriter) event(event model.NewEvent) (model.SaveResult, error)
 
 	switch {
 	case issue == nil:
-		writer.database.issuesMutex.Lock()
-		writer.database.table.lastID++
-		id := writer.database.table.lastID
-		writer.database.issuesMutex.Unlock()
+		id := writer.newIssueID()
 
 		issue = &issueRecord{
 			Issue:       model.Issue{ID: id, ProjectID: event.ProjectID, Status: model.StatusUnresolved, FirstSeen: received},
@@ -432,14 +464,6 @@ func (writer *batchWriter) event(event model.NewEvent) (model.SaveResult, error)
 		return result, err
 	}
 
-	writer.written[issue.ID] = append(writer.written[issue.ID], record)
-
-	if event.KeepEvents > 0 && issue.Stored > event.KeepEvents {
-		if err := writer.trimIssue(issue, event.KeepEvents); err != nil {
-			return result, err
-		}
-	}
-
 	return result, nil
 }
 
@@ -456,33 +480,6 @@ func (writer *batchWriter) deleteEvent(entry kv.Entry[eventRecord]) {
 	if issue, ok := writer.issue(entry.Record.IssueID); ok {
 		issue.removeEvent(entry.Record.ReceivedAt)
 	}
-}
-
-// trimIssue deletes an issue's oldest events beyond keep.
-func (writer *batchWriter) trimIssue(issue *issueRecord, keep int) error {
-	err := writer.database.events.Primary(kv.U64(uint64(issue.ID))).Each(writer.database.db, func(entry kv.Entry[eventRecord]) (bool, error) {
-		writer.deleteEvent(entry)
-
-		return issue.Stored > keep, nil
-	})
-
-	if err != nil {
-		return err
-	}
-
-	for issue.Stored > keep && len(writer.written[issue.ID]) > 0 {
-		oldest := writer.written[issue.ID][0]
-		writer.written[issue.ID] = writer.written[issue.ID][1:]
-
-		if err := writer.database.events.Delete(writer.batch, oldest); err != nil {
-			return err
-		}
-
-		writer.removed[string(writer.database.events.KeyOf(oldest))] = true
-		issue.removeEvent(oldest.ReceivedAt)
-	}
-
-	return nil
 }
 
 type messageGroup struct {

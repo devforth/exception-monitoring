@@ -41,8 +41,8 @@ func TestEmail(t *testing.T) {
 		Kind:         NewIssue,
 		Project:      "backend",
 		ProjectColor: "#db2777",
-		IssueID:      5,
-		IssueURL:     "https://errors.example.com/issues/5",
+		IssueID:      "issue005",
+		IssueURL:     "https://errors.example.com/issues/issue005",
 		Title:        event.Title(),
 		Culprit:      "GET /api/debug-sentry/cause",
 		Level:        "error",
@@ -71,7 +71,7 @@ func TestEmail(t *testing.T) {
 	subject, text, html := fixtures.ParseEmail(t, session.Data)
 
 	for _, body := range []string{text, stdhtml.UnescapeString(html)} {
-		if !strings.Contains(body, `Exception Monitoring MCP: get_issue {"issue_id":5}`) {
+		if !strings.Contains(body, `Exception Monitoring MCP: get_issue {"issue_id":"issue005"}`) {
 			t.Error("missing copyable MCP reference in email body")
 		}
 	}
@@ -81,7 +81,7 @@ func TestEmail(t *testing.T) {
 	}
 
 	// The agent prompt is attached, not in the body.
-	prompt := fixtures.ReadEmail(t, session.Data).Attachments["backend-error-5.md"]
+	prompt := fixtures.ReadEmail(t, session.Data).Attachments["backend-error-issue005.md"]
 
 	for _, want := range []string{"## Exception", "Kind: New issue", "Do not change any code"} {
 		if !strings.Contains(prompt, want) {
@@ -89,7 +89,7 @@ func TestEmail(t *testing.T) {
 		}
 	}
 
-	if strings.Contains(html, "## Exception") || strings.Contains(text, "## Exception") || !strings.Contains(html, "backend-error-5.md") || !strings.Contains(text, "backend-error-5.md") {
+	if strings.Contains(html, "## Exception") || strings.Contains(text, "## Exception") || !strings.Contains(html, "backend-error-issue005.md") || !strings.Contains(text, "backend-error-issue005.md") {
 		t.Error("the body must mention the attached prompt, not contain it")
 	}
 
@@ -99,13 +99,13 @@ func TestEmail(t *testing.T) {
 	}
 
 	// The long format: cause chain, source line of the throw, link, environment.
-	for _, want := range []string{"Caused by", "connect ECONNREFUSED", `throw new Error(&#34;Failed to load orders&#34;`, `href="https://errors.example.com/issues/5"`, "development"} {
+	for _, want := range []string{"Caused by", "connect ECONNREFUSED", `throw new Error(&#34;Failed to load orders&#34;`, `href="https://errors.example.com/issues/issue005"`, "development"} {
 		if !strings.Contains(html, want) {
 			t.Errorf("HTML part is missing %q", want)
 		}
 	}
 
-	if !strings.Contains(text, "Caused by Error: connect ECONNREFUSED") || !strings.Contains(text, "https://errors.example.com/issues/5") {
+	if !strings.Contains(text, "Caused by Error: connect ECONNREFUSED") || !strings.Contains(text, "https://errors.example.com/issues/issue005") {
 		t.Errorf("text part:\n%s", text)
 	}
 }
@@ -113,7 +113,7 @@ func TestEmail(t *testing.T) {
 func TestEmailSummary(t *testing.T) {
 	settings, sessions := fixtures.FakeSMTP(t)
 
-	summary := Summary{Count: 3, Window: time.Minute, Items: []Notification{{Project: "backend", IssueID: 42, Title: "Error: <b>boom</b>"}}}
+	summary := Summary{Count: 3, Window: time.Minute, Items: []Notification{{Project: "backend", IssueID: "issue042", Title: "Error: <b>boom</b>"}}}
 
 	if err := (Email{SMTP: settings, To: "ops@example.com"}).SendSummary(context.Background(), summary); err != nil {
 		t.Fatal(err)
@@ -122,7 +122,7 @@ func TestEmailSummary(t *testing.T) {
 	subject, text, html := fixtures.ParseEmail(t, (<-sessions).Data)
 
 	for _, body := range []string{text, stdhtml.UnescapeString(html)} {
-		if !strings.Contains(body, `Exception Monitoring MCP: get_issue {"issue_id":42}`) {
+		if !strings.Contains(body, `Exception Monitoring MCP: get_issue {"issue_id":"issue042"}`) {
 			t.Error("missing MCP reference in summary")
 		}
 	}
@@ -165,7 +165,7 @@ func TestVerificationCodeEmail(t *testing.T) {
 func TestEmailIssueLinkSetting(t *testing.T) {
 	settings, sessions := fixtures.FakeSMTP(t)
 	factory := Factory{SMTP: settings}
-	notification := Notification{Kind: NewIssue, Project: "backend", Title: "Example issue", Level: "warning", IssueURL: "https://errors.example.com/issues/5"}
+	notification := Notification{Kind: NewIssue, Project: "backend", Title: "Example issue", Level: "warning", IssueURL: "https://errors.example.com/issues/issue005"}
 
 	for _, hidden := range []bool{false, true} {
 		channel, err := factory.Channel(store.Connection{Type: config.ChannelEmail, Address: "ops@example.com", HideIssueLink: hidden})
@@ -205,9 +205,9 @@ func TestPromptFileName(t *testing.T) {
 		notification Notification
 		want         string
 	}{
-		{Notification{Project: "backend", Level: "error", IssueID: 6}, "backend-error-6.md"},
-		{Notification{Project: "Web App / SSR", Level: "fatal", IssueID: 12}, "web-app-ssr-fatal-12.md"},
-		{Notification{Project: "../../etc", IssueID: 3}, "etc-error-3.md"},
+		{Notification{Project: "backend", Level: "error", IssueID: "issue006"}, "backend-error-issue006.md"},
+		{Notification{Project: "Web App / SSR", Level: "fatal", IssueID: "issue012"}, "web-app-ssr-fatal-issue012.md"},
+		{Notification{Project: "../../etc", IssueID: "issue003"}, "etc-error-issue003.md"},
 	}
 
 	for _, testCase := range testCases {

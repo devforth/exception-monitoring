@@ -21,6 +21,11 @@ func (service *Logs) Count(ctx context.Context, filter store.LogFilter) (count i
 	return service.store.CountLogs(ctx, filter)
 }
 
+// Levels returns the levels at least one log has.
+func (service *Logs) Levels(ctx context.Context) ([]string, error) {
+	return service.store.LogLevels(ctx)
+}
+
 // List returns one page of the logs that match filter, newest first.
 func (service *Logs) List(ctx context.Context, filter store.LogFilter) ([]store.LogRecord, error) {
 	return service.store.ListLogs(ctx, filter)

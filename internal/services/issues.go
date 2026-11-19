@@ -27,6 +27,11 @@ func (issues *Issues) Count(ctx context.Context, filter store.IssueFilter) (int,
 	return issues.store.CountIssues(ctx, filter)
 }
 
+// Levels returns the levels at least one issue has, in no order.
+func (issues *Issues) Levels(ctx context.Context) ([]string, error) {
+	return issues.store.IssueLevels(ctx)
+}
+
 // Unresolved counts the unresolved issues of every project: the counter
 // next to Issues in the menu.
 func (issues *Issues) Unresolved(ctx context.Context) (int, error) {
@@ -39,7 +44,7 @@ func (issues *Issues) List(ctx context.Context, filter store.IssueFilter) ([]sto
 }
 
 // Get reads an issue; store.ErrNotFound when it does not exist.
-func (issues *Issues) Get(ctx context.Context, issueID int64) (store.Issue, error) {
+func (issues *Issues) Get(ctx context.Context, issueID string) (store.Issue, error) {
 	return issues.store.GetIssue(ctx, issueID)
 }
 
@@ -47,7 +52,7 @@ func (issues *Issues) Get(ctx context.Context, issueID int64) (store.Issue, erro
 const recentEventsShown = 20
 
 // RecentEvents lists the newest events of an issue for its page.
-func (issues *Issues) RecentEvents(ctx context.Context, issueID int64) ([]store.EventSummary, error) {
+func (issues *Issues) RecentEvents(ctx context.Context, issueID string) ([]store.EventSummary, error) {
 	return issues.store.ListEvents(ctx, store.EventFilter{IssueID: issueID, Limit: recentEventsShown})
 }
 
@@ -84,9 +89,9 @@ var ErrUnknownAction = errors.New("unknown action")
 
 // ApplyAction runs action on the issues for the viewer, who is recorded in
 // the status history; deleting needs CanAdminister. Statuses change in
-// batches, one transaction each. An issue that no longer exists (deleted
+// batches, each all or nothing. An issue that no longer exists (deleted
 // from another tab) is skipped, the others are still processed.
-func (issues *Issues) ApplyAction(ctx context.Context, viewer store.User, action string, issueIDs []int64) error {
+func (issues *Issues) ApplyAction(ctx context.Context, viewer store.User, action string, issueIDs []string) error {
 	status, ok := issueActions[action]
 
 	if !ok {
@@ -114,20 +119,16 @@ func (issues *Issues) ApplyAction(ctx context.Context, viewer store.User, action
 	return nil
 }
 
-func (issues *Issues) deleteBatch(ctx context.Context, issueIDs []int64) error {
-	for _, issueID := range issueIDs {
-		if err := issues.store.DeleteIssue(ctx, issueID); err != nil && !errors.Is(err, store.ErrNotFound) {
-			return err
-		}
-	}
+func (issues *Issues) deleteBatch(ctx context.Context, issueIDs []string) error {
+	_, err := issues.store.DeleteIssues(ctx, issueIDs)
 
-	return nil
+	return err
 }
 
 // setStatus changes the issues of a batch that still exist. The batch
 // update is all or nothing, so one deleted meanwhile means another try
 // without it.
-func (issues *Issues) setStatus(ctx context.Context, issueIDs []int64, status string, actor store.Actor) error {
+func (issues *Issues) setStatus(ctx context.Context, issueIDs []string, status string, actor store.Actor) error {
 	for {
 		existing, err := issues.store.GetIssues(ctx, issueIDs)
 
@@ -135,7 +136,7 @@ func (issues *Issues) setStatus(ctx context.Context, issueIDs []int64, status st
 			return err
 		}
 
-		ids := make([]int64, len(existing))
+		ids := make([]string, len(existing))
 
 		for index, issue := range existing {
 			ids[index] = issue.ID
@@ -150,20 +151,20 @@ func (issues *Issues) setStatus(ctx context.Context, issueIDs []int64, status st
 }
 
 // History lists the status changes of an issue, newest first.
-func (issues *Issues) History(ctx context.Context, issueID int64) ([]store.StatusChange, error) {
+func (issues *Issues) History(ctx context.Context, issueID string) ([]store.StatusChange, error) {
 	return issues.store.IssueStatusHistory(ctx, issueID)
 }
 
-// TraceLogs counts the logs of the event's trace: its trace ID links to
-// them only when there are some.
-func (issues *Issues) TraceLogs(ctx context.Context, event store.Event) (int, error) {
+// TraceLogs reports whether the event's trace has logs: its trace ID links
+// to them only then.
+func (issues *Issues) TraceLogs(ctx context.Context, event store.Event) (bool, error) {
 	if event.TraceID == "" {
-		return 0, nil
+		return false, nil
 	}
 
-	count, _, err := issues.store.CountLogs(ctx, store.LogFilter{TraceID: event.TraceID})
+	logs, err := issues.store.ListLogs(ctx, store.LogFilter{TraceID: event.TraceID, Limit: 1})
 
-	return count, err
+	return len(logs) > 0, err
 }
 
 // relatedLogsWindow bounds the fallback by time: logs of the same trace this

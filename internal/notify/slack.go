@@ -24,7 +24,6 @@ type Slack struct {
 	BotToken   string
 	Channel    string
 	AppName    string // APP_NAME, in the MCP request of an issue
-	Client     *http.Client
 	// apiURL is replaced in tests with a fake server.
 	apiURL string
 }
@@ -136,13 +135,7 @@ func (slack Slack) postMessage(ctx context.Context, text, threadTimestamp string
 	request.Header.Set("Content-Type", "application/json; charset=utf-8")
 	request.Header.Set("Authorization", "Bearer "+slack.BotToken)
 
-	client := slack.Client
-
-	if client == nil {
-		client = http.DefaultClient
-	}
-
-	response, err := client.Do(request)
+	response, err := http.DefaultClient.Do(request)
 
 	if err != nil {
 		return "", fmt.Errorf("slack: %w", stripURL(err))
@@ -188,7 +181,7 @@ func (slack Slack) post(ctx context.Context, text string) error {
 
 	request.Header.Set("Content-Type", "application/json")
 
-	return doRequest(slack.Client, request)
+	return doRequest(request)
 }
 
 // slackErrorHint says what to do about the errors a bot setup runs into,
@@ -223,12 +216,8 @@ func slackLink(link, text string) string {
 
 // doRequest sends an HTTP request and turns a non-2xx answer into an error;
 // 429 becomes a RetryAfterError with the delay from Retry-After.
-func doRequest(client *http.Client, request *http.Request) error {
-	if client == nil {
-		client = http.DefaultClient
-	}
-
-	response, err := client.Do(request)
+func doRequest(request *http.Request) error {
+	response, err := http.DefaultClient.Do(request)
 
 	// The URL of a webhook is its secret: errors are stored, shown and logged.
 	if err != nil {

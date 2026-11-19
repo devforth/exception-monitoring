@@ -7,11 +7,11 @@ import (
 	"time"
 )
 
-// ErrNotFound is returned when the requested row does not exist.
+// ErrNotFound is returned when the requested record does not exist.
 var ErrNotFound = errors.New("not found")
 
 type Issue struct {
-	ID         int64      `json:"id"`
+	ID         string     `json:"id"`
 	ProjectID  int        `json:"project_id"`
 	Title      string     `json:"title"`
 	Culprit    string     `json:"culprit"`
@@ -27,7 +27,7 @@ type Issue struct {
 type EventSummary struct {
 	ID           int64     `json:"-"`
 	ProjectID    int       `json:"project_id"`
-	IssueID      int64     `json:"issue_id"`
+	IssueID      string    `json:"issue_id"`
 	EventID      string    `json:"event_id"`
 	Timestamp    time.Time `json:"timestamp"`
 	ReceivedAt   time.Time `json:"received_at"`
@@ -66,7 +66,7 @@ type IssueFilter struct {
 	Levels     []string // any of these levels
 	Status     string
 	Query      string // substring of the title or culprit
-	Sort       string // a key of issueSorts; "" is last_seen
+	Sort       string // one of IssueSorts; "" is last_seen
 	// SeenSince and SeenUntil bound the date given by DateField to
 	// [SeenSince, SeenUntil). Zero means no bound.
 	SeenSince time.Time
@@ -94,7 +94,7 @@ func ValidDateField(field string) bool {
 // IssueSorts are the IssueFilter.Sort values: a field, newest or most first,
 // or with _asc the reverse (the project name A to Z, _desc the reverse).
 var IssueSorts = []string{
-	"id", "id_asc", "project", "project_desc", "last_seen", "last_seen_asc",
+	"project", "project_desc", "last_seen", "last_seen_asc",
 	"first_seen", "first_seen_asc", "event_count", "event_count_asc",
 }
 
@@ -106,7 +106,7 @@ func ValidIssueSort(sort string) bool {
 // EventFilter selects events. Events are listed newest first; BeforeID
 // continues a previous page (keyset pagination, stable while events arrive).
 type EventFilter struct {
-	IssueID  int64
+	IssueID  string
 	TraceID  string
 	BeforeID int64
 	Limit    int
@@ -132,7 +132,7 @@ var LogCountLimit = 10000
 
 // LogIssue is the issue of the error raised in the same request as a log line.
 type LogIssue struct {
-	IssueID int64
+	IssueID string
 	Title   string
 }
 

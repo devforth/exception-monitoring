@@ -15,6 +15,9 @@ type Definition[T any] struct {
 	// Encode and Decode default to JSON.
 	Encode func(T) ([]byte, error)
 	Decode func([]byte) (T, error)
+	// DecodeHead, when set, decodes what a walk with Head needs: the fields
+	// the keys and lists use, without the large part of the value.
+	DecodeHead func([]byte) (T, error)
 	// Counter, when set, counts the bytes a record takes, index keys included.
 	Counter func(T) Key
 }
@@ -79,9 +82,6 @@ func (collection *Collection[T]) KeyRange() (lower, upper []byte) {
 	return []byte(collection.name + "."), prefixEnd(collection.prefix)
 }
 
-// Name returns the collection's name.
-func (collection *Collection[T]) Name() string { return collection.name }
-
 // KeyOf returns the primary key of record, without the prefix.
 func (collection *Collection[T]) KeyOf(record T) Key { return collection.definition.Key(record) }
 
@@ -127,6 +127,28 @@ func (collection *Collection[T]) Get(reader Reader, key Key) (T, error) {
 	}
 
 	return collection.definition.Decode(value)
+}
+
+// Has reports whether a record is stored under key, without reading its value.
+func (collection *Collection[T]) Has(reader Reader, key Key) (bool, error) {
+	primary := collection.primaryKey(key)
+	iterator := reader.Iterate(primary, append(bytes.Clone(primary), 0))
+	found := iterator.First()
+
+	return found, iterator.Close()
+}
+
+// GetEntry reads the record under key with its stored size, for Write.
+func (collection *Collection[T]) GetEntry(reader Reader, key Key) (Entry[T], error) {
+	value, err := reader.Get(collection.primaryKey(key))
+
+	if err != nil {
+		return Entry[T]{}, err
+	}
+
+	record, err := collection.definition.Decode(value)
+
+	return Entry[T]{Key: key, Record: record, Size: len(value)}, err
 }
 
 // GetBy reads the record a unique index points to, or returns ErrNotFound.

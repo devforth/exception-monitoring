@@ -2,6 +2,7 @@ package tests
 
 import (
 	"context"
+	"fmt"
 	"html"
 	"io"
 	"maps"
@@ -14,8 +15,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/devforth/exception-monitoring/internal/platform/config"
 	"github.com/devforth/exception-monitoring/internal/storage/storetest"
+
+	"github.com/devforth/exception-monitoring/internal/platform/config"
+	"github.com/devforth/exception-monitoring/internal/storage/store"
 
 	"github.com/devforth/exception-monitoring/internal/fixtures"
 )
@@ -61,13 +64,13 @@ func (hook *webhook) last() string {
 }
 
 var (
-	connectionLink   = regexp.MustCompile(`class="issue-title" href="/notifications/(\d+)"`)
-	destinationInput = regexp.MustCompile(`name="destination_id" value="(\d+)"`)
+	connectionLink   = regexp.MustCompile(`class="issue-title" href="/notifications/([a-z0-9]{8})"`)
+	destinationInput = regexp.MustCompile(`name="destination_id" value="([a-z0-9]{8})"`)
 	confirmationCode = regexp.MustCompile(`\b(\d{6})\b`)
 )
 
 func TestSlackConnection(t *testing.T) {
-	database := openDatabase(t)
+	database := storetest.Open(t)
 	server := startServer(t, database, "admin", password)
 	server.login()
 
@@ -97,8 +100,10 @@ func TestSlackConnection(t *testing.T) {
 	// The webhook URL is stored encrypted, in the destination.
 	var stored string
 
-	if err := storetest.SQL(database).QueryRow(`SELECT secret FROM notification_destinations WHERE type = 'slack'`).Scan(&stored); err != nil {
-		t.Fatal(err)
+	for _, connection := range listConnections(t, database) {
+		if connection.Type == "slack" {
+			stored = connection.Secret
+		}
 	}
 
 	if stored == "" || strings.Contains(stored, "hooks") || strings.Contains(stored, "services") {
@@ -222,7 +227,7 @@ func expectNoMail(t *testing.T, server *testServer, why string) {
 }
 
 func TestEmailStep(t *testing.T) {
-	database := openDatabase(t)
+	database := storetest.Open(t)
 	server := startServer(t, database, "admin", password)
 	server.login()
 
@@ -249,10 +254,8 @@ func TestEmailStep(t *testing.T) {
 		t.Fatalf("code sent to %s", commands)
 	}
 
-	var stored string
-
-	if err := storetest.SQL(database).QueryRow(`SELECT address FROM notification_destinations WHERE id = ?`, destinationID).Scan(&stored); err != nil || stored != "ops@example.com" {
-		t.Fatalf("stored address %q (%v), want lowercase", stored, err)
+	if destination, err := database.GetDestination(context.Background(), destinationID); err != nil || destination.Address != "ops@example.com" {
+		t.Fatalf("stored address %q (%v), want lowercase", destination.Address, err)
 	}
 
 	connection := url.Values{
@@ -300,10 +303,8 @@ func TestEmailStep(t *testing.T) {
 			t.Fatalf("save link option: %d", response.Code)
 		}
 
-		var hidden bool
-
-		if err := storetest.SQL(database).QueryRow(`SELECT hide_issue_link FROM notification_connections WHERE id = ?`, id).Scan(&hidden); err != nil || hidden != (include == "") {
-			t.Fatalf("saved link option: hidden=%v, err=%v", hidden, err)
+		if connection, err := database.GetConnection(context.Background(), id); err != nil || connection.HideIssueLink != (include == "") {
+			t.Fatalf("saved link option: hidden=%v, err=%v", connection.HideIssueLink, err)
 		}
 
 		page := server.page("/notifications/" + id)
@@ -355,64 +356,6 @@ func TestEmailStep(t *testing.T) {
 	// "Change email" goes back to the address field.
 	if step := server.post("/notifications/email/change", url.Values{"address": {"ops@example.com"}}).Body.String(); !strings.Contains(step, `hx-post="/notifications/email/start"`) {
 		t.Fatalf("change email:\n%s", step)
-	}
-}
-
-// A connection whose address was never confirmed (made before confirmation
-// existed) is confirmed on its own page; the address itself cannot change.
-func TestConfirmExistingConnection(t *testing.T) {
-	database := openDatabase(t)
-	server := startServer(t, database, "admin", password)
-	server.login()
-
-	_, err := storetest.SQL(database).Exec(`
-		INSERT INTO notification_destinations (id, type, address, secret, verified, created_at, updated_at) VALUES (7, 'email', 'old@example.com', '', 0, 'x', 'x');
-		INSERT INTO notification_connections (id, name, destination_id, all_projects, levels, active, created_at, updated_at) VALUES (3, 'Old', 7, 1, 'error', 0, 'x', 'x');`)
-
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	page := server.page("/notifications/3")
-
-	if list := server.page("/notifications"); !strings.Contains(list, `disabled title="Confirm the email address first"`) {
-		t.Fatal("activation must be disabled until email confirmation")
-	}
-
-	if response := server.post("/notifications/3/active", url.Values{"active": {"1"}}); response.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("activate unconfirmed email: %d", response.Code)
-	}
-
-	var active bool
-
-	if err := storetest.SQL(database).QueryRow(`SELECT active FROM notification_connections WHERE id = 3`).Scan(&active); err != nil || active {
-		t.Fatalf("unconfirmed connection became active: %v, %v", active, err)
-	}
-
-	if !strings.Contains(page, `hx-post="/notifications/email/resend"`) || !strings.Contains(page, `class="connection-rest" disabled`) || strings.Contains(page, "Change email") {
-		t.Fatalf("an unconfirmed connection must offer a code, lock the rest and keep the address:\n%s", page)
-	}
-
-	form := url.Values{"address_fixed": {"1"}, "destination_id": {"7"}}
-	step := server.post("/notifications/email/resend", form).Body.String()
-
-	if !strings.Contains(step, `name="code"`) || strings.Contains(step, "Change email") {
-		t.Fatalf("after Send a code:\n%s", step)
-	}
-
-	code, _ := receiveCode(t, server)
-	form.Set("code", code)
-
-	if step := server.post("/notifications/email/confirm", form).Body.String(); !strings.Contains(step, "data-verified") {
-		t.Fatalf("confirm:\n%s", step)
-	}
-
-	if response := server.post("/notifications/3", url.Values{"name": {"Old"}, "all_projects": {"on"}, "level": {"error"}, "active": {"on"}}); response.Code != http.StatusSeeOther {
-		t.Fatalf("activate after confirming: %d\n%s", response.Code, response.Body)
-	}
-
-	if list := server.page("/notifications"); !strings.Contains(list, "connection-active") {
-		t.Fatalf("list:\n%s", list)
 	}
 }
 
@@ -486,7 +429,7 @@ func TestConnectionFormValidation(t *testing.T) {
 // A connection saved without a name gets one: the part of the address before
 // "@", the name of the Telegram chat, or "Slack".
 func TestConnectionDefaultNames(t *testing.T) {
-	database := openDatabase(t)
+	database := storetest.Open(t)
 	server := startServer(t, database, "admin", password)
 	server.login()
 
@@ -513,19 +456,8 @@ func TestConnectionDefaultNames(t *testing.T) {
 
 	var names []string
 
-	rows, err := storetest.SQL(database).Query(`SELECT name FROM notification_connections ORDER BY id`)
-
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	defer rows.Close()
-
-	for rows.Next() {
-		var name string
-
-		_ = rows.Scan(&name)
-		names = append(names, name)
+	for _, connection := range listConnections(t, database) {
+		names = append(names, connection.Name)
 	}
 
 	if strings.Join(names, "|") != "ops.team|Ops chat|Slack" {
@@ -540,7 +472,7 @@ func TestConnectionDefaultNames(t *testing.T) {
 // The delivery log shows every message with its status and error, and the
 // notifications list flags a connection whose deliveries fail.
 func TestDeliveryLog(t *testing.T) {
-	database := openDatabase(t)
+	database := storetest.Open(t)
 	server := startServer(t, database, "admin", password)
 	server.login()
 
@@ -555,45 +487,58 @@ func TestDeliveryLog(t *testing.T) {
 
 	ctx := context.Background()
 	now := time.Now()
-	notification := `{"Kind":"new_issue","Project":"backend","Title":"Error: queue is full","IssueID":7}`
+	notification := `{"Kind":"new_issue","Project":"backend","Title":"Error: queue is full","IssueID":"issue007"}`
+	connections := listConnections(t, database)
+	broken, working := connections[0].ID, connections[1].ID
+	messages := map[string]int64{}
 
-	for _, channel := range []string{"1", "2"} {
+	for _, channel := range []string{broken, working} {
 		if err := database.EnqueueOutbox(ctx, []string{channel}, "notification", []byte(notification), nil, now); err != nil {
 			t.Fatal(err)
 		}
+
+		messages[channel] = queued(t, database, channel)
 	}
 
-	summary := `{"Count":12,"Window":60000000000,"Items":[{"Kind":"new_issue","Project":"backend","Title":"Error: disk is full","IssueID":8}]}`
+	summary := `{"Count":12,"Window":60000000000,"Items":[{"Kind":"new_issue","Project":"backend","Title":"Error: disk is full","IssueID":"issue008"}]}`
 
-	if err := database.EnqueueOutbox(ctx, []string{"2"}, "summary", []byte(summary), nil, now); err != nil {
+	if err := database.EnqueueOutbox(ctx, []string{working}, "summary", []byte(summary), nil, now); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := database.MarkOutboxRetry(ctx, 1, "slack: 500 internal_error", now.Add(time.Minute), now); err != nil {
+	summaryID := queued(t, database, working)
+
+	if err := database.MarkOutboxRetry(ctx, messages[broken], "slack: 500 internal_error", now.Add(time.Minute), now); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := database.MarkOutboxSent(ctx, 2, now); err != nil {
+	if err := database.MarkOutboxSent(ctx, messages[working], now); err != nil {
 		t.Fatal(err)
 	}
 
 	list := server.page("/notifications")
 
-	if !strings.Contains(list, "failing: slack: 500 internal_error") || !strings.Contains(list, `href="/notifications/log?connection=2">ok`) {
+	if !strings.Contains(list, "failing: slack: 500 internal_error") || !strings.Contains(list, `href="/notifications/log?connection=`+working+`">ok`) {
 		t.Fatalf("delivery column:\n%s", list)
 	}
 
 	log := server.page("/notifications/log")
 
+	if !strings.Contains(log, `<form class="filters" id="delivery-filters"`) || strings.Count(log, `form="delivery-filters">`) != 1 {
+		t.Error("the page size of the delivery log must be one select that belongs to its filters")
+	}
+
 	// A summary opens the issues it stood for in a popup.
-	for _, want := range []string{"Broken chat", "Working chat", `href="/issues/7">Error: queue is full</a>`, "retrying", "slack: 500 internal_error", `delivery-sent`,
-		`popovertarget="summary-3">12 more issues in the last 1m0s</button>`, `<div popover id="summary-3"`, `href="/issues/8">Error: disk is full</a>`, "and 11 more not listed"} {
+	popup := fmt.Sprintf("summary-%d", summaryID)
+
+	for _, want := range []string{"Broken chat", "Working chat", `href="/issues/issue007">Error: queue is full</a>`, "retrying", "slack: 500 internal_error", `delivery-sent`,
+		`popovertarget="` + popup + `">12 more issues in the last 1m0s</button>`, `<div popover id="` + popup + `"`, `href="/issues/issue008">Error: disk is full</a>`, "and 11 more not listed"} {
 		if !strings.Contains(log, want) {
 			t.Errorf("delivery log is missing %q", want)
 		}
 	}
 
-	if filtered := server.page("/notifications/log?status=sent&connection=999"); strings.Contains(filtered, "internal_error") || !strings.Contains(filtered, "Working chat") {
+	if filtered := server.page("/notifications/log?status=sent&connection=missing0"); strings.Contains(filtered, "internal_error") || !strings.Contains(filtered, "Working chat") {
 		t.Error("the status filter must apply and an unknown connection must be ignored")
 	}
 }
@@ -601,7 +546,7 @@ func TestDeliveryLog(t *testing.T) {
 // Issue links are on by default for email and off for chats, which may be
 // public; the box can be set either way for any type.
 func TestIssueLinkDefaults(t *testing.T) {
-	database := openDatabase(t)
+	database := storetest.Open(t)
 	server := startServer(t, database, "admin", password)
 	server.login()
 
@@ -623,22 +568,9 @@ func TestIssueLinkDefaults(t *testing.T) {
 	}
 
 	hidden := map[string]bool{}
-	rows, err := storetest.SQL(database).Query(`SELECT name, hide_issue_link FROM notification_connections`)
 
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	defer rows.Close()
-
-	for rows.Next() {
-		var (
-			name string
-			hide bool
-		)
-
-		_ = rows.Scan(&name, &hide)
-		hidden[name] = hide
+	for _, connection := range listConnections(t, database) {
+		hidden[connection.Name] = connection.HideIssueLink
 	}
 
 	if !hidden["Public chat"] || hidden["Team chat"] {
@@ -649,7 +581,7 @@ func TestIssueLinkDefaults(t *testing.T) {
 // A Slack connection can use a bot instead of a webhook (the bot also sends
 // the agent prompt); a bot needs both its token and a channel.
 func TestSlackBotConnection(t *testing.T) {
-	database := openDatabase(t)
+	database := storetest.Open(t)
 	server := startServer(t, database, "admin", password)
 	server.login()
 
@@ -696,7 +628,7 @@ func TestSlackBotConnection(t *testing.T) {
 // "Retry now" sends the messages waiting for a retry at once: for when the
 // cause was fixed outside this server (a scope added in Slack).
 func TestRetryNow(t *testing.T) {
-	database := openDatabase(t)
+	database := storetest.Open(t)
 	server := startServer(t, database, "admin", password)
 	server.login()
 
@@ -708,35 +640,38 @@ func TestRetryNow(t *testing.T) {
 
 	ctx := context.Background()
 	now := time.Now()
+	id := listConnections(t, database)[0].ID
 
-	if err := database.EnqueueOutbox(ctx, []string{"1"}, "notification", []byte(`{}`), nil, now); err != nil {
+	if err := database.EnqueueOutbox(ctx, []string{id}, "notification", []byte(`{}`), nil, now); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := database.MarkOutboxRetry(ctx, 1, "slack: 200 missing_scope", now.Add(5*time.Minute), now); err != nil {
+	message := queued(t, database, id)
+
+	if err := database.MarkOutboxRetry(ctx, message, "slack: 200 missing_scope", now.Add(5*time.Minute), now); err != nil {
 		t.Fatal(err)
 	}
 
-	if !strings.Contains(server.page("/notifications"), "Retry now (1)") || !strings.Contains(server.page("/notifications/1"), "Retry now (1)") {
+	if !strings.Contains(server.page("/notifications"), "Retry now (1)") || !strings.Contains(server.page("/notifications/"+id), "Retry now (1)") {
 		t.Fatal("the button is shown where the failure is")
 	}
 
-	response := server.post("/notifications/1/retry", url.Values{"return": {"/notifications"}})
+	response := server.post("/notifications/"+id+"/retry", url.Values{"return": {"/notifications"}})
 
 	if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/notifications?notice=retried" {
 		t.Fatalf("retry: %d %q", response.Code, response.Header().Get("Location"))
 	}
 
-	if due, _ := database.DueOutbox(ctx, "1", time.Now().Add(time.Second), 10); len(due) != 1 {
+	if due, _ := database.DueOutbox(ctx, id, time.Now().Add(time.Second), 10); len(due) != 1 {
 		t.Fatal("the waiting message must be due now")
 	}
 
 	// Once sent, nothing waits: no button.
-	if err := database.MarkOutboxSent(ctx, 1, time.Now()); err != nil {
+	if err := database.MarkOutboxSent(ctx, message, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 
-	if strings.Contains(server.page("/notifications/1"), "Retry now") || strings.Contains(server.page("/notifications"), "Retry now") {
+	if strings.Contains(server.page("/notifications/"+id), "Retry now") || strings.Contains(server.page("/notifications"), "Retry now") {
 		t.Error("nothing waits: no button")
 	}
 }
@@ -836,4 +771,29 @@ func TestChatFieldsAreCheckedInTheBrowser(t *testing.T) {
 			t.Errorf("missing %s", want)
 		}
 	}
+}
+
+func listConnections(t *testing.T, database store.Store) []store.Connection {
+	t.Helper()
+
+	connections, err := database.ListConnections(context.Background())
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return connections
+}
+
+// queued is the id of the newest outbox message of a connection.
+func queued(t *testing.T, database store.Store, connectionID string) int64 {
+	t.Helper()
+
+	messages, err := database.ListOutbox(context.Background(), store.OutboxFilter{Channel: connectionID, Limit: 1})
+
+	if err != nil || len(messages) == 0 {
+		t.Fatalf("no queued message: %v", err)
+	}
+
+	return messages[0].ID
 }

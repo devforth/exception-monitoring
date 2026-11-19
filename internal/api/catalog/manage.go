@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/url"
-	"strconv"
 	"time"
 
 	"github.com/devforth/exception-monitoring/internal/platform/config"
@@ -42,7 +41,7 @@ func (handler *handlers) management() []Endpoint {
 
 		Define(Endpoint{
 			Name:        "get_project",
-			Description: "Settings of a project: DSN, color, recorded levels and retention, empty values following the server defaults.",
+			Description: "Settings of a project: DSN, color (missing when it follows the palette) and recorded levels.",
 			ReadOnly:    true, Admin: true, AgentsOnly: true,
 		}, handler.getProject),
 		Define(Endpoint{
@@ -92,7 +91,7 @@ func (handler *handlers) management() []Endpoint {
 // Account and agents.
 
 type userOutput struct {
-	ID                 int64      `json:"id"`
+	ID                 string     `json:"id"`
 	Username           string     `json:"username"`
 	Name               string     `json:"name,omitempty"`
 	Role               string     `json:"role"`
@@ -131,11 +130,11 @@ func (handler *handlers) updateAccountName(ctx context.Context, call Call, input
 }
 
 type listAgentsInput struct {
-	UserID int64 `json:"user_id,omitempty" jsonschema:"Admins: a user they manage; the user the agent acts for when empty."`
+	UserID string `json:"user_id,omitempty" jsonschema:"Admins: a user they manage; the user the agent acts for when empty."`
 }
 
 type agentOutput struct {
-	GrantID    int64      `json:"grant_id"`
+	GrantID    string     `json:"grant_id"`
 	Name       string     `json:"name"`
 	Kind       string     `json:"kind"`
 	CreatedAt  time.Time  `json:"created_at"`
@@ -155,7 +154,7 @@ func (handler *handlers) listAgents(ctx context.Context, call Call, input listAg
 	}
 
 	// Page falls back to the viewer's own agents: say so instead.
-	if input.UserID != 0 && page.Owner.ID != input.UserID {
+	if input.UserID != "" && page.Owner.ID != input.UserID {
 		return agentsOutput{}, ErrNotFound
 	}
 
@@ -169,7 +168,7 @@ func (handler *handlers) listAgents(ctx context.Context, call Call, input listAg
 }
 
 type grantInput struct {
-	GrantID int64 `json:"grant_id" jsonschema:"grant_id from list_agents."`
+	GrantID string `json:"grant_id" jsonschema:"grant_id from list_agents."`
 }
 
 type doneOutput struct {
@@ -369,18 +368,18 @@ func (handler *handlers) createUser(ctx context.Context, call Call, input create
 	return handler.withPassword(ctx, id, password)
 }
 
-func (handler *handlers) withPassword(ctx context.Context, id int64, password string) (passwordOutput, error) {
+func (handler *handlers) withPassword(ctx context.Context, id string, password string) (passwordOutput, error) {
 	user, err := handler.services.Users.Get(ctx, id)
 
 	return passwordOutput{User: userView(user), TemporaryPassword: password, Note: temporaryPasswordNote}, err
 }
 
 type userInput struct {
-	UserID int64 `json:"user_id" jsonschema:"id from list_users."`
+	UserID string `json:"user_id" jsonschema:"id from list_users."`
 }
 
 type updateUserInput struct {
-	UserID int64   `json:"user_id" jsonschema:"id from list_users."`
+	UserID string  `json:"user_id" jsonschema:"id from list_users."`
 	Name   *string `json:"name,omitempty" jsonschema:"Display name."`
 	Role   *string `json:"role,omitempty" jsonschema:"admin or user."`
 }
@@ -432,5 +431,5 @@ func (handler *handlers) deleteUser(ctx context.Context, call Call, input userIn
 		return doneOutput{}, err
 	}
 
-	return doneOutput{Done: "deleted user " + strconv.FormatInt(input.UserID, 10)}, nil
+	return doneOutput{Done: "deleted user " + input.UserID}, nil
 }

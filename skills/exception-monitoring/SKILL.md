@@ -5,7 +5,7 @@ description: Set up and use Exception Monitoring, a self-hosted error and log mo
 
 # Exception Monitoring
 
-A self-hosted server (one Docker container, SQLite inside) that accepts errors and logs from the official Sentry SDKs through a DSN, groups errors into issues, notifies by email/Telegram/Slack and serves them to coding agents over MCP at `<server>/mcp`.
+A self-hosted server (one Docker container with an embedded database) that accepts errors and logs from the official Sentry SDKs through a DSN, groups errors into issues, notifies by email/Telegram/Slack and serves them to coding agents over MCP at `<server>/mcp`.
 
 ## Documentation
 
@@ -31,7 +31,7 @@ Read the page for the task before acting; it has the exact commands and settings
 1. Read deployment.md and configuration.md. Ask where it runs (this machine for a try, or a server with a domain) and whether a reverse proxy with HTTPS already exists.
 2. Use the `compose.yml` from deployment.md and an `.env` next to it with at least `ADMIN_PASSWORD` (12+ characters) and, on a server, `SECRET_KEY` (otherwise generated into the data directory), `PUBLIC_URL=https://<domain>` and `TRUSTED_PROXIES`. Let the user choose the admin password or tell them where it is stored; do not print it.
 3. Start it with `docker compose up -d` (or let the user start it if they prefer), then check `curl -fsS <server>/health`.
-4. Tell the user to log in as `admin` and add a project per service on the **Projects** page (or set `PROJECTS`); agents cannot create projects.
+4. Tell the user to log in as `admin` and add a project per service on the **Projects** page (or set `PROJECTS`).
 
 ## Connect this agent (MCP)
 
@@ -52,7 +52,7 @@ If the tools `list_projects`, `list_issues` and `get_issue` are already availabl
 
 ## Investigate errors
 
-Once connected, the MCP server's own instructions and `fetch_skill` cover finding, reading and resolving issues. In short: `get_issue {"issue_id": N}` gives the error with stack, request, breadcrumbs and related logs; explain the cause with evidence from the code before proposing a fix, and change an issue's status only when the user asks or confirms.
+Once connected, the MCP server's own instructions and `fetch_skill` cover finding, reading and resolving issues. In short: `get_issue {"issue_id": "<id>"}` gives the error with stack, request, breadcrumbs and related logs; explain the cause with evidence from the code before proposing a fix, and change an issue's status only when the user asks or confirms.
 
 ## REST API
 

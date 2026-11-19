@@ -6,9 +6,7 @@ import "encoding/json"
 type RequestInfo struct {
 	Method  string            `json:"method"`
 	URL     string            `json:"url"`
-	Query   json.RawMessage   `json:"query_string"`
 	Headers map[string]string `json:"headers"`
-	Data    json.RawMessage   `json:"data"`
 }
 
 // ParseRequest decodes the event's "request" context. Headers may come as an
@@ -22,18 +20,16 @@ func ParseRequest(raw json.RawMessage) *RequestInfo {
 
 	if err := json.Unmarshal(raw, &info); err != nil {
 		var loose struct {
-			Method  string          `json:"method"`
-			URL     string          `json:"url"`
-			Headers [][2]string     `json:"headers"`
-			Query   json.RawMessage `json:"query_string"`
-			Data    json.RawMessage `json:"data"`
+			Method  string      `json:"method"`
+			URL     string      `json:"url"`
+			Headers [][2]string `json:"headers"`
 		}
 
 		if json.Unmarshal(raw, &loose) != nil {
 			return nil
 		}
 
-		info = RequestInfo{Method: loose.Method, URL: loose.URL, Query: loose.Query, Data: loose.Data, Headers: map[string]string{}}
+		info = RequestInfo{Method: loose.Method, URL: loose.URL, Headers: map[string]string{}}
 
 		for _, pair := range loose.Headers {
 			info.Headers[pair[0]] = pair[1]

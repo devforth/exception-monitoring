@@ -23,7 +23,7 @@ type OutboxMessage struct {
 	CreatedAt    time.Time
 }
 
-// OutboxRecord is a row of the outbox as the delivery log shows it.
+// OutboxRecord is an outbox message as the delivery log shows it.
 type OutboxRecord struct {
 	ID            int64
 	Channel       string // the connection id
@@ -37,7 +37,7 @@ type OutboxRecord struct {
 	UpdatedAt     time.Time
 }
 
-// OutboxFilter selects outbox rows, newest first. Zero values mean "any".
+// OutboxFilter selects outbox messages, newest first. Zero values mean "any".
 type OutboxFilter struct {
 	Channel string
 	Status  string

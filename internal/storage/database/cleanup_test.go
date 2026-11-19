@@ -1,10 +1,14 @@
 package database
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"math/rand/v2"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -205,7 +209,7 @@ func TestCleanupResolvedAndIgnored(t *testing.T) {
 	}
 
 	for name, status := range map[string]string{"resolved": model.StatusResolved, "ignored": model.StatusIgnored} {
-		if err := database.SetIssueStatus(ctx, storedIssue(database, name).ID, status, model.Actor{Source: model.SourceAPI}); err != nil {
+		if _, err := database.SetIssuesStatus(ctx, []string{storedIssue(database, name).ID}, status, model.Actor{Source: model.SourceAPI}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -356,7 +360,7 @@ func TestCleanupMinorLogsAlways(t *testing.T) {
 // the smaller size and deletes nothing more.
 func TestCleanupDoesNotRepeat(t *testing.T) {
 	ctx := context.Background()
-	database, err := Open(t.TempDir(), nil)
+	database, err := Open(t.TempDir())
 
 	if err != nil {
 		t.Fatal(err)
@@ -409,6 +413,92 @@ func TestCleanupDoesNotRepeat(t *testing.T) {
 	}
 
 	checkCollections(t, database)
+}
+
+// The inbox holds envelopes as the SDKs sent them, credentials included; once
+// processed, their bytes leave the files at start and halfway between the
+// checks, limit or not.
+func TestRunCleanupCompactsTheInbox(t *testing.T) {
+	dir := t.TempDir()
+	database, err := Open(dir)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer func() { _ = database.Close() }()
+
+	process := func(raw []byte) {
+		entry, err := database.Append(1, time.Now(), raw)
+
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if _, err := database.Write([]Envelope{{Sequence: entry.Sequence, InboxSize: entry.Size}}); err != nil {
+			t.Fatal(err)
+		}
+
+		if !filesHold(t, dir, raw) {
+			t.Fatal("the envelope never reached the files")
+		}
+	}
+
+	// goleveldb removes replaced files in the background.
+	waitGone := func(raw []byte, when string) {
+		for deadline := time.Now().Add(10 * time.Second); filesHold(t, dir, raw); time.Sleep(10 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatalf("a processed envelope is still in the database files %s", when)
+			}
+		}
+	}
+
+	first := []byte(`{"request":{"headers":{"Cookie":"sid=7f3a9c2e5b8d1046e9a2c7b4f0d3851a"}}}`)
+
+	process(first)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	stopped := make(chan struct{})
+
+	go func() {
+		defer close(stopped)
+
+		database.RunCleanup(ctx, 0, 400*time.Millisecond, slog.New(slog.DiscardHandler))
+	}()
+
+	defer func() {
+		cancel()
+		<-stopped
+	}()
+
+	waitGone(first, "after the start")
+
+	second := []byte(`{"request":{"headers":{"Cookie":"sid=0e4b9d1c7a3f5826b1d9e0c4a7f3b258"}}}`)
+
+	process(second)
+	waitGone(second, "halfway between the checks")
+}
+
+// filesHold says whether a file of the database holds data.
+func filesHold(t *testing.T, dir string, data []byte) bool {
+	t.Helper()
+
+	entries, err := os.ReadDir(filepath.Join(dir, engineName))
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, entry := range entries {
+		// A file may go between the listing and the read.
+		content, err := os.ReadFile(filepath.Join(dir, engineName, entry.Name()))
+
+		if err == nil && bytes.Contains(content, data) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // The latest events go only for issues not seen for a week; a more recent
@@ -518,6 +608,7 @@ func TestCleanupJudgesIssuesAsTheyAre(t *testing.T) {
 	database := openTest(t)
 	clockAt(database, time.Date(2026, 11, 1, 9, 0, 0, 0, time.UTC))
 	writeEvents(t, database, "first", "error", 1)
+	clockAt(database, time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC))
 	writeEvents(t, database, "second", "error", 1)
 	clockAt(database, time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC))
 
@@ -539,13 +630,13 @@ func TestCleanupJudgesIssuesAsTheyAre(t *testing.T) {
 
 	issue := storedIssue(database, "reopened")
 
-	if _, err := database.SetIssuesStatus(context.Background(), []int64{storedIssue(database, "first").ID, issue.ID}, model.StatusResolved, model.Actor{}); err != nil {
+	if _, err := database.SetIssuesStatus(context.Background(), []string{storedIssue(database, "first").ID, issue.ID}, model.StatusResolved, model.Actor{}); err != nil {
 		t.Fatal(err)
 	}
 
 	position, _ = runBatch(t, database, 3, nil, cleanupChunk)
 
-	if _, err := database.SetIssuesStatus(context.Background(), []int64{issue.ID}, model.StatusUnresolved, model.Actor{}); err != nil {
+	if _, err := database.SetIssuesStatus(context.Background(), []string{issue.ID}, model.StatusUnresolved, model.Actor{}); err != nil {
 		t.Fatal(err)
 	}
 

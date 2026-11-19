@@ -73,16 +73,8 @@ func isTerminal(file *os.File) bool {
 	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
-// Pretty is a slog handler for reading in a terminal:
-//
-//	21:32:31 INFO  server started              url=http://localhost:8000  projects=2
-//
-// A record marked Block, or a line wider than the terminal, puts each field
-// on a line of its own, under the message:
-//
-//	21:32:31 INFO  retention
-//	               events=30d
-//	               logs=14d
+// Pretty is a slog handler for reading in a terminal; a Block record or a
+// line wider than the terminal puts each field on a line of its own.
 type Pretty struct {
 	out   io.Writer
 	level slog.Leveler

@@ -8,8 +8,8 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
-	"path/filepath"
 	"regexp"
+	"runtime/debug"
 	"slices"
 	"strconv"
 	"strings"
@@ -81,11 +81,6 @@ func (projects Projects) List() Projects {
 // filters), up to MaxProjectName.
 func ValidProjectName(name string) bool {
 	return len(name) <= MaxProjectName && projectNameRe.MatchString(name)
-}
-
-// ValidPublicKey: 16-64 letters or digits (the DSN key).
-func ValidPublicKey(key string) bool {
-	return publicKeyRe.MatchString(key)
 }
 
 // Projects is the list from PROJECTS, in the order it was written.
@@ -162,14 +157,11 @@ const (
 	DefaultLogLevel           = slog.LevelInfo
 	DefaultAllowedOrigins     = "*"
 	DefaultRateLimitPerMinute = 1000
+	DefaultMemoryLimit        = 200 << 20 // GOMEMLIMIT, the Go runtime's soft limit
 
 	DefaultAdminUsername = "admin"
 
 	DefaultSessionLifetime = 24 * time.Hour
-
-	// DatabaseFileName is the SQLite file in DATA_DIR. Fixed, not derived
-	// from APP_NAME: renaming the app must not lose the data.
-	DatabaseFileName = "database.db"
 
 	// MinAPITokenLength keeps tokens out of brute-force range.
 	MinAPITokenLength = 32
@@ -202,14 +194,16 @@ var (
 	originRe      = regexp.MustCompile(`^https?://([a-z0-9.-]+|\[[0-9a-f:]+\])(:[0-9]{1,5})?$`)
 )
 
-// DatabaseFile is the path of the database: DATA_DIR/database.db.
-func (config *Config) DatabaseFile() string {
-	return filepath.Join(config.DataDir, DatabaseFileName)
-}
-
 // Load reads the configuration from the process environment.
 func Load() (*Config, error) {
 	return loadFrom(os.Getenv)
+}
+
+// LimitMemory sets DefaultMemoryLimit unless GOMEMLIMIT is set; the load tests call it to measure what the server does.
+func LimitMemory() {
+	if os.Getenv("GOMEMLIMIT") == "" {
+		debug.SetMemoryLimit(DefaultMemoryLimit)
+	}
 }
 
 func loadFrom(getenv func(string) string) (*Config, error) {
@@ -240,11 +234,6 @@ func loadFrom(getenv func(string) string) (*Config, error) {
 	}
 
 	if value := getenv("DATA_DIR"); value != "" {
-		// The path goes into a SQLite "file:" DSN where these characters have a special meaning.
-		if strings.ContainsAny(value, "?#%") {
-			return nil, fmt.Errorf("DATA_DIR: path must not contain '?', '#' or '%%': %q", value)
-		}
-
 		config.DataDir = value
 	}
 

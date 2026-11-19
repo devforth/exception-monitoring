@@ -3,7 +3,6 @@ package controllers
 import (
 	"net/http"
 	"net/url"
-	"strconv"
 
 	"github.com/devforth/exception-monitoring/internal/api/mcp"
 	"github.com/devforth/exception-monitoring/internal/platform/config"
@@ -22,8 +21,7 @@ func (controller *Controllers) AgentsPage(w http.ResponseWriter, r *http.Request
 // shown this once (only its hash is stored). Admins may list the agents of
 // a user they manage (?user=).
 func (controller *Controllers) renderAgents(w http.ResponseWriter, r *http.Request, client, token string) {
-	owner, _ := strconv.ParseInt(r.URL.Query().Get("user"), 10, 64)
-	page, err := controller.agents.Page(r.Context(), requests.Viewer(r), owner)
+	page, err := controller.agents.Page(r.Context(), requests.Viewer(r), r.URL.Query().Get("user"))
 
 	if err != nil {
 		controller.serverError(w, r, err)

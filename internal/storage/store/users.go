@@ -32,7 +32,7 @@ var ErrUsernameTaken = errors.New("username is taken")
 // User is a user of the panel. The password hash is never read with it: only
 // UserPassword and FindLogin return it, where a password is checked.
 type User struct {
-	ID                 int64
+	ID                 string
 	Username           string
 	Name               string
 	Role               string

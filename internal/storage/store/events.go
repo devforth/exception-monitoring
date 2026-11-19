@@ -32,9 +32,6 @@ type NewEvent struct {
 	Timestamp    time.Time // when it happened, by the SDK's clock
 	ReceivedAt   time.Time // when the server got it
 	Payload      []byte    // full event JSON
-	// KeepEvents > 0 keeps only the newest KeepEvents events of the issue:
-	// older ones are deleted as this one is saved.
-	KeepEvents int
 }
 
 // An issue keeps at most this much of an event's title and culprit: titles
@@ -49,9 +46,9 @@ func (event NewEvent) IssueText() (title, culprit string) {
 	return text.Shorten(event.Title, MaxTitleLength), text.Shorten(event.Culprit, MaxCulpritLength)
 }
 
-// SaveResult tells what storing an event changed. Notifications (stage 6) use it.
+// SaveResult tells what storing an event changed; StoreSink notifies of new issues and regressions from it.
 type SaveResult struct {
-	IssueID int64
+	IssueID string
 	// Duplicate: an event with this event_id was already stored (an SDK retry); nothing changed.
 	Duplicate bool
 	// NewIssue: the first event of a new issue.

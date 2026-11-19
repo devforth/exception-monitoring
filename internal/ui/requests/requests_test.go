@@ -19,13 +19,13 @@ func postForm(form url.Values) *http.Request {
 }
 
 func TestReadBulkIssues(t *testing.T) {
-	ids, problem := ReadBulkIssues(postForm(url.Values{"issue": {"3", "7"}}))
+	ids, problem := ReadBulkIssues(postForm(url.Values{"issue": {"issue003", "issue007"}}))
 
-	if problem != "" || !slices.Equal(ids, []int64{3, 7}) {
+	if problem != "" || !slices.Equal(ids, []string{"issue003", "issue007"}) {
 		t.Errorf("ReadBulkIssues = %v, %q", ids, problem)
 	}
 
-	if _, problem := ReadBulkIssues(postForm(url.Values{"issue": {"3", "x"}})); problem != "invalid issue id" {
+	if _, problem := ReadBulkIssues(postForm(url.Values{"issue": {"issue003", "x"}})); problem != "invalid issue id" {
 		t.Errorf("bad id: problem = %q", problem)
 	}
 

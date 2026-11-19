@@ -19,7 +19,7 @@ func (row DeliveryRow) Retrying() bool {
 }
 
 type DeliveriesView struct {
-	Connections []lists.Option // by id (Name) with the connection name in Label
+	Connections []lists.Option // by id (Name); the names are in Labels
 	Labels      map[string]string
 	Connection  string
 	Status      string

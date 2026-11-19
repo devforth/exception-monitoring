@@ -6,14 +6,8 @@
 *.log
 /logs/
 
-# Local data (SQLite database, volumes)
+# Local data (the database, volumes)
 /data/
-*.db
-*.db-shm
-*.db-wal
-*.sqlite
-*.sqlite-shm
-*.sqlite-wal
 
 # Environment / secrets
 .env

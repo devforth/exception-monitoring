@@ -33,7 +33,7 @@ var emailTemplates = template.Must(template.New("email.html").Funcs(template.Fun
 }).ParseFS(emailTemplateFiles, "templates/email.html"))
 
 // projectColor is the color of a project badge in an email; anything other
-// than "#rrggbb" (an old outbox row, a missing color) falls back to grey.
+// than "#rrggbb" (a test message has none) falls back to grey.
 func projectColor(color string) string {
 	if config.ValidColor(color) {
 		return color

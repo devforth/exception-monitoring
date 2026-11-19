@@ -1,12 +1,5 @@
-// Package rest serves the request catalog (package catalog) as a REST API under
-// /api/v1/, behind the API token and the IP allowlist. Each endpoint is
-// /api/v1/<name>: a GET with the input as query parameters when it only
-// reads (?project=backend&limit=50; a list field takes repeated or
-// comma-separated values), a POST with the input as a JSON object otherwise.
-// Agents get the same endpoints as MCP tools, so both always match.
-//
-// Lists return {"items": [...], "next_cursor": "..."}; pass next_cursor as
-// cursor to get the next page. No next_cursor means the last page.
+// Package rest serves the request catalog (package catalog) as a REST API
+// under /api/v1/<name> (docs/api.md).
 package rest
 
 import (

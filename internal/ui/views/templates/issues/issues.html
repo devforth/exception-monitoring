@@ -46,11 +46,10 @@
       {{template "issue-action-buttons" (issueActions "bulk" $.Viewer.CanAdminister)}}
     </div>
 
-    <table class="list issues-table">
+    <table class="list">
       <thead>
         <tr>
           <th class="check"><input type="checkbox" class="select-all" aria-label="Select all issues"></th>
-          {{template "sort-header" (.Filter.SortHeader "id" "ID" "number")}}
           <th>Issue</th>
           {{template "sort-header" (.Filter.SortHeader "project" "Project" "")}}
           {{template "sort-header" (.Filter.SortHeader "event_count" "Events" "number")}}
@@ -78,7 +77,6 @@
 {{/* The status is the row: resolved tinted, ignored faded; hovering says what it means. */}}
 <tr class="issue-{{.Status}}" title="{{template "status-title" .Status}}">
   <td class="check"><input type="checkbox" name="issue" value="{{.ID}}" aria-label="Select issue {{.ID}}"></td>
-  <td class="number"><a class="issue-id" href="/issues/{{.ID}}">{{.ID}}</a></td>
   <td>
     {{template "badge" (levelBadge .Level $.Data.Filter)}} <a class="issue-title" href="/issues/{{.ID}}">{{.Title}}</a>
     <span class="visually-hidden">({{.Status}})</span>

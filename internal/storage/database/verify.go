@@ -14,6 +14,8 @@ func (database *Store) Verify() ([]string, error) {
 	checks := []func(kv.Reader) ([]string, error){
 		database.inbox.Check, database.issues.Check, database.status.Check, database.events.Check,
 		database.logs.Check, database.collections.marks.Check, database.thin.Check, database.cleanups.Check,
+		database.users.Check, database.sessions.Check, database.oauthClients.Check, database.oauthCodes.Check, database.grants.Check,
+		database.spentTokens.Check,
 	}
 
 	for _, check := range checks {
@@ -55,7 +57,7 @@ func (database *Store) Verify() ([]string, error) {
 	database.issuesMutex.RUnlock()
 
 	for _, issue := range issues {
-		stored, _, err := database.events.Primary(kv.U64(uint64(issue.ID))).Count(database.db, 0)
+		stored, _, err := database.events.Primary(kv.Text(issue.ID)).Count(database.db, 0)
 
 		if err != nil {
 			return problems, err
@@ -68,7 +70,7 @@ func (database *Store) Verify() ([]string, error) {
 		}
 
 		if stored != issue.Stored || days != issue.Stored {
-			problems = append(problems, fmt.Sprintf("issue %d counts %d events (%d by day), %d stored", issue.ID, issue.Stored, days, stored))
+			problems = append(problems, fmt.Sprintf("issue %s counts %d events (%d by day), %d stored", issue.ID, issue.Stored, days, stored))
 		}
 	}
 

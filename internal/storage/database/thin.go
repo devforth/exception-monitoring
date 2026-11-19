@@ -157,6 +157,8 @@ func (database *Store) thinBefore(cutoff time.Time) cleanupBatch {
 					return true, nil
 				}
 
+				cursor.decoded += len(entry.Record.Payload)
+
 				return true, writer.thin(entry)
 			})
 

@@ -1,9 +1,5 @@
-// Package ingest receives data from Sentry SDKs: POST /api/{projectID}/envelope/.
-//
-// Request flow: CORS check → find the public key → authenticate against the
-// project → rate limit → read and decompress the body → parse the envelope →
-// hand events and logs to the Sink. Item types other than events and logs
-// (spans, sessions, client reports, ...) are accepted and dropped.
+// Package ingest receives envelopes from Sentry SDKs at
+// POST /api/{projectID}/envelope/ and stores their events and logs.
 package ingest
 
 import (

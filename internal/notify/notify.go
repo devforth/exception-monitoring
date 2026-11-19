@@ -1,31 +1,5 @@
 // Package notify sends alerts about new and regressed issues to the
-// connections set up in the UI: email addresses, Telegram chats and Slack
-// webhooks, each with its projects and levels.
-//
-// Delivery survives restarts and outages: every message is written to the
-// notification_outbox table (one row per message and connection) and sent
-// from there.
-//
-//   - Notify only puts the notification in memory and returns: ingest never
-//     waits for a database write, a chat or a mail server.
-//   - A dispatcher goroutine finds the connections that receive it (active,
-//     verified, project and level selected) and applies the flood limit per
-//     connection: at most MaxPerWindow notifications per window (a minute)
-//     one by one, the rest as one summary when the window ends. It writes the
-//     messages to the outbox.
-//   - One worker goroutine per connection sends due messages in order, so a
-//     destination that is down or rate-limited does not delay the others. A
-//     failed attempt is retried on the Schedule (2s, 10s, 30s, … then hourly)
-//     until RetryFor has passed; then the message is marked failed. A channel
-//     can ask for its own delay (Telegram and Slack rate limits). The channel
-//     is built from the stored connection on every attempt, so edits apply
-//     at once; a disabled or deleted connection fails its queued messages.
-//   - A cleanup goroutine deletes sent messages after KeepSent and failed
-//     ones after KeepFailed.
-//
-// What can still be lost: notifications in memory when the process is killed
-// (a fraction of a second), and those held for the summary of the current
-// minute. A normal shutdown (Close) writes them out first.
+// connections set up in the UI, delivered through the outbox.
 package notify
 
 import (
@@ -34,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strconv"
 	"sync"
 	"time"
 
@@ -62,7 +35,7 @@ type Notification struct {
 	Project   string
 	// ProjectColor marks the project in emails ("#rrggbb"; may be empty).
 	ProjectColor string `json:",omitempty"`
-	IssueID      int64
+	IssueID      string
 	IssueURL     string // link to the issue in the UI; empty without PUBLIC_URL
 	Title        string
 	Culprit      string
@@ -108,7 +81,7 @@ func (err *RetryAfterError) Unwrap() error { return err.Err }
 // Store is what the notifier needs from the database (implemented by store.Store).
 type Store interface {
 	ListConnections(ctx context.Context) ([]store.Connection, error)
-	GetConnection(ctx context.Context, id int64) (store.Connection, error)
+	GetConnection(ctx context.Context, id string) (store.Connection, error)
 
 	EnqueueOutbox(ctx context.Context, channels []string, kind string, payload, eventPayload []byte, now time.Time) error
 	DueOutbox(ctx context.Context, channel string, now time.Time, limit int) ([]store.OutboxMessage, error)
@@ -141,7 +114,8 @@ type Options struct {
 	KeepFailed time.Duration // default 30 days
 
 	PollInterval    time.Duration // how often workers look for due retries; default 1s
-	CleanupInterval time.Duration // default 1 hour
+	CleanupInterval time.Duration // default config.OutboxCleanupInterval
+	CleanupDelay    time.Duration // before the first cleanup; 0: at start
 	Now             func() time.Time
 }
 
@@ -179,6 +153,11 @@ type Notifier struct {
 
 	mutex  sync.Mutex
 	closed bool
+
+	// connections are read again once the queue has emptied: a burst of new
+	// issues reads them once, and an edit applies to the next notification.
+	connections []store.Connection
+	inBurst     bool
 }
 
 type worker struct {
@@ -276,7 +255,7 @@ func setDefaults(options *Options) {
 	}
 
 	if options.CleanupInterval <= 0 {
-		options.CleanupInterval = time.Hour
+		options.CleanupInterval = config.OutboxCleanupInterval
 	}
 
 	if options.Now == nil {
@@ -345,13 +324,13 @@ func (notifier *Notifier) dispatch() {
 
 	defer ticker.Stop()
 
-	windows := map[int64]*window{}
+	windows := map[string]*window{}
 
 	flush := func() {
 		for connectionID, current := range windows {
 			if current.held > 0 {
 				summary := Summary{Count: current.held, Window: notifier.options.Window, Items: current.examples}
-				notifier.enqueue(connectionID, kindSummary, summary, nil)
+				notifier.enqueue([]string{connectionID}, kindSummary, summary, nil)
 			}
 		}
 
@@ -374,14 +353,20 @@ func (notifier *Notifier) dispatch() {
 	}
 }
 
-func (notifier *Notifier) route(notification Notification, windows map[int64]*window) {
-	connections, err := notifier.options.Store.ListConnections(notifier.ctx)
+func (notifier *Notifier) route(notification Notification, windows map[string]*window) {
+	if !notifier.inBurst {
+		connections, err := notifier.options.Store.ListConnections(notifier.ctx)
 
-	if err != nil {
-		notifier.options.Logger.Error("read notification connections", "err", err)
+		if err != nil {
+			notifier.options.Logger.Error("read notification connections", "err", err)
 
-		return
+			return
+		}
+
+		notifier.connections = connections
 	}
+
+	notifier.inBurst = len(notifier.queue) > 0
 
 	var eventPayload []byte
 
@@ -389,7 +374,9 @@ func (notifier *Notifier) route(notification Notification, windows map[int64]*wi
 		eventPayload = notification.Event.Raw
 	}
 
-	for _, connection := range connections {
+	var send []string
+
+	for _, connection := range notifier.connections {
 		if !matches(connection, notification) {
 			continue
 		}
@@ -402,8 +389,7 @@ func (notifier *Notifier) route(notification Notification, windows map[int64]*wi
 		}
 
 		if current.sent < notifier.options.MaxPerWindow {
-			notifier.enqueue(connection.ID, kindNotification, notification, eventPayload)
-
+			send = append(send, connection.ID)
 			current.sent++
 		} else {
 			current.held++
@@ -417,10 +403,14 @@ func (notifier *Notifier) route(notification Notification, windows map[int64]*wi
 			}
 		}
 	}
+
+	if len(send) > 0 {
+		notifier.enqueue(send, kindNotification, notification, eventPayload)
+	}
 }
 
-// enqueue writes a message for one connection and wakes its worker.
-func (notifier *Notifier) enqueue(connectionID int64, kind string, message any, eventPayload []byte) {
+// enqueue writes a message for connections in one batch and wakes their workers.
+func (notifier *Notifier) enqueue(connectionIDs []string, kind string, message any, eventPayload []byte) {
 	payload, err := json.Marshal(message)
 
 	if err != nil {
@@ -429,15 +419,16 @@ func (notifier *Notifier) enqueue(connectionID int64, kind string, message any, 
 		return
 	}
 
-	channel := strconv.FormatInt(connectionID, 10)
-
-	if err := notifier.options.Store.EnqueueOutbox(notifier.ctx, []string{channel}, kind, payload, eventPayload, notifier.options.Now()); err != nil {
-		notifier.options.Logger.Error("write notification to outbox", "connection_id", connectionID, "err", err)
+	// The outbox channel of a connection is its id.
+	if err := notifier.options.Store.EnqueueOutbox(notifier.ctx, connectionIDs, kind, payload, eventPayload, notifier.options.Now()); err != nil {
+		notifier.options.Logger.Error("write notification to outbox", "connection_ids", connectionIDs, "err", err)
 
 		return
 	}
 
-	notifier.wakeWorker(channel)
+	for _, connectionID := range connectionIDs {
+		notifier.wakeWorker(connectionID)
+	}
 }
 
 // wakeWorker starts the worker of an outbox channel if needed and tells it
@@ -496,8 +487,15 @@ func (notifier *Notifier) sendDue(channel string) {
 			return
 		}
 
+		if len(messages) == 0 {
+			return
+		}
+
+		// One channel per batch: the connection is read and its secret decrypted once.
+		built, err := notifier.channel(channel)
+
 		for _, message := range messages {
-			notifier.attempt(message)
+			notifier.attempt(message, built, err)
 		}
 
 		if len(messages) < dueBatch {
@@ -509,11 +507,11 @@ func (notifier *Notifier) sendDue(channel string) {
 // errGone are failures that retrying cannot fix.
 var errGone = errors.New("gone")
 
-// attempt sends one message once and records the result.
-func (notifier *Notifier) attempt(message store.OutboxMessage) {
+// attempt sends one message once through channel (or records why there is
+// none, channelErr) and records the result.
+func (notifier *Notifier) attempt(message store.OutboxMessage, channel Channel, channelErr error) {
 	about := []any{"connection", message.Channel, "outbox_id", message.ID, "attempt", message.Attempts + 1}
-
-	channel, err := notifier.channel(message.Channel)
+	err := channelErr
 
 	if err == nil {
 		ctx, cancel := context.WithTimeout(notifier.ctx, sendTimeout)
@@ -568,13 +566,7 @@ func (notifier *Notifier) attempt(message store.OutboxMessage) {
 // channel builds the channel of an outbox channel id from the stored
 // connection, so edits made in the UI apply to queued messages too.
 func (notifier *Notifier) channel(outboxChannel string) (Channel, error) {
-	connectionID, err := strconv.ParseInt(outboxChannel, 10, 64)
-
-	if err != nil {
-		return nil, fmt.Errorf("%w: not a connection id %q", errGone, outboxChannel)
-	}
-
-	connection, err := notifier.options.Store.GetConnection(notifier.ctx, connectionID)
+	connection, err := notifier.options.Store.GetConnection(notifier.ctx, outboxChannel)
 
 	switch {
 	case errors.Is(err, store.ErrNotFound):
@@ -617,13 +609,21 @@ func send(ctx context.Context, channel Channel, message store.OutboxMessage) err
 	}
 }
 
-// runCleanup deletes old outbox messages at start and every CleanupInterval.
+// runCleanup deletes old outbox messages after CleanupDelay and every CleanupInterval.
 func (notifier *Notifier) runCleanup() {
-	ticker := time.NewTicker(notifier.options.CleanupInterval)
+	timer := time.NewTimer(notifier.options.CleanupDelay)
 
-	defer ticker.Stop()
+	defer timer.Stop()
 
 	for {
+		select {
+		case <-timer.C:
+		case <-notifier.dispatched:
+			return
+		case <-notifier.ctx.Done():
+			return
+		}
+
 		now := notifier.options.Now()
 
 		deleted, err := notifier.options.Store.CleanOutbox(notifier.ctx, now.Add(-notifier.options.KeepSent), now.Add(-notifier.options.KeepFailed))
@@ -634,12 +634,6 @@ func (notifier *Notifier) runCleanup() {
 			notifier.options.Logger.Debug("cleaned notification outbox", "deleted", deleted)
 		}
 
-		select {
-		case <-ticker.C:
-		case <-notifier.dispatched:
-			return
-		case <-notifier.ctx.Done():
-			return
-		}
+		timer.Reset(notifier.options.CleanupInterval)
 	}
 }

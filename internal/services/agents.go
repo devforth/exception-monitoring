@@ -56,7 +56,7 @@ type AgentsPage struct {
 
 // Page lists the agents of ownerID when the viewer may see them, otherwise
 // the viewer's own.
-func (agents *Agents) Page(ctx context.Context, viewer store.User, ownerID int64) (AgentsPage, error) {
+func (agents *Agents) Page(ctx context.Context, viewer store.User, ownerID string) (AgentsPage, error) {
 	page := AgentsPage{Owner: viewer, Owners: []store.User{viewer}}
 
 	if viewer.CanAdminister() {
@@ -91,7 +91,7 @@ func (agents *Agents) NewPersonalToken(ctx context.Context, viewer store.User) (
 }
 
 // Disconnect revokes an agent the viewer may access.
-func (agents *Agents) Disconnect(ctx context.Context, viewer store.User, grantID int64) error {
+func (agents *Agents) Disconnect(ctx context.Context, viewer store.User, grantID string) error {
 	grant, err := agents.authorization.Grant(ctx, grantID)
 
 	if err != nil {

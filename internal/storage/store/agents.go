@@ -21,7 +21,7 @@ type OAuthClient struct {
 
 // OAuthCode is an authorization code waiting to be traded for tokens.
 type OAuthCode struct {
-	UserID        int64 // who allowed the agent
+	UserID        string // who allowed the agent
 	ClientID      string
 	ClientName    string
 	RedirectURI   string
@@ -32,8 +32,8 @@ type OAuthCode struct {
 // Grant is a connected agent or a personal token, without its secrets. It
 // acts for UserID.
 type Grant struct {
-	ID         int64
-	UserID     int64
+	ID         string
+	UserID     string
 	UserName   string // the user's display name, read with the grant
 	Kind       string
 	ClientID   string

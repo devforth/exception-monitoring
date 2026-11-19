@@ -1,16 +1,5 @@
-// Package ui is the web interface: server-rendered HTML pages (html/template)
-// with htmx swapping parts of a page (filtered and paged lists, issue
-// actions, the email step of a connection) without a full reload. Templates,
-// CSS and htmx are embedded in the binary, so the UI works without internet
-// access.
-//
-// Access: the IP allowlist is applied by the server; this package adds the
-// users' login (session cookie stored as a hash in SQLite), their roles and
-// CSRF checks.
-//
-// This package is only the composition root; the code lives in sub-packages
-// by role: contracts (view types), lists, helpers, views, middleware,
-// requests, services, controllers and routes.
+// Package ui is the composition root of the web interface (server-rendered
+// HTML with htmx); the code lives in its sub-packages.
 package ui
 
 import (
@@ -18,7 +7,6 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/devforth/exception-monitoring/internal/api/oauth"
 	"github.com/devforth/exception-monitoring/internal/notify"
 	"github.com/devforth/exception-monitoring/internal/platform/config"
 	"github.com/devforth/exception-monitoring/internal/services"
@@ -36,10 +24,11 @@ type Handler struct {
 	auth        *session.Auth
 }
 
+// New builds the UI on the services every part shares (services.New, built once in main).
 func New(ctx context.Context, logger *slog.Logger, database store.Store, settings *config.Config, registry *projects.Registry, factory notify.Factory,
-	authorization *oauth.Server,
+	all *services.All,
 ) (*Handler, error) {
-	renderer, err := views.New(logger, registry, services.NewIssues(database), requests.Viewer, settings.AppName)
+	renderer, err := views.New(logger, registry, all.Issues, requests.Viewer, settings.AppName)
 
 	if err != nil {
 		return nil, err
@@ -47,15 +36,15 @@ func New(ctx context.Context, logger *slog.Logger, database store.Store, setting
 
 	// The first start creates the superadmin from env; later starts do not
 	// use ADMIN_USERNAME/ADMIN_PASSWORD.
-	if err := services.NewUsers(logger, database).EnsureSuperadmin(ctx, settings.AdminUsername, settings.AdminPassword); err != nil {
+	if err := all.Users.EnsureSuperadmin(ctx, settings.AdminUsername, settings.AdminPassword); err != nil {
 		return nil, err
 	}
 
-	auth := session.NewAuth(logger, database, settings)
+	auth := session.NewAuth(logger, database, settings, all.Users)
 
 	return &Handler{
 		controllers: controllers.New(controllers.Dependencies{
-			Logger: logger, Store: database, Registry: registry, Settings: settings, Factory: factory, Views: renderer, Auth: auth, OAuth: authorization,
+			Logger: logger, Registry: registry, Settings: settings, Factory: factory, Views: renderer, Auth: auth, Services: all,
 		}),
 		auth: auth,
 	}, nil

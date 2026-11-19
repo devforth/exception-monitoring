@@ -46,7 +46,7 @@ A goleveldb database is a flat directory managed by the library. It is not one f
 | `LOCK` | Keeps a second process out |
 | `LOG` | The library's own text log (compactions) |
 
-- **Location:** `DATA_DIR/leveldb`. Each store keeps its own directory (see *Engine*). `DATA_DIR/database.db` (SQLite) stays until stage 5, and `secret.key` stays as it is.
+- **Location:** `DATA_DIR/leveldb`. Each store keeps its own directory (see *Engine*). `secret.key` stays as it is; the old `DATA_DIR/database.db` (SQLite) is no longer read.
 - **Settings, to be confirmed by measurements in stage 3:**
   - block cache 32 MB;
   - write buffer (memtable) 16 MB;
@@ -77,7 +77,7 @@ SDK -> HTTP handler -> inbox (goleveldb) -> 200
 
 goleveldb only knows bytes: no tables, no indexes, no query planner. A thin layer of our own, `internal/storage/kv`, gives records a model-like shape, so that no other code builds a key by hand. It works like a model in an ORM, with indexes declared up front.
 
-**Rule: every model is declared once.** Its key, its indexes and the encoding of its value live in one declaration, and every read, write and delete goes through it. The SQLite layer did not do this: a project's columns were listed separately in the column list, the scan function, `INSERT`, `UPDATE` and the migration, so one new field meant edits in five places. Here a new field or index is one edit in `internal/storage/database/schema.go`, plus a migration when stored records have to change.
+**Rule: every model is declared once.** Its key, its indexes and the encoding of its value live in one declaration, and every read, write and delete goes through it. The SQLite layer did not do this: a project's columns were listed separately in the column list, the scan function, `INSERT`, `UPDATE` and the migration, so one new field meant edits in five places. Here a new field or index is one edit in `internal/storage/database/schema.go`; a compatible change is a new collection or a field read with a default, anything else changes `storeFormat` and starts over.
 
 ```go
 // Declared once, in one file (database/schema.go): the primary key and every index.
@@ -111,7 +111,7 @@ logs, err := Logs.By("project", 2, kv.Level("error")).Newest().Limit(20).All(db)
   - sequence numbers;
   - time marks;
   - byte counters per kind, level and day, updated by `Save` and `Delete`;
-  - `meta/schema` with migration functions that rebuild an index or rewrite records when the layout changes.
+  - the format of the database (`storeFormat`), checked at start.
 - **A consistency check.** One function walks a collection and verifies that every index key points to an existing record and that every record has all its index keys. Tests run it for every collection.
 - **Not provided:** joins, which are done in Go through index values, and aggregates, which come from counters or from the in-memory issue table.
 
@@ -146,7 +146,7 @@ Keys are byte strings in sorted order: numbers are big-endian so they sort, and 
 | Time marks | `mark/<10-minute interval>` -> the first sequence number of that interval | |
 | Byte counters | `size/<kind><level><day>` | |
 | Small data | `user/<id>`, `session/<hash>`, `project/<id>`, `connection/<id>`, `destination/<id>`, `outbox/<id>`, `oauth_*/...` | Unique keys (`user_name/<lowercase>`, ...) checked and written by the writer |
-| Metadata | `meta/seq`, `meta/schema` | |
+| Metadata | `meta/sequence`, `format/`, `count/<counter>` | |
 
 - **Sequence numbers** grow with every record, so `<seq>` orders records by arrival.
 - **Time marks** turn a date into a sequence number: a dated list starts and stops by key instead of reading everything, and the cleanup cuts whole days.
@@ -173,7 +173,7 @@ One limit stays: `MAX_DATABASE_SIZE` (default 2 GB).
 - **Order:** docs/configuration.md (Retention) for people, `database/cleanup.go` in code; nowhere else.
 - **Thinning** keeps the exception, `stacktrace` and `threads` without local variables, plus the message, level, time, release and environment. It drops the rest (breadcrumbs, request, contexts, tags). It runs in the background every 10 minutes on the events that turned a month old (`ReduceAging`, only while the limit is on), never in the size cleanup: once the cleanup is deep, thinning would only slow it down. A thinned event is marked, an event that would not get smaller is left as it is, and progress is kept per level.
 - **Deleting.** LevelDB has no range delete. Records go with their index keys in batches of up to 2000, each under the write lock and judging the data as it is then; a batch stops once the goal is reached. A run is a record (status, goal, step, position, counts per step and project) saved in the same batch as the deletes, so a restart goes on where it stopped; the last 100 runs are kept and shown on a page linked from Projects (`/projects/cleanups`).
-- **Returning space.** Before deleting, the cleanup compacts the inbox and the issues, where deleted and rewritten records pile up; that alone may bring the database under the limit. After deleting, it compacts the key ranges it touched. goleveldb removes replaced table files only at its next version change, so the size counts only the tables in use.
+- **Returning space.** Before deleting, the cleanup compacts the inbox and the issues, where deleted and rewritten records pile up; that alone may bring the database under the limit. The inbox is also compacted at startup and halfway between the checks, limit or not: a processed envelope is deleted, but its bytes, credentials included, stay in the files until a compaction reaches its key. Not after the 50 MB checks of a peak: measured, that added 23–28% disk writes and 10% CPU to the peak of 50 DSNs. After deleting, it compacts the key ranges it touched. goleveldb removes replaced table files only at its next version change, so the size counts only the tables in use.
 - **Caps on repeats.** Copies of one log message are capped at 10 as they are written, a fixed limit and not a setting. Events of an issue are not capped when written: the cleanup trims them as above.
 
 ## Stages
@@ -185,7 +185,7 @@ One limit stays: `MAX_DATABASE_SIZE` (default 2 GB).
 | 2. Ingest and reads | First the collections layer (see *Collections*): the `Engine` interface with the goleveldb adapter, key encoding, collections with indexes, batches, queries, the consistency check, with its own tests. Then, on top of it: inbox, issues, events, logs, time marks, counters; the pipeline; `storetest.Open` runs every test on either store (`STORE=kv`); the rest passes to SQLite until stage 5 **Done:** the layer is `internal/storage/kv` (engine, keys, collections, batches with counters and sequence numbers, queries and cursors, the consistency check); the store is `internal/storage/database` on it (`schema.go` declares every collection; the rest of `store.Store` passes to SQLite); the ingest pipeline and the server run on it (`DATA_DIR/leveldb`). First measurements (tmpfs, 50 projects): 50 000 events stored at 2 500/s, logs at ~6 400 lines/s; answers p50 4 ms, max 690 ms; peak memory 300–540 MB, so stage 3 has work to do. | The layer's tests pass; UI and API tests pass on goleveldb |
 | 3. Measurements | Ingest load test (50 × 1000 events, logs), peak memory, latency of answers; tune the settings above; decide the inbox sync policy **Done** (NVMe, 50 projects at once; `INGEST_DIR`, `INGEST_REPEATS`, `INGEST_ONLY` of the load test): one copy of each batch instead of two; issues written without reading them back; repeated log messages counted by keys from their oldest live copy, copies a batch would delete never written; batches bounded by 4 MB as well; goleveldb's level-0 limits relaxed (write stalls 5.5 s to 0.7 s); the inbox without its own sync. Events 3,500/s, answers p50 2 ms, p99 ~105 ms, max ~140–180 ms; logs ~12,400 lines/s without repeats, ~6,500 when every line repeats; peak memory 230–320 MB, ~200 MB with `GOMEMLIMIT=200MiB` at a 5–8% cost. Memory: a default `GOMEMLIMIT` of 200 MiB (in main, overridden by the variable); the goals above follow these numbers. | The goal is met, or the gap is understood |
 | 4. Cleanup | The cleanup above under ingest on a 2 GB database; the retention settings, UI and docs removed. A test runs a burst of writes through the pipeline while the cleanup deletes and compacts: nothing accepted is lost or stored twice, the counters match the stored records, the consistency check passes, and the answers to SDKs stay within the goal **Done:** `database/cleanup.go` and `thin.go` as described above, `Store.Verify` (indexes, byte counters, issue counts) after every test of the package, `TestBurstWithCleanup` (2,600 envelopes through the pipeline while the cleanup runs at a 3 MB limit, under the race detector). The in-memory changes of a batch are applied before the next batch starts (`Batch.AfterWrite`): applying them after the lock let a cleanup overwrite what ingest had just changed. The retention settings are gone from config, the UI, MCP and docs. Measured on 1 GB (60 days, 1.8 M logs, 180 k events) with an ingest batch every 20 ms: the steps take 24–29 s, half of the first version; ingest waits p50 9 ms, p99 53–72 ms, at most 0.56 s (was 3.5 s). | Cleanup tests pass, the burst-with-cleanup test among them; the cleanup does not stall ingest |
-| 5. Small data | Users, sessions, projects, OAuth, notifications, outbox, as collections of the same layer | All tests pass; `modernc.org/sqlite` removed from `go.mod` |
+| 5. Small data | Users, sessions, projects, OAuth, notifications, outbox, as collections of the same layer **Done:** every record is a collection of `database/schema.go`; the rules SQL kept (unique usernames in any case, one superadmin, one personal token, cascades of a deleted user, connection or project, a replayed refresh token revoking its grant) are unique indexes and single batches, with tests in `database`. The `sqlite` package and `modernc.org/sqlite` are gone, tests run on the one store. Users, agents, notification destinations and connections, and issues got random 8-character ids, projects added in the UI a random 8-digit id; nothing moves from the SQLite file. `reset-password` runs with the server stopped, since the server holds the database. Processors remove credentials and compact events in one pass over the JSON tokens (`encoding/json/jsontext`) instead of decoding a tree: 1.7–3.3× faster, the same JSON as the tree pass (a test and a fuzz target compare them), linear on deep nesting. The inbox is compacted at startup and every 10 minutes, so processed envelopes leave the files. | All tests pass; `modernc.org/sqlite` removed from `go.mod` |
 | 6. Operations | `backup` through a snapshot, docs, image size, `CLAUDE.md` | Ready for the release |
 
 ## Risks
@@ -208,7 +208,6 @@ One limit stays: `MAX_DATABASE_SIZE` (default 2 GB).
 - `store`: the API of the storage, the one list of every operation (`store.Store`) with the records and their rules.
 - `database`: the one implementation of that API (`schema.go` declares every collection); `engine_leveldb.go` is the one file that names the engine.
 - `kv`: the layer under it (keys, collections, batches, queries, the `Engine` interface); `kv/leveldb`: the goleveldb adapter; `kv/enginetest`: the test every adapter must pass.
-- Adapters could later split into two families, key-value and SQL, sharing their code; not now, while no second database is planned.
 
 ## Later, outside this plan
 

@@ -29,7 +29,7 @@ type Notifications struct {
 
 	// RetryFor is how long a message that cannot be delivered is retried before
 	// it is marked failed. KeepSent and KeepFailed are how long delivered and
-	// failed messages stay in the outbox table before they are deleted.
+	// failed messages stay in the outbox before they are deleted.
 	RetryFor   time.Duration
 	KeepSent   time.Duration
 	KeepFailed time.Duration

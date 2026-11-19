@@ -14,7 +14,7 @@ It collects exceptions and logs from your backend and frontend apps through the 
 - **MCP server** for coding agents (Claude Code, Codex, …) with OAuth sign-in or a personal token.
 - **REST API** for scripts and integrations.
 - **Size-based cleanup**: under `MAX_DATABASE_SIZE`, logs and old repeated events go first, errors last; credentials are scrubbed from incoming data.
-- **Small:** one static binary with embedded SQLite, an image of about 20 MB, no external database.
+- **Small:** one static binary with an embedded database, an image of about 20 MB, no external database.
 
 Tracing spans, session replays and other Sentry item types are accepted and dropped.
 

@@ -167,7 +167,6 @@ a.badge, a.project { text-decoration: none; }
 a.badge:hover, a.project:hover { filter: brightness(.92); }
 
 .issue-title { color: var(--text); font-weight: 600; }
-.issue-id { color: var(--text); }
 .muted { color: var(--muted); }
 .small { font-size: 12px; }
 .empty { color: var(--muted); padding: 32px; text-align: center; background: var(--surface); border: 1px dashed var(--border); border-radius: 8px; }
@@ -245,8 +244,7 @@ a.button.accent:hover { background: var(--accent); color: var(--accent-text); bo
 
 details { margin: 4px 0; }
 details > summary { cursor: pointer; }
-details > pre, details > table { margin-top: 6px; }
-details > pre { background: var(--code-bg); padding: 10px; border-radius: 6px; max-height: 480px; overflow: auto; }
+details > pre { margin-top: 6px; background: var(--code-bg); padding: 10px; border-radius: 6px; max-height: 480px; overflow: auto; }
 
 .frame { border-top: 1px solid var(--border); padding: 6px 0; margin: 0; }
 .frame > summary { list-style-position: inside; }
@@ -276,7 +274,6 @@ details.stacktrace > :not(summary) { margin-left: 6px; padding-left: 14px; borde
 .columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 24px; }
 
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-top: 12px; }
-.card label { display: block; }
 .storage p { margin: 4px 0; }
 .projects-table .dsn { width: 100%; min-width: 260px; font-size: 12px; }
 .level-choices { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin: 4px 0; }

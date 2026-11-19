@@ -11,7 +11,7 @@ import (
 // address is confirmed with a code once; the confirmation stays with the
 // address, so a new connection to it needs no new code.
 type Destination struct {
-	ID           int64
+	ID           string
 	Type         string // config.ChannelEmail, ChannelTelegram or ChannelSlack
 	Address      string // email, lowercase
 	Secret       string // encrypted tokens of a chat, see package secret
@@ -26,9 +26,9 @@ type Destination struct {
 // Address, Secret, Verified) are filled when reading, for convenience; they
 // are changed through the destination.
 type Connection struct {
-	ID            int64
+	ID            string
 	Name          string
-	DestinationID int64
+	DestinationID string
 	AllProjects   bool  // every project, including ones added to PROJECTS later
 	ProjectIDs    []int // used when AllProjects is false
 	Levels        []string

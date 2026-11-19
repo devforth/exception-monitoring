@@ -1,6 +1,10 @@
 package store
 
-import "time"
+import (
+	"fmt"
+	"strings"
+	"time"
+)
 
 // The cleanup by size has CleanupSteps steps (docs/configuration.md); the
 // first CleanupAlwaysSteps run in full, the rest only while needed.
@@ -50,4 +54,27 @@ type CleanupCounts struct {
 	Events  int `json:"events,omitempty"`
 	Thinned int `json:"thinned,omitempty"`
 	Issues  int `json:"issues,omitempty"`
+}
+
+func (counts *CleanupCounts) Add(other CleanupCounts) {
+	counts.Logs += other.Logs
+	counts.Events += other.Events
+	counts.Thinned += other.Thinned
+	counts.Issues += other.Issues
+}
+
+// String reads "120 logs, 3 events, 5 events thinned".
+func (counts CleanupCounts) String() string {
+	var parts []string
+
+	for _, part := range []struct {
+		count int
+		name  string
+	}{{counts.Logs, "logs"}, {counts.Events, "events"}, {counts.Thinned, "events thinned"}, {counts.Issues, "issues"}} {
+		if part.count > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", part.count, part.name))
+		}
+	}
+
+	return strings.Join(parts, ", ")
 }

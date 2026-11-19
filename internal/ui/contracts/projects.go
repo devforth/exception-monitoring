@@ -41,7 +41,6 @@ type CleanupRunView struct {
 	StartedAt                               time.Time
 	Status                                  string // running, done or failed
 	Limit, SizeBefore, Compacted, SizeAfter string
-	Reached                                 int    // the last step; 0: compacting was enough
 	Stop                                    string // 80% of the limit, where deleting stops
 	Needed                                  string // to free after compacting
 	Deleted                                 string // the steps that deleted something: "1, 4–7"

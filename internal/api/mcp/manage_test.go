@@ -14,7 +14,7 @@ import (
 )
 
 // as is the server seen by an agent of a new user with role.
-func (server *testServer) as(role string) (*testServer, int64) {
+func (server *testServer) as(role string) (*testServer, string) {
 	server.t.Helper()
 
 	ctx := context.Background()
@@ -199,7 +199,7 @@ func TestManageProjects(t *testing.T) {
 }
 
 type userOutput struct {
-	ID                 int64  `json:"id"`
+	ID                 string `json:"id"`
 	Username           string `json:"username"`
 	Name               string `json:"name"`
 	Role               string `json:"role"`

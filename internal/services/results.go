@@ -13,7 +13,7 @@ import "time"
 type EmailStep struct {
 	State         string
 	Address       string
-	DestinationID int64
+	DestinationID string
 	VerifiedAt    time.Time
 	Fixed         bool
 	Duplicate     *Duplicate // the connection that already uses the address
@@ -24,7 +24,7 @@ type EmailStep struct {
 // Duplicate names the connection that already sends to an address or chat,
 // so the error can link to it.
 type Duplicate struct {
-	ID   int64
+	ID   string
 	Name string
 }
 

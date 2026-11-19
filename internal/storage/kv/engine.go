@@ -43,7 +43,6 @@ type Snapshot interface {
 type Iterator interface {
 	First() bool
 	Last() bool
-	Seek(key []byte) bool
 	Next() bool
 	Prev() bool
 	Key() []byte

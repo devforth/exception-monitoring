@@ -17,14 +17,6 @@ linters:
       disable:
         # "err" requires `if err != nil` to be cuddled, the opposite of the rule above.
         - err
-    errcheck:
-      # database/sql idioms where the error is either impossible or checked elsewhere:
-      # Rollback is deferred after Commit (then it is a no-op), rows errors come from
-      # rows.Err(), and a statement is closed with its transaction.
-      exclude-functions:
-        - (*database/sql.Tx).Rollback
-        - (*database/sql.Rows).Close
-        - (*database/sql.Stmt).Close
 
 formatters:
   enable:

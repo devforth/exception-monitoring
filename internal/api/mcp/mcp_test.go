@@ -177,7 +177,7 @@ func (server *testServer) decode(tool string, arguments map[string]any, target a
 }
 
 type issue struct {
-	ID         int64  `json:"id"`
+	ID         string `json:"id"`
 	Project    string `json:"project"`
 	Title      string `json:"title"`
 	Status     string `json:"status"`
@@ -269,7 +269,7 @@ func TestIssues(t *testing.T) {
 	target := all.Items[0]
 	details := server.call("get_issue", map[string]any{"issue_id": target.ID})
 
-	for _, want := range []string{"Issue ID: " + strconv.FormatInt(target.ID, 10), "Event ID: ", "## Error", "Project: backend"} {
+	for _, want := range []string{"Issue ID: " + target.ID, "Event ID: ", "## Error", "Project: backend"} {
 		if !strings.Contains(details, want) {
 			t.Errorf("get_issue lacks %q:\n%s", want, details)
 		}
@@ -314,7 +314,7 @@ func TestIssues(t *testing.T) {
 		t.Errorf("event of another issue accepted:\n%s", text)
 	}
 
-	if text, isError := server.try("get_issue", map[string]any{"issue_id": 999999}); !isError || !strings.Contains(text, "not found") {
+	if text, isError := server.try("get_issue", map[string]any{"issue_id": "missing0"}); !isError || !strings.Contains(text, "not found") {
 		t.Errorf("missing issue: %v %s", isError, text)
 	}
 }
@@ -331,7 +331,7 @@ func TestUpdateIssueStatus(t *testing.T) {
 		Issues []issue `json:"issues"`
 	}
 
-	server.decode("update_issue_status", map[string]any{"issue_ids": []int64{target.ID}, "status": "resolved"}, &updated)
+	server.decode("update_issue_status", map[string]any{"issue_ids": []string{target.ID}, "status": "resolved"}, &updated)
 
 	if len(updated.Issues) != 1 || updated.Issues[0].Status != "resolved" {
 		t.Fatalf("updated: %+v", updated)
@@ -340,7 +340,7 @@ func TestUpdateIssueStatus(t *testing.T) {
 	// The history names the user the agent acts for.
 	history, err := server.database.IssueStatusHistory(context.Background(), target.ID)
 
-	if err != nil || len(history) != 1 || history[0].Name != "admin" || history[0].UserID == 0 || history[0].Source != store.SourceMCP {
+	if err != nil || len(history) != 1 || history[0].Name != "admin" || history[0].UserID == "" || history[0].Source != store.SourceMCP {
 		t.Fatalf("history: %+v %v", history, err)
 	}
 
@@ -353,7 +353,7 @@ func TestUpdateIssueStatus(t *testing.T) {
 		t.Errorf("unresolved: %d, want %d", len(after.Items), len(before.Items)-1)
 	}
 
-	if _, isError := server.try("update_issue_status", map[string]any{"issue_ids": []int64{target.ID}, "status": "deleted"}); !isError {
+	if _, isError := server.try("update_issue_status", map[string]any{"issue_ids": []string{target.ID}, "status": "deleted"}); !isError {
 		t.Error("unknown status accepted")
 	}
 }
@@ -516,7 +516,7 @@ func TestListPageLimits(t *testing.T) {
 	now := time.Now().UTC()
 	ctx := context.Background()
 
-	var issueID int64
+	var issueID string
 
 	logs := make([]store.NewLog, 0, 105)
 	traceID := strings.Repeat("c", 32)
@@ -618,20 +618,20 @@ func TestBatchIssueStatusTools(t *testing.T) {
 		t.Fatalf("need three fixture issues, got %d", len(before.Items))
 	}
 
-	ids := []int64{before.Items[2].ID, before.Items[0].ID, before.Items[1].ID}
+	ids := []string{before.Items[2].ID, before.Items[0].ID, before.Items[1].ID}
 
 	type batch struct {
 		Issues []struct {
-			ID         int64  `json:"id"`
+			ID         string `json:"id"`
 			Status     string `json:"status"`
 			ResolvedAt string `json:"resolved_at"`
 		} `json:"issues"`
-		Missing []int64 `json:"missing_issue_ids"`
+		Missing []string `json:"missing_issue_ids"`
 	}
 
 	var summaries batch
 
-	readIDs := append(append([]int64(nil), ids...), ids[0], 999999)
+	readIDs := append(append([]string(nil), ids...), ids[0], "missing0")
 	raw := server.call("get_issues", map[string]any{"issue_ids": readIDs})
 
 	if strings.Contains(raw, "Help me understand") || strings.Contains(raw, "## Exception") || strings.Contains(raw, "payload") {
@@ -642,7 +642,7 @@ func TestBatchIssueStatusTools(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(summaries.Issues) != 3 || !slices.Equal(summaries.Missing, []int64{999999}) {
+	if len(summaries.Issues) != 3 || !slices.Equal(summaries.Missing, []string{"missing0"}) {
 		t.Fatalf("summary batch: %+v", summaries)
 	}
 
@@ -653,7 +653,7 @@ func TestBatchIssueStatusTools(t *testing.T) {
 	}
 
 	var updated batch
-	server.decode("update_issue_status", map[string]any{"issue_ids": append(append([]int64(nil), ids...), ids[0]), "status": "resolved"}, &updated)
+	server.decode("update_issue_status", map[string]any{"issue_ids": append(append([]string(nil), ids...), ids[0]), "status": "resolved"}, &updated)
 
 	if len(updated.Issues) != 3 || len(updated.Missing) != 0 {
 		t.Fatalf("updated batch: %+v", updated)
@@ -672,7 +672,7 @@ func TestBatchIssueStatusTools(t *testing.T) {
 		t.Fatalf("retry changed the resolved records: %+v, %+v", updated, retried)
 	}
 
-	invalidBatches := [][]int64{nil, {}, {ids[0], 0}, {ids[0], -1}, make([]int64, 101), {ids[0], 999999}}
+	invalidBatches := [][]string{nil, {}, {ids[0], ""}, {ids[0], "Not-An-ID"}, make([]string, 101), {ids[0], "missing0"}}
 
 	for _, bad := range invalidBatches {
 		if _, isError := server.try("update_issue_status", map[string]any{"issue_ids": bad, "status": "ignored"}); !isError {
@@ -688,7 +688,7 @@ func TestBatchIssueStatusTools(t *testing.T) {
 		stored, err := server.database.GetIssue(context.Background(), id)
 
 		if err != nil || stored.Status != "resolved" {
-			t.Fatalf("failed batch partially changed issue %d: %v %+v", id, err, stored)
+			t.Fatalf("failed batch partially changed issue %s: %v %+v", id, err, stored)
 		}
 	}
 
@@ -703,7 +703,7 @@ func TestBatchIssueStatusTools(t *testing.T) {
 		}
 	}
 
-	for _, bad := range [][]int64{{}, {-1}, make([]int64, 101)} {
+	for _, bad := range [][]string{{}, {"Not-An-ID"}, make([]string, 101)} {
 		if _, isError := server.try("get_issues", map[string]any{"issue_ids": bad}); !isError {
 			t.Fatalf("invalid read batch accepted: %v", bad)
 		}

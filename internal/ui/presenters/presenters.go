@@ -1,9 +1,5 @@
-// Package presenters turns stored data into the view types of contracts:
-// table rows, forms filled from a record, display wording. Presenters do no
-// I/O (no store, no services): a controller fetches the data through
-// services, hands it to a presenter and renders the result. What they need
-// besides the data (settings, project names, colors) comes as read-only
-// fields, so tests build them from plain values.
+// Package presenters turns stored data into the view types of contracts,
+// without I/O.
 package presenters
 
 import (

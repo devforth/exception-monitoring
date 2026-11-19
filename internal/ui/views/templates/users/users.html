@@ -26,7 +26,7 @@
       <td class="actions-column">
         {{if $.Viewer.CanManage .}}
         <div class="actions connection-actions">
-          {{template "edit-link" (editLink (printf "/users/%d" .ID) (printf "Edit %s" .DisplayName))}}
+          {{template "edit-link" (editLink (printf "/users/%s" .ID) (printf "Edit %s" .DisplayName))}}
         </div>
         {{end}}
       </td>

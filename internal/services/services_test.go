@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"strconv"
 	"testing"
 	"time"
 
@@ -63,7 +62,7 @@ func TestConnectionsCreateUpdateDelete(t *testing.T) {
 	created := connections[0]
 
 	// A chat needs no confirmation: its destination is created confirmed, holding the secret.
-	if created.DestinationID == 0 || !created.Verified || created.Secret != firstSecret {
+	if created.DestinationID == "" || !created.Verified || created.Secret != firstSecret {
 		t.Errorf("created = %+v, want a confirmed destination with the secret", created)
 	}
 
@@ -109,14 +108,14 @@ func TestVerificationDestinations(t *testing.T) {
 
 	first, err := verification.DestinationFor(ctx, "dev@example.com")
 
-	if err != nil || first.ID == 0 || first.Verified || first.Type != config.ChannelEmail {
+	if err != nil || first.ID == "" || first.Verified || first.Type != config.ChannelEmail {
 		t.Fatalf("DestinationFor = %+v, %v; want a new unconfirmed email destination", first, err)
 	}
 
 	again, err := verification.DestinationFor(ctx, "dev@example.com")
 
 	if err != nil || again.ID != first.ID {
-		t.Errorf("second DestinationFor = %d, %v; want the same destination %d", again.ID, err, first.ID)
+		t.Errorf("second DestinationFor = %s, %v; want the same destination %s", again.ID, err, first.ID)
 	}
 
 	if found, err := verification.EmailDestination(ctx, first.ID); err != nil || found.Address != "dev@example.com" {
@@ -140,7 +139,7 @@ func TestSelectedEvent(t *testing.T) {
 	issues := NewIssues(database)
 	now := time.Now().UTC()
 
-	save := func(eventID, fingerprint string, received time.Time) int64 {
+	save := func(eventID, fingerprint string, received time.Time) string {
 		result, err := database.SaveEvent(ctx, store.NewEvent{
 			ProjectID: 1, EventID: eventID, Fingerprint: fingerprint, Title: fingerprint, Level: "error",
 			Timestamp: received, ReceivedAt: received, Payload: []byte(`{}`),
@@ -188,7 +187,7 @@ func TestSaveRetriesWaitingMessages(t *testing.T) {
 	ctx := context.Background()
 	destination, _ := database.CreateDestination(ctx, store.Destination{Type: "slack", Secret: "x", Verified: true}, time.Now())
 	id, _ := database.CreateConnection(ctx, store.Connection{Name: "Chat", DestinationID: destination, AllProjects: true, Levels: []string{"error"}, Active: true}, time.Now())
-	channel := strconv.FormatInt(id, 10)
+	channel := id
 
 	if err := database.EnqueueOutbox(ctx, []string{channel}, "notification", []byte(`{}`), nil, time.Now()); err != nil {
 		t.Fatal(err)

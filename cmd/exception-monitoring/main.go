@@ -10,12 +10,9 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"runtime/debug"
 	"strconv"
 	"syscall"
 	"time"
-
-	"github.com/devforth/exception-monitoring/internal/storage/sqlite"
 
 	"github.com/devforth/exception-monitoring/internal/api/catalog"
 	"github.com/devforth/exception-monitoring/internal/api/mcp"
@@ -44,8 +41,8 @@ func main() {
 		os.Exit(healthcheck())
 	}
 
-	// `exception-monitoring reset-password [username]`: run on the server
-	// (docker exec), it is how a forgotten password is recovered.
+	// `exception-monitoring reset-password [username]`: run with the server
+	// stopped (it holds the database), it is how a forgotten password is recovered.
 	if len(os.Args) > 1 && os.Args[1] == "reset-password" {
 		if err := resetPassword(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
@@ -67,12 +64,6 @@ func main() {
 	}
 }
 
-// defaultMemoryLimit applies when GOMEMLIMIT is not set (docs/configuration.md).
-const defaultMemoryLimit = 200 << 20
-
-// cleanupInterval is how often the size is checked besides after writes.
-const cleanupInterval = 10 * time.Minute
-
 func run() error {
 	settings, err := config.Load()
 
@@ -80,9 +71,7 @@ func run() error {
 		return err
 	}
 
-	if os.Getenv("GOMEMLIMIT") == "" {
-		debug.SetMemoryLimit(defaultMemoryLimit)
-	}
+	config.LimitMemory()
 
 	logger := logging.New(os.Stderr, settings.LogFormat, settings.LogLevel)
 
@@ -90,23 +79,14 @@ func run() error {
 
 	defer stop()
 
-	relational, err := sqlite.Open(ctx, settings.DatabaseFile())
+	database, err := database.Open(settings.DataDir)
 
 	if err != nil {
-		return err
-	}
-
-	// The rest of the storage is in SQLite until it moves (docs/storage-plan.md).
-	database, err := database.Open(settings.DataDir, relational)
-
-	if err != nil {
-		_ = relational.Close()
-
 		return err
 	}
 
 	defer func() {
-		// Closing flushes both stores; a failure here is worth knowing about.
+		// Closing flushes the store; a failure here is worth knowing about.
 		if err := database.Close(); err != nil {
 			logger.Error("close database", "err", err)
 		}
@@ -156,7 +136,12 @@ func run() error {
 		Name: settings.AppName, Store: database, PublicURL: settings.Notifications.PublicURL, TrustedProxies: settings.TrustedProxies, ResourcePath: mcp.Path,
 	}
 
-	webUI, err := ui.New(ctx, logger, database, settings, registry, factory, authorization)
+	// The rules of the app, one set for the UI and for agents' tools and the REST API.
+	all := services.New(services.Dependencies{
+		Logger: logger, Store: database, Registry: registry, Settings: settings, Factory: factory, OAuth: authorization,
+	})
+
+	webUI, err := ui.New(ctx, logger, database, settings, registry, factory, all)
 
 	if err != nil {
 		return err
@@ -173,6 +158,8 @@ func run() error {
 		RetryFor:   settings.Notifications.RetryFor,
 		KeepSent:   settings.Notifications.KeepSent,
 		KeepFailed: settings.Notifications.KeepFailed,
+		// After the first size check and before the first inbox compaction (config.CleanupInterval).
+		CleanupDelay: config.OutboxCleanupDelay,
 	})
 
 	defer func() {
@@ -195,7 +182,7 @@ func run() error {
 	go func() {
 		defer close(cleanupDone)
 
-		database.RunCleanup(cleanupCtx, settings.Retention.MaxDatabaseBytes, cleanupInterval, logger)
+		database.RunCleanup(cleanupCtx, settings.Retention.MaxDatabaseBytes, config.CleanupInterval, logger)
 	}()
 
 	defer func() {
@@ -207,9 +194,7 @@ func run() error {
 
 	// One catalog of requests, served as the REST API and as MCP tools, on
 	// the same services as the UI.
-	endpoints := catalog.New(database, registry, services.New(services.Dependencies{
-		Logger: logger, Store: database, Registry: registry, Settings: settings, Factory: factory, OAuth: authorization,
-	}))
+	endpoints := catalog.New(database, registry, all)
 
 	sink := ingest.StoreSink{Store: database, Logger: logger, Notifier: notifier, PublicURL: settings.Notifications.PublicURL,
 		Recording: settings.Recording}
@@ -331,14 +316,11 @@ func notificationFactory(logger *slog.Logger, appName string, settings config.No
 
 	// One field per type: "on", or what is missing.
 	channels := []any{logging.Block}
-	available := false
 
 	for _, channelType := range config.AllChannelTypes {
 		state := "on"
 
-		if ok, reason := settings.ChannelAvailable(channelType); ok {
-			available = true
-		} else {
+		if ok, reason := settings.ChannelAvailable(channelType); !ok {
 			state = "off: " + reason
 		}
 
@@ -347,7 +329,8 @@ func notificationFactory(logger *slog.Logger, appName string, settings config.No
 
 	logger.Info("notification channels", channels...)
 
-	if settings.PublicURL == "" && available {
+	// Telegram and Slack are always available (the secret key is generated when not set).
+	if settings.PublicURL == "" {
 		logger.Warn("PUBLIC_URL is not set, notifications will not link to the issue")
 	}
 
@@ -395,10 +378,11 @@ func resetPassword(args []string) error {
 
 	ctx := context.Background()
 	logger := logging.New(os.Stderr, settings.LogFormat, settings.LogLevel)
-	database, err := sqlite.Open(ctx, settings.DatabaseFile())
+	// The running server holds the database: the command runs while it is stopped.
+	database, err := database.Open(settings.DataDir)
 
 	if err != nil {
-		return err
+		return fmt.Errorf("stop the server first, the database is open there (%w)", err)
 	}
 
 	defer func() { _ = database.Close() }()

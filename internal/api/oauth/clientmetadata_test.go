@@ -128,7 +128,7 @@ func TestClientMetadataDocument(t *testing.T) {
 		t.Fatal("a metadata client was stored")
 	}
 
-	callback, err := server.Approve(context.Background(), request, checked, testUserID)
+	callback, err := server.Approve(context.Background(), request, checked, testUserID(t, server))
 
 	if err != nil {
 		t.Fatal(err)
@@ -137,7 +137,7 @@ func TestClientMetadataDocument(t *testing.T) {
 	target, _ := url.Parse(callback)
 	exchange(t, handler, url.Values{"grant_type": {"authorization_code"}, "client_id": {clientID}, "redirect_uri": {redirect}, "code": {target.Query().Get("code")}, "code_verifier": {testVerifier}}, http.StatusOK)
 
-	grants, err := server.Grants(context.Background(), testUserID)
+	grants, err := server.Grants(context.Background(), testUserID(t, server))
 
 	if err != nil || len(grants) != 1 || grants[0].Name != "Claude Code" || grants[0].ClientID != clientID {
 		t.Fatalf("grants = %+v, %v", grants, err)

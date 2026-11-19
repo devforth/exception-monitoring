@@ -53,10 +53,10 @@ var templateFuncs = template.FuncMap{
 	"retryNow": func(id any, count int, back string) map[string]any {
 		return map[string]any{"ID": id, "Count": count, "Return": back}
 	},
-	"back":     link,
-	"editLink": link,
-	// The buttons of the issue-action-buttons partial: an issue's status, or "bulk".
+	"back":        link,
+	"editLink":    link,
 	"roleSummary": func(role string) string { return store.RoleSummaries[role] },
+	// The data of the issue-action-buttons partial: an issue's status (or "bulk") and whether Delete is shown.
 	"issueActions": func(status string, canDelete bool) map[string]any {
 		return map[string]any{"Status": status, "CanDelete": canDelete}
 	},
@@ -99,7 +99,7 @@ func parseTemplates(appName string) (map[string]*template.Template, error) {
 	pages := map[string]*template.Template{}
 	funcs := maps.Clone(templateFuncs)
 	funcs["appName"] = func() string { return appName }
-	funcs["mcpReference"] = func(issueID int64) string { return agentprompt.MCPReference(appName, issueID) }
+	funcs["mcpReference"] = func(issueID string) string { return agentprompt.MCPReference(appName, issueID) }
 
 	pageFiles, err := fs.Glob(templateFiles, "templates/*/*.html")
 
@@ -179,7 +179,7 @@ type view struct {
 
 // LoggedIn: the page is shown to a user (with the menu).
 func (pageView view) LoggedIn() bool {
-	return pageView.Viewer.ID > 0
+	return pageView.Viewer.ID != ""
 }
 
 const sidebarCookie = "em_sidebar"

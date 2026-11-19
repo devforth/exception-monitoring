@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -23,13 +24,13 @@ type listIssuesInput struct {
 	Since   string `json:"since,omitempty" jsonschema:"RFC 3339 time, e.g. 2026-11-11T10:00:00Z: only issues with an event at or after it."`
 	Until   string `json:"until,omitempty" jsonschema:"RFC 3339 time: only issues with an event before it."`
 	DateBy  string `json:"date_by,omitempty" jsonschema:"What since/until apply to: event (default: any event of the issue), first_seen or last_seen."`
-	Sort    string `json:"sort,omitempty" jsonschema:"last_seen (default), first_seen, event_count or id, newest or most first (append _asc to reverse), or project (A to Z; project_desc reverses)."`
+	Sort    string `json:"sort,omitempty" jsonschema:"last_seen (default), first_seen or event_count, newest or most first (append _asc to reverse), or project (A to Z; project_desc reverses)."`
 	Limit   int    `json:"limit,omitempty" jsonschema:"Issues per page, 1 to 100 (default 20)."`
 	Cursor  string `json:"cursor,omitempty" jsonschema:"next_cursor of the previous page."`
 }
 
 type issueOutput struct {
-	ID         int64      `json:"id"`
+	ID         string     `json:"id"`
 	Project    string     `json:"project"`
 	Title      string     `json:"title"`
 	Location   string     `json:"location,omitempty"`
@@ -108,7 +109,7 @@ func (handler *handlers) issueFilter(input listIssuesInput) (store.IssueFilter, 
 	}
 
 	if !store.ValidIssueSort(filter.Sort) {
-		return filter, Invalid("sort must be id, last_seen, first_seen or event_count (optionally with _asc), project or project_desc")
+		return filter, Invalid("sort must be last_seen, first_seen or event_count (optionally with _asc), project or project_desc")
 	}
 
 	if !store.ValidDateField(filter.DateField) {
@@ -134,7 +135,7 @@ func (handler *handlers) issueFilter(input listIssuesInput) (store.IssueFilter, 
 }
 
 type getIssueInput struct {
-	IssueID int64  `json:"issue_id" jsonschema:"Issue ID, as list_issues returns it."`
+	IssueID string `json:"issue_id" jsonschema:"Issue ID, as list_issues returns it."`
 	EventID string `json:"event_id,omitempty" jsonschema:"An event of this issue (see list_issue_events); its latest event when empty."`
 }
 
@@ -154,7 +155,7 @@ func (handler *handlers) getIssue(ctx context.Context, _ Call, input getIssueInp
 	// Asked for an event the issue does not have: say so rather than
 	// describe another one.
 	if err != nil && input.EventID != "" {
-		return "", fmt.Errorf("event %s of issue %d: %w", input.EventID, issue.ID, ErrNotFound)
+		return "", fmt.Errorf("event %s of issue %s: %w", input.EventID, issue.ID, ErrNotFound)
 	}
 
 	return handler.describe(ctx, issue, event)
@@ -208,7 +209,7 @@ func (handler *handlers) describe(ctx context.Context, issue store.Issue, event 
 		err         error
 	)
 
-	ids := []string{fmt.Sprintf("Issue ID: %d", issue.ID)}
+	ids := []string{fmt.Sprintf("Issue ID: %s", issue.ID)}
 
 	if event.EventID != "" {
 		if parsed, err = sentry.ParseEvent(event.Payload, event.EventID, event.ReceivedAt); err != nil {
@@ -238,7 +239,7 @@ func (handler *handlers) describe(ctx context.Context, issue store.Issue, event 
 }
 
 type listIssueEventsInput struct {
-	IssueID int64  `json:"issue_id" jsonschema:"Issue ID."`
+	IssueID string `json:"issue_id" jsonschema:"Issue ID."`
 	Limit   int    `json:"limit,omitempty" jsonschema:"Events per page, 1 to 100 (default 20)."`
 	Cursor  string `json:"cursor,omitempty" jsonschema:"next_cursor of the previous page."`
 }
@@ -294,16 +295,16 @@ func (handler *handlers) listIssueEvents(ctx context.Context, call Call, input l
 }
 
 type issueIDsInput struct {
-	IssueIDs []int64 `json:"issue_ids" jsonschema:"1 to 100 known issue IDs. Duplicates are handled once."`
+	IssueIDs []string `json:"issue_ids" jsonschema:"1 to 100 known issue IDs. Duplicates are handled once."`
 }
 
 type issueBatchOutput struct {
 	Issues          []issueOutput `json:"issues"`
-	MissingIssueIDs []int64       `json:"missing_issue_ids,omitempty"`
+	MissingIssueIDs []string      `json:"missing_issue_ids,omitempty"`
 }
 
-func (handler *handlers) batchOutput(call Call, ids []int64, issues []store.Issue) issueBatchOutput {
-	byID := make(map[int64]store.Issue, len(issues))
+func (handler *handlers) batchOutput(call Call, ids []string, issues []store.Issue) issueBatchOutput {
+	byID := make(map[string]store.Issue, len(issues))
 
 	for _, issue := range issues {
 		byID[issue.ID] = issue
@@ -339,8 +340,8 @@ func (handler *handlers) getIssues(ctx context.Context, call Call, input issueID
 }
 
 type updateIssueStatusInput struct {
-	IssueIDs []int64 `json:"issue_ids" jsonschema:"1 to 100 issue IDs; one ID for a single issue."`
-	Status   string  `json:"status" jsonschema:"resolved, ignored or unresolved, for every issue in the call."`
+	IssueIDs []string `json:"issue_ids" jsonschema:"1 to 100 issue IDs; one ID for a single issue."`
+	Status   string   `json:"status" jsonschema:"resolved, ignored or unresolved, for every issue in the call."`
 }
 
 // updateIssueStatus changes one or many issues at once: all or none. The
@@ -372,16 +373,16 @@ func (handler *handlers) updateIssueStatus(ctx context.Context, call Call, input
 }
 
 type deleteIssueInput struct {
-	IssueID int64 `json:"issue_id" jsonschema:"Issue ID."`
+	IssueID string `json:"issue_id" jsonschema:"Issue ID."`
 }
 
 type deletedOutput struct {
-	Deleted int64 `json:"deleted"`
+	Deleted string `json:"deleted"`
 }
 
 func (handler *handlers) deleteIssue(ctx context.Context, _ Call, input deleteIssueInput) (deletedOutput, error) {
-	if err := handler.store.DeleteIssue(ctx, input.IssueID); err != nil {
-		return deletedOutput{}, err
+	if deleted, err := handler.store.DeleteIssues(ctx, []string{input.IssueID}); err != nil || deleted == 0 {
+		return deletedOutput{}, cmp.Or(err, store.ErrNotFound)
 	}
 
 	return deletedOutput{Deleted: input.IssueID}, nil

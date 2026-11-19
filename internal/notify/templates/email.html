@@ -1,6 +1,6 @@
 {{/* Email clients ignore <style> blocks and classes, so every style is inline. */}}
 
-{{define "level"}}<span style="display:inline-block;padding:1px 6px;border-radius:4px;font-size:12px;font-weight:600;{{if or (eq . "fatal") (eq . "critical") (eq . "error")}}color:#c62828;background:#fdecea{{else if or (eq . "warning") (eq . "warn")}}color:#9a6700;background:#fff4d6{{else if or (eq . "info") (eq . "log")}}color:#1f5fbf;background:#e5efff{{else}}color:#555560;background:#ececf0{{end}}">{{.}}</span>{{end}}
+{{define "level"}}<span style="display:inline-block;padding:1px 6px;border-radius:4px;font-size:12px;font-weight:600;{{if or (eq . "fatal") (eq . "error")}}color:#c62828;background:#fdecea{{else if eq . "warning"}}color:#9a6700;background:#fff4d6{{else if eq . "info"}}color:#1f5fbf;background:#e5efff{{else}}color:#555560;background:#ececf0{{end}}">{{.}}</span>{{end}}
 
 {{/* The project as an outlined badge in its color, like in the UI. */}}
 {{define "project"}}{{$color := projectColor .ProjectColor}}<span style="display:inline-block;padding:0 7px;border:1px solid {{$color}};border-radius:10px;font-size:11px;font-weight:600;text-transform:capitalize;letter-spacing:0;white-space:nowrap;color:{{$color}}">{{.Project}}</span>{{end}}

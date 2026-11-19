@@ -21,7 +21,7 @@ type Choice struct {
 // ConnectionView is what templates/notifications/connection.html shows: the form of a new
 // or an existing connection, with errors after a failed save.
 type ConnectionView struct {
-	ID int64
+	ID string
 	// Waiting is how many messages wait for a retry after a failed attempt
 	// (the "Retry now" button is shown for them).
 	Waiting      int
@@ -75,7 +75,7 @@ func (view ConnectionView) RestLocked() bool {
 }
 
 type ConnectionRow struct {
-	ID          int64
+	ID          string
 	Name        string
 	TypeLabel   string
 	Destination string
@@ -90,7 +90,6 @@ type ConnectionRow struct {
 }
 
 type ConnectionsView struct {
-	Rows      []ConnectionRow
-	CanCreate bool
-	Notice    string
+	Rows   []ConnectionRow
+	Notice string
 }

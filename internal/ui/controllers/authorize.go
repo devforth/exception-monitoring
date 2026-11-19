@@ -10,14 +10,8 @@ import (
 	"github.com/devforth/exception-monitoring/internal/ui/requests"
 )
 
-// The consent page of the OAuth flow (package oauth): an agent asks for
-// access, the admin allows or denies it. The form token binds the decision
-// to this session and to the exact request shown.
-//
-// The page keeps the policy of every page, Referrer-Policy: same-origin: the
-// agent never gets its address (with the request) as a referrer, while the
-// form still carries its Origin. no-referrer would make browsers send
-// "Origin: null" with the form, which the CSRF check rejects.
+// AuthorizePage shows the OAuth consent page: the logged-in user allows or
+// denies an agent's request.
 func (controller *Controllers) AuthorizePage(w http.ResponseWriter, r *http.Request) {
 	params := r.URL.Query()
 	request, err := controller.agents.CheckRequest(r.Context(), r, params)

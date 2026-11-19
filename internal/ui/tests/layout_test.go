@@ -166,7 +166,7 @@ func TestNotFoundPage(t *testing.T) {
 
 	for name, response := range map[string]*httptest.ResponseRecorder{
 		"unknown address":   server.get("/no-such-page"),
-		"missing issue":     server.get("/issues/999999"),
+		"missing issue":     server.get("/issues/zzzzzzzz"),
 		"not for this role": user.get("/notifications"),
 	} {
 		body := response.Body.String()

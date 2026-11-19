@@ -10,7 +10,7 @@ Everything is set with environment variables (in Docker: `-e`, `env_file` or `en
 |---|---|---|
 | `APP_NAME` | `Exception Monitoring` | Shown in the UI, emails and notifications, and to coding agents, who register the MCP server under it in lowercase with dashes (`Acme Errors` → `acme-errors`). Up to 60 characters. |
 | `PORT` | `8000` | Port to listen on. |
-| `DATA_DIR` | `./data` (`/data` in the image) | Where the SQLite database (`database.db`) lives, and `secret.key` when `SECRET_KEY` is not set. Keep it on a volume. |
+| `DATA_DIR` | `./data` (`/data` in the image) | Where the database (`leveldb`) lives, and `secret.key` when `SECRET_KEY` is not set. Keep it on a volume. |
 | `PUBLIC_URL` | | The address users and SDKs reach the server at, e.g. `https://errors.example.com` (a path prefix is kept). Used for links in notifications, the DSNs on the Projects page and the MCP address. Without it, DSNs use the address the UI was opened with and notifications have no links. |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error`. `debug` also logs every request and every rejected envelope. |
 | `GOMEMLIMIT` | `200MiB` | The memory the server aims to stay under: the Go runtime collects garbage harder as it nears it. A soft limit, not a cap. Takes `MiB`, `GiB`. |
@@ -50,7 +50,7 @@ Where messages go (email addresses, Telegram chats, Slack channels) is set up on
 
 | Variable | Default | |
 |---|---|---|
-| `SECRET_KEY` | generated | At least 32 characters (`openssl rand -hex 32`). Encrypts Telegram tokens and Slack webhooks and tokens in the database. Without it a key is generated at the first start into `DATA_DIR/secret.key`; that protects a leaked database file but not a copy of the whole data directory, so on a server set it and keep it outside. Do not lose or change it: stored chats stop working (enter their tokens again). |
+| `SECRET_KEY` | generated | At least 32 characters (`openssl rand -hex 32`). Encrypts Telegram tokens and Slack webhooks and tokens in the database. Without it a key is generated at the first start into `DATA_DIR/secret.key`; that protects a leaked copy of the database (`DATA_DIR/leveldb`) but not a copy of the whole data directory, so on a server set it and keep it outside. Do not lose or change it: stored chats stop working (enter their tokens again). |
 | `SMTP_HOST` | | Mail server; required for email. |
 | `SMTP_PORT` | `587` | Port 465 uses TLS from the start, others STARTTLS. |
 | `SMTP_USERNAME`, `SMTP_PASSWORD` | | SMTP login. |
@@ -69,7 +69,7 @@ While the limit is on, events lose their details as they turn a month old, every
 |---|---|---|
 | `MAX_DATABASE_SIZE` | `2GB` | Once the database reaches it, the least useful data is deleted until the database is at 80%. Takes `KB`, `MB`, `GB`; `0` turns the limit off, and nothing is deleted or thinned. |
 
-The size is checked at startup, every 10 minutes and after every 50 MB written. Only the database files in use count (`DATA_DIR/leveldb`). At the limit the parts that collect deleted data as the server works (the ingest queue, issues) are first compacted, since deleted data keeps its space until then; if the database is still at the limit, the cleanup runs and always deletes:
+The size is checked at startup, every 10 minutes and after every 50 MB written. The ingest queue is compacted at startup and every 10 minutes halfway between the checks, limit or not, so envelopes that waited there as the SDKs sent them, credentials included, leave the files; not after the writes of a peak, where it would add a quarter to the disk writes. Only the database files in use count (`DATA_DIR/leveldb`). At the limit the parts that collect deleted data as the server works (the ingest queue, issues) are first compacted, since deleted data keeps its space until then; if the database is still at the limit, the cleanup runs and always deletes:
 
 1. Logs older than a month.
 2. Events older than a month beyond the newest 20 of their issue.

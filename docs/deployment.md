@@ -1,6 +1,6 @@
 # Deployment
 
-The server is one container, `devforth/exception-monitoring`, for amd64 and arm64. It keeps all its data in one SQLite database in `/data` and needs nothing else. The database file is `/data/database.db`; without `SECRET_KEY`, the key that encrypts chat tokens is `/data/secret.key`.
+The server is one container, `devforth/exception-monitoring`, for amd64 and arm64. It keeps all its data in an embedded database in `/data` and needs nothing else. The database is the directory `/data/leveldb`; without `SECRET_KEY`, the key that encrypts chat tokens is `/data/secret.key`.
 
 Image tags: `latest` (newest release), `X.Y` (newest patch of a minor version), `X.Y.Z`. Pin `X.Y` or `X.Y.Z` in production and upgrade on purpose.
 
@@ -79,15 +79,17 @@ Events and logs are kept until the database nears [its size limit](configuration
 docker compose pull && docker compose up -d
 ```
 
-The database is migrated at start. Migrations only go forward: a database opened by a newer version refuses to start with an older one, so an upgraded server cannot go back to an older version.
-
 On shutdown (`docker stop` sends SIGTERM) the server finishes requests and writes queued notifications to the database; they are sent after the next start.
 
 ## Forgotten password
 
+The running server holds the database, so stop it first:
+
 ```sh
-docker compose exec exception-monitoring /exception-monitoring reset-password          # the superadmin
-docker compose exec exception-monitoring /exception-monitoring reset-password <username>
+docker compose stop exception-monitoring
+docker compose run --rm exception-monitoring reset-password          # the superadmin
+docker compose run --rm exception-monitoring reset-password <username>
+docker compose start exception-monitoring
 ```
 
 It prints a temporary password; the user chooses a new one at the next login. Their sessions end; their connected agents keep working.

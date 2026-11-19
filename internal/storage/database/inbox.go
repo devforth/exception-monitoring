@@ -1,7 +1,6 @@
 package database
 
 import (
-	"errors"
 	"time"
 
 	"github.com/devforth/exception-monitoring/internal/storage/kv"
@@ -34,13 +33,7 @@ func (database *Store) Append(projectID int, received time.Time, body []byte) (I
 
 // InInbox reports whether an entry is still waiting.
 func (database *Store) InInbox(sequence uint64) (bool, error) {
-	_, err := database.inbox.Get(database.db, kv.K(kv.U64(sequence)))
-
-	if errors.Is(err, kv.ErrNotFound) {
-		return false, nil
-	}
-
-	return err == nil, err
+	return database.inbox.Has(database.db, kv.K(kv.U64(sequence)))
 }
 
 // InboxBytes returns the size of the waiting envelopes.

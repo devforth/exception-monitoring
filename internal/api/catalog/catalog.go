@@ -13,11 +13,10 @@ type handlers struct {
 	services *services.All
 }
 
-// New is the catalog, in the order agents and the UI list the tools. To add
-// an endpoint, add it here with its handler: REST and MCP pick it up.
-// Descriptions say when to use an endpoint; the MCP instructions and skills
-// hold the workflow. Called with nil arguments it serves only to read the
-// definitions (the MCP page lists them).
+// New is the catalog. To add an endpoint, add it here with its handler: REST
+// and MCP pick it up. Descriptions say when to use an endpoint; the MCP
+// instructions and skills hold the workflow. Called with nil arguments it
+// serves only to read the definitions.
 func New(database store.Store, projects config.ProjectList, all *services.All) []Endpoint {
 	handler := &handlers{store: database, projects: projects, services: all}
 

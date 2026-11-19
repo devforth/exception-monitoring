@@ -1,8 +1,8 @@
 // Package secret encrypts values stored in the database (chat tokens, webhook
-// URLs), so a copy of the database file alone does not reveal them. The key
-// comes from SECRET_KEY, kept apart from the data; without it one is
-// generated into the data directory (KeyFile), which protects a leaked
-// database file but not a copy of the whole directory.
+// URLs), so a copy of the database (DATA_DIR/leveldb) alone does not reveal
+// them. The key comes from SECRET_KEY, kept apart from the data; without it
+// one is generated into the data directory (KeyFile), which protects a leaked
+// copy of the database but not a copy of the whole data directory.
 package secret
 
 import (

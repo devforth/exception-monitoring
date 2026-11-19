@@ -81,13 +81,13 @@ func (controller *Controllers) NewProjectPage(w http.ResponseWriter, r *http.Req
 // loadProject reads the project of the {projectID} path value; on failure it
 // has written the response.
 func (controller *Controllers) loadProject(w http.ResponseWriter, r *http.Request) (store.Project, bool) {
-	id, ok := controller.pathID(w, r, "projectID")
+	id, ok := controller.projectID(w, r)
 
 	if !ok {
 		return store.Project{}, false
 	}
 
-	project, err := controller.projects.Get(r.Context(), int(id))
+	project, err := controller.projects.Get(r.Context(), id)
 
 	return project, !controller.failed(w, r, err)
 }

@@ -175,16 +175,3 @@ func (db *DB) Counters() map[string]int64 {
 
 	return maps.Clone(db.counters)
 }
-
-// View runs read on a snapshot.
-func (db *DB) View(read func(reader Reader) error) error {
-	snapshot, err := db.Snapshot()
-
-	if err != nil {
-		return err
-	}
-
-	defer snapshot.Release()
-
-	return read(snapshot)
-}

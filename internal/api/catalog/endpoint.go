@@ -1,20 +1,6 @@
-// Package catalog is the one catalog of the server's API: every request
-// is declared here once, with its name, description, input (a struct whose
-// jsonschema tags describe the fields) and handler. The transports are built
-// from it, so an endpoint added here is served both ways:
-//
-//   - package rest serves it over REST: GET /api/v1/<name>?<input> when it
-//     only reads, POST /api/v1/<name> with the input as JSON otherwise;
-//   - package mcp offers it to coding agents as the tool <name>, to the
-//     users whose role allows it (Admin).
-//
-// RESTOnly endpoints are not tools (raw payloads); AgentsOnly ones are not
-// REST routes: they act as a user, and the REST API has only its token.
-//
-// Handlers know nothing about HTTP or MCP: they get a Call (who acts, whether
-// the output goes to an agent's model provider) and the decoded input, and
-// return a value written as JSON, or Text written as it is. What a user may
-// change is checked again by the services the handlers call.
+// Package catalog is the one catalog of the server's API requests, each
+// declared once with its input and handler and served both by package rest
+// and as MCP tools by package mcp.
 package catalog
 
 import (
@@ -62,8 +48,7 @@ type Endpoint struct {
 	// InputSchema describes the input, inferred from the handler's input type.
 	InputSchema *jsonschema.Schema
 
-	resolved *jsonschema.Resolved
-	run      func(ctx context.Context, call Call, input map[string]any) (any, error)
+	run func(ctx context.Context, call Call, input map[string]any) (any, error)
 }
 
 // Call is what a handler knows about the request.
@@ -112,7 +97,6 @@ func Define[In, Out any](endpoint Endpoint, handler func(context.Context, Call, 
 	}
 
 	endpoint.InputSchema = schema
-	endpoint.resolved = resolved
 	endpoint.run = func(ctx context.Context, call Call, input map[string]any) (any, error) {
 		if input == nil {
 			input = map[string]any{}
@@ -160,7 +144,7 @@ func (endpoint Endpoint) AllowedFor(call Call) bool {
 		return !endpoint.AgentsOnly
 	}
 
-	return call.Viewer.ID != 0 && !endpoint.RESTOnly && (!endpoint.Admin || call.Viewer.CanAdminister())
+	return call.Viewer.ID != "" && !endpoint.RESTOnly && (!endpoint.Admin || call.Viewer.CanAdminister())
 }
 
 // The notes that end the description of a tool that must be confirmed:

@@ -288,6 +288,48 @@ func TestSeveralProjectsFilter(t *testing.T) {
 	}
 }
 
+// The level filters offer the levels some issue or log has, and one a link chose.
+func TestLevelFiltersOfferLevelsInUse(t *testing.T) {
+	server := newTestServer(t, password)
+	server.ingestFixtures()
+	server.login()
+
+	for _, list := range []struct {
+		path    string
+		offered map[string]bool
+	}{
+		{"/issues?status=all", map[string]bool{"error": true, "warning": true, "info": true, "fatal": false, "debug": false}},
+		{"/logs", map[string]bool{"error": true, "warn": true, "info": true, "fatal": false, "debug": false, "trace": false}},
+	} {
+		page := server.page(list.path)
+
+		for level, offered := range list.offered {
+			if strings.Contains(page, `name="level" value="`+level+`"`) != offered {
+				t.Errorf("%s: level %s offered: %v, want %v", list.path, level, !offered, offered)
+			}
+		}
+
+		if chosen := server.page(strings.Split(list.path, "?")[0] + "?level=debug"); !strings.Contains(chosen, `name="level" value="debug" checked`) {
+			t.Errorf("%s: a level the link chose is not offered", list.path)
+		}
+	}
+}
+
+// A filter with one choice and nothing chosen filters nothing, so it is not shown.
+func TestPickerWithOneChoiceIsHidden(t *testing.T) {
+	server := newTestServer(t, password)
+	server.login()
+	server.sendEnvelope(fixtures.BackendEnvelopeURL, []byte(`{}`+"\n"+`{"type":"event"}`+"\n"+`{"message":"only error","level":"error"}`))
+
+	if page := server.page("/issues"); strings.Contains(page, `name="level"`) || !strings.Contains(page, `name="project"`) {
+		t.Error("one level offered, or the projects (two of them) not")
+	}
+
+	if page := server.page("/issues?level=error"); !strings.Contains(page, `name="level" value="error" checked`) {
+		t.Error("a chosen level is not offered")
+	}
+}
+
 func TestActiveFilterChips(t *testing.T) {
 	server := newTestServer(t, password)
 	server.ingestFixtures()
@@ -455,7 +497,6 @@ func TestIssueSortHeadings(t *testing.T) {
 		`<th class="sortable number"><a href="/issues?sort=event_count"`,
 		`<th class="sortable" aria-sort="descending"><a href="/issues?sort=last_seen_asc"`,
 		`<th class="sortable"><a href="/issues?sort=project"`,
-		`<th class="sortable number"><a href="/issues?sort=id"`,
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("missing %s", want)

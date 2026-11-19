@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"strconv"
 	"strings"
 	"time"
 
@@ -46,21 +45,21 @@ func (service *Connections) DeliveryHealth(ctx context.Context) (map[string]stor
 }
 
 // Get reads a connection; store.ErrNotFound when it does not exist.
-func (service *Connections) Get(ctx context.Context, id int64) (store.Connection, error) {
+func (service *Connections) Get(ctx context.Context, id string) (store.Connection, error) {
 	return service.store.GetConnection(ctx, id)
 }
 
 // create saves a new connection and returns its id. chatSecret is the
 // encrypted secret of a chat (empty for email): the chat's destination is
 // created first.
-func (service *Connections) create(ctx context.Context, connection store.Connection, chatSecret string) (int64, error) {
+func (service *Connections) create(ctx context.Context, connection store.Connection, chatSecret string) (string, error) {
 	if chatSecret != "" {
 		// Chats need no confirmation: whoever has the token owns the chat.
 		now := service.now()
 		destinationID, err := service.store.CreateDestination(ctx, store.Destination{Type: connection.Type, Secret: chatSecret, Verified: true, VerifiedAt: now}, now)
 
 		if err != nil {
-			return 0, err
+			return "", err
 		}
 
 		connection.DestinationID = destinationID
@@ -74,7 +73,7 @@ func (service *Connections) create(ctx context.Context, connection store.Connect
 // from the stored one.
 func (service *Connections) update(ctx context.Context, connection store.Connection, newChatSecret string) error {
 	if newChatSecret != "" && newChatSecret != connection.Secret {
-		if err := service.store.UpdateDestinationSecret(ctx, connection.DestinationID, newChatSecret, service.now()); err != nil {
+		if err := service.store.UpdateDestinationSecret(ctx, connection.DestinationID, newChatSecret); err != nil {
 			return err
 		}
 	}
@@ -97,14 +96,14 @@ func (service *Connections) SetActive(ctx context.Context, connection store.Conn
 // RetryNow sends the waiting messages of a connection again now, without
 // waiting for the next step of the retry schedule: for when the problem was
 // fixed outside this server (a scope added in Slack, the bot invited).
-func (service *Connections) RetryNow(ctx context.Context, id int64) error {
-	return service.store.RetryOutboxNow(ctx, strconv.FormatInt(id, 10), service.now())
+func (service *Connections) RetryNow(ctx context.Context, id string) error {
+	return service.store.RetryOutboxNow(ctx, id, service.now())
 }
 
 // saved stores a changed connection and retries its waiting messages now:
 // a save is usually the fix for why they failed.
 func (service *Connections) saved(ctx context.Context, connection store.Connection) error {
-	if err := service.store.UpdateConnection(ctx, connection, service.now()); err != nil {
+	if err := service.store.UpdateConnection(ctx, connection); err != nil {
 		return err
 	}
 
@@ -112,13 +111,13 @@ func (service *Connections) saved(ctx context.Context, connection store.Connecti
 		return nil
 	}
 
-	return service.store.RetryOutboxNow(ctx, strconv.FormatInt(connection.ID, 10), service.now())
+	return service.store.RetryOutboxNow(ctx, connection.ID, service.now())
 }
 
 // Delete removes a connection; one already gone (deleted from another tab)
 // is not an error. Its destination stays, so a confirmed address stays
 // confirmed.
-func (service *Connections) Delete(ctx context.Context, id int64) error {
+func (service *Connections) Delete(ctx context.Context, id string) error {
 	if err := service.store.DeleteConnection(ctx, id); err != nil && !errors.Is(err, store.ErrNotFound) {
 		return err
 	}
@@ -185,7 +184,7 @@ func (service *Connections) destinationKey(connection store.Connection) string {
 
 // FindDuplicate returns the connection other than exceptID that already
 // sends to key (see destinationKey), or nil.
-func (service *Connections) FindDuplicate(ctx context.Context, channelType, key string, exceptID int64) (*Duplicate, error) {
+func (service *Connections) FindDuplicate(ctx context.Context, channelType, key string, exceptID string) (*Duplicate, error) {
 	if key == "" {
 		return nil, nil
 	}

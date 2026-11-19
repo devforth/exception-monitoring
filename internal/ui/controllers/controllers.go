@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/devforth/exception-monitoring/internal/api/oauth"
 	"github.com/devforth/exception-monitoring/internal/notify"
 	"github.com/devforth/exception-monitoring/internal/platform/config"
 	"github.com/devforth/exception-monitoring/internal/services"
@@ -25,22 +24,19 @@ import (
 
 // Controllers holds what the handlers need.
 type Controllers struct {
-	logger        *slog.Logger
-	registry      *projects.Registry
-	notifications config.Notifications
-	retention     config.Retention
-	recording     config.Recording
-	factory       notify.Factory
-	views         *views.Renderer
-	auth          *session.Auth
-	issues        *services.Issues
-	projects      *services.Projects
-	connections   *services.Connections
-	deliveries    *services.Deliveries
-	verification  *services.Verification
-	logs          *services.Logs
-	agents        *services.Agents
-	users         *services.Users
+	logger       *slog.Logger
+	registry     *projects.Registry
+	retention    config.Retention
+	views        *views.Renderer
+	auth         *session.Auth
+	issues       *services.Issues
+	projects     *services.Projects
+	connections  *services.Connections
+	deliveries   *services.Deliveries
+	verification *services.Verification
+	logs         *services.Logs
+	agents       *services.Agents
+	users        *services.Users
 	// For the MCP page: whether ALLOWED_IPS limits access.
 	ipsRestricted bool
 	appName       string // APP_NAME
@@ -52,29 +48,22 @@ type Controllers struct {
 // Dependencies are the parts Controllers is built from.
 type Dependencies struct {
 	Logger   *slog.Logger
-	Store    store.Store
 	Registry *projects.Registry
 	Settings *config.Config
 	Factory  notify.Factory
 	Views    *views.Renderer
 	Auth     *session.Auth
-	OAuth    *oauth.Server // the MCP server's sign-in, shared with it
+	Services *services.All
 }
 
 func New(dependencies Dependencies) *Controllers {
 	settings := dependencies.Settings
-	all := services.New(services.Dependencies{
-		Logger: dependencies.Logger, Store: dependencies.Store, Registry: dependencies.Registry,
-		Settings: settings, Factory: dependencies.Factory, OAuth: dependencies.OAuth,
-	})
+	all := dependencies.Services
 
 	return &Controllers{
 		logger:        dependencies.Logger,
 		registry:      dependencies.Registry,
-		notifications: settings.Notifications,
 		retention:     settings.Retention,
-		recording:     settings.Recording,
-		factory:       dependencies.Factory,
 		views:         dependencies.Views,
 		auth:          dependencies.Auth,
 		issues:        all.Issues,
@@ -120,10 +109,23 @@ func (controller *Controllers) NotFoundPage(w http.ResponseWriter, r *http.Reque
 	controller.views.NotFound(w, r)
 }
 
-// pathID reads a positive id from the path value name; a 404 page
-// otherwise (false).
-func (controller *Controllers) pathID(w http.ResponseWriter, r *http.Request, name string) (int64, bool) {
-	id, err := strconv.ParseInt(r.PathValue(name), 10, 64)
+// pathID reads a record id (store.ValidID) from the path value name; a 404
+// page otherwise (false).
+func (controller *Controllers) pathID(w http.ResponseWriter, r *http.Request, name string) (string, bool) {
+	id := r.PathValue(name)
+
+	if !store.ValidID(id) {
+		controller.NotFoundPage(w, r)
+
+		return "", false
+	}
+
+	return id, true
+}
+
+// projectID reads a positive project id from the path; a 404 page otherwise (false).
+func (controller *Controllers) projectID(w http.ResponseWriter, r *http.Request) (int, bool) {
+	id, err := strconv.Atoi(r.PathValue("projectID"))
 
 	if err != nil || id <= 0 {
 		controller.NotFoundPage(w, r)

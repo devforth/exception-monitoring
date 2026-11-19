@@ -1,8 +1,5 @@
-// Package contracts holds the data the templates receive: one type per page,
-// row or form, with the small display methods templates call. Every view
-// type of the UI is defined here and nowhere else; presenters and
-// controllers fill them, templates read them. contracts never imports
-// controllers, presenters, services or requests.
+// Package contracts holds the view types the templates receive, with their
+// display methods; every view type of the UI is defined here.
 package contracts
 
 import (
@@ -54,8 +51,8 @@ type IssueData struct {
 	// the same trace around the time of the error when spans do not match.
 	RelatedLogs     []store.LogRecord
 	LogsFromRequest bool
-	// TraceLogs is how many logs the event's trace has.
-	TraceLogs   int
+	// TraceLogs: the event's trace has logs.
+	TraceLogs   bool
 	AgentPrompt string
 	SelectedID  string
 	// History is who changed the status and when, newest first.

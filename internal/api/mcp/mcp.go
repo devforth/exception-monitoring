@@ -1,23 +1,5 @@
-// Package mcp is the MCP server (Model Context Protocol): coding agents such
-// as Claude Code connect to /mcp to list issues, read an error with its stack
-// trace, breadcrumbs and the logs of its request, search logs and change an
-// issue's status.
-//
-// It is served over Streamable HTTP by the main server, behind ALLOWED_IPS.
-// Agents sign in with OAuth or send the personal token (package oauth); both
-// are managed on the MCP page of the UI. The server is stateless: every
-// request stands alone, so nothing has to be kept between calls or cleaned up.
-//
-// What a tool returns goes to the agent's model provider, so it follows the
-// rules of the agent prompt (package agentprompt): event details come from
-// agentprompt.Build, and free text in lists (titles, log lines) goes
-// through agentprompt.Redact (catalog.Call.ForAgent). Raw payloads and log
-// attributes are not exposed: those endpoints are RESTOnly.
-//
-// The tools are not declared here: they are the endpoints of package
-// catalog (the same as the REST API), plus fetch_skill. An agent acts for
-// the user who connected it, and is offered only the tools that user's role
-// allows: one server per role, chosen per request by the user's current role.
+// Package mcp is the MCP server at /mcp for coding agents: the tools are the
+// endpoints of package catalog a user's role allows, plus fetch_skill.
 package mcp
 
 import (
@@ -58,7 +40,8 @@ func New(logger *slog.Logger, database store.Store, endpoints []catalog.Endpoint
 		server := sdk.NewServer(&sdk.Implementation{Name: config.AppSlug(appName), Title: appName, Version: version},
 			&sdk.ServerOptions{Instructions: serverInstructions(appName)})
 
-		for _, endpoint := range agentEndpoints(endpoints, store.User{ID: 1, Role: role}) {
+		// Any user of the role: the tools depend on the role only.
+		for _, endpoint := range agentEndpoints(endpoints, store.User{ID: store.NewID(), Role: role}) {
 			server.AddTool(tool(endpoint), handler.run(endpoint))
 		}
 

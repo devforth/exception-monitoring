@@ -18,9 +18,6 @@ type Request struct {
 	RedirectURI   string
 	CodeChallenge string
 	State         string
-	// Params are the request's query parameters: the consent form posts
-	// them back, and they are checked again then.
-	Params url.Values
 }
 
 // ClientSite is the host that published the agent's metadata document,
@@ -57,7 +54,7 @@ func (request Request) RedirectOrigin() string {
 func (server *Server) CheckRequest(ctx context.Context, r *http.Request, params url.Values) (Request, error) {
 	request := Request{
 		ClientID: params.Get("client_id"), RedirectURI: params.Get("redirect_uri"),
-		CodeChallenge: params.Get("code_challenge"), State: params.Get("state"), Params: params,
+		CodeChallenge: params.Get("code_challenge"), State: params.Get("state"),
 	}
 
 	if err := uniqueParams(params); err != nil {
@@ -93,7 +90,7 @@ func (server *Server) CheckRequest(ctx context.Context, r *http.Request, params 
 
 // Approve issues a code for the agent to act as userID (the user who
 // allowed it) and returns where to send the browser.
-func (server *Server) Approve(ctx context.Context, r *http.Request, request Request, userID int64) (string, error) {
+func (server *Server) Approve(ctx context.Context, r *http.Request, request Request, userID string) (string, error) {
 	code, err := newSecret("")
 
 	if err != nil {
@@ -112,7 +109,7 @@ func (server *Server) Approve(ctx context.Context, r *http.Request, request Requ
 	return server.redirect(r, request, url.Values{"code": {code}})
 }
 
-// Deny returns where to send the browser when the admin refuses.
+// Deny returns where to send the browser when the user refuses.
 func (server *Server) Deny(r *http.Request, request Request) (string, error) {
 	return server.redirect(r, request, url.Values{"error": {"access_denied"}})
 }

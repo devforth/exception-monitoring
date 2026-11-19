@@ -147,8 +147,8 @@ type Auth struct {
 	opened atomic.Bool
 }
 
-func NewAuth(logger *slog.Logger, database store.Store, settings *config.Config) *Auth {
-	return &Auth{logger: logger, store: database, users: services.NewUsers(logger, database), trustedProxies: settings.TrustedProxies, sessionLife: settings.SessionLifetime, byAddress: newLoginLimiter(), byUsername: newLoginLimiter(), now: time.Now}
+func NewAuth(logger *slog.Logger, database store.Store, settings *config.Config, users *services.Users) *Auth {
+	return &Auth{logger: logger, store: database, users: users, trustedProxies: settings.TrustedProxies, sessionLife: settings.SessionLifetime, byAddress: newLoginLimiter(), byUsername: newLoginLimiter(), now: time.Now}
 }
 
 // Disabled: there is no superadmin yet (ADMIN_PASSWORD was never set), so
@@ -255,7 +255,7 @@ func (auth *Auth) ChangePassword(r *http.Request, viewer store.User, current, pa
 
 // startSession creates a new session and sets its cookie. A session cookie
 // the browser already had (possibly planted) is ended, never reused.
-func (auth *Auth) startSession(ctx context.Context, w http.ResponseWriter, r *http.Request, userID int64, now time.Time) error {
+func (auth *Auth) startSession(ctx context.Context, w http.ResponseWriter, r *http.Request, userID string, now time.Time) error {
 	if cookie, err := r.Cookie(sessionCookie); err == nil && cookie.Value != "" {
 		if err := auth.store.DeleteSession(ctx, hashToken(cookie.Value)); err != nil {
 			auth.logger.Error("delete previous session", "err", err)

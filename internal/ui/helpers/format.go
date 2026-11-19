@@ -1,5 +1,5 @@
 // Package helpers holds the pure formatting functions of the UI: relative
-// times, level colors, log and JSON cleanup, short IDs, retention wording.
+// times, level colors, log and JSON cleanup, short IDs.
 // Nothing here knows about HTTP, the store or templates, so every other ui
 // package may import it.
 package helpers

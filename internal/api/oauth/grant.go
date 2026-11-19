@@ -3,7 +3,6 @@ package oauth
 import (
 	"context"
 	"net/http"
-	"strconv"
 
 	"github.com/modelcontextprotocol/go-sdk/auth"
 
@@ -27,7 +26,7 @@ func withGrant(next http.Handler) http.Handler {
 			return nil, auth.ErrInvalidToken
 		}
 
-		return &auth.TokenInfo{UserID: strconv.FormatInt(grant.UserID, 10), Extra: map[string]any{tokenInfoGrant: grant}}, nil
+		return &auth.TokenInfo{UserID: grant.UserID, Extra: map[string]any{tokenInfoGrant: grant}}, nil
 	}, &auth.RequireBearerTokenOptions{AllowMissingExpiration: true})(next)
 }
 

@@ -135,7 +135,7 @@ func TestTelegramChatTitle(t *testing.T) {
 // A chat connection that hides issue links gets messages and summaries
 // without any link to the panel.
 func TestChatWithoutIssueLinks(t *testing.T) {
-	notification := Notification{Kind: NewIssue, IssueID: 5, Project: "backend", Title: "Example issue", Level: "error", IssueURL: "https://errors.example.com/issues/5"}
+	notification := Notification{Kind: NewIssue, IssueID: "issue005", Project: "backend", Title: "Example issue", Level: "error", IssueURL: "https://errors.example.com/issues/issue005"}
 
 	for _, hidden := range []bool{false, true} {
 		server, _, payload := recordingServer(t, http.StatusOK, nil, "ok")

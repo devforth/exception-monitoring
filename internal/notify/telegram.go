@@ -24,7 +24,6 @@ type Telegram struct {
 	BotToken string
 	ChatID   string
 	AppName  string // APP_NAME, in the MCP request of an issue
-	Client   *http.Client
 	// apiURL is replaced in tests with a fake server.
 	apiURL string
 }
@@ -183,13 +182,7 @@ func (telegram Telegram) post(ctx context.Context, method, contentType string, b
 
 	request.Header.Set("Content-Type", contentType)
 
-	client := telegram.Client
-
-	if client == nil {
-		client = http.DefaultClient
-	}
-
-	response, err := client.Do(request)
+	response, err := http.DefaultClient.Do(request)
 
 	if err != nil {
 		// The URL contains the bot token: never let it reach the logs.

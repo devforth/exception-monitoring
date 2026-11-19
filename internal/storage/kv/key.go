@@ -5,7 +5,6 @@ package kv
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
 )
 
 // Key is an encoded key or part of one; its parts sort the way their values do.
@@ -79,27 +78,24 @@ const (
 	escapedZero = 0xFF
 )
 
-// ErrBadKey means a key does not have the parts it is read as.
-var ErrBadKey = errors.New("kv: key does not match its parts")
-
-// Decoder reads the parts of a key in order.
+// Decoder reads the parts of a key in order; once a read fails, every later read returns zero.
 type Decoder struct {
-	rest []byte
-	err  error
+	rest   []byte
+	failed bool
 }
 
 // Decode reads key from offset on.
 func Decode(key []byte, offset int) *Decoder {
 	if offset > len(key) {
-		return &Decoder{err: ErrBadKey}
+		return &Decoder{failed: true}
 	}
 
 	return &Decoder{rest: key[offset:]}
 }
 
 func (decoder *Decoder) number(width int) uint64 {
-	if decoder.err != nil || len(decoder.rest) < width {
-		decoder.err = ErrBadKey
+	if decoder.failed || len(decoder.rest) < width {
+		decoder.failed = true
 
 		return 0
 	}
@@ -117,12 +113,10 @@ func (decoder *Decoder) number(width int) uint64 {
 
 func (decoder *Decoder) U8() byte { return byte(decoder.number(1)) }
 
-func (decoder *Decoder) U32() uint32 { return uint32(decoder.number(4)) }
-
 func (decoder *Decoder) U64() uint64 { return decoder.number(8) }
 
 func (decoder *Decoder) Text() string {
-	if decoder.err != nil {
+	if decoder.failed {
 		return ""
 	}
 
@@ -144,19 +138,16 @@ func (decoder *Decoder) Text() string {
 			text = append(text, 0)
 			index++
 		default:
-			decoder.err = ErrBadKey
+			decoder.failed = true
 
 			return ""
 		}
 	}
 
-	decoder.err = ErrBadKey
+	decoder.failed = true
 
 	return ""
 }
-
-// Err returns the first error of the reads.
-func (decoder *Decoder) Err() error { return decoder.err }
 
 // prefixEnd returns the first key after every key with prefix, or nil if none.
 func prefixEnd(prefix []byte) []byte {

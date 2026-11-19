@@ -24,9 +24,9 @@ func Shorten(text string, limit int) string {
 	return string(runes[:limit-1]) + "…"
 }
 
-// ContainsFold reports whether text contains part, ignoring the case of
-// ASCII letters only, as SQLite's LIKE does.
-func ContainsFold(text, part string) bool {
+// ContainsFold reports whether text (a string or bytes) contains part,
+// ignoring the case of ASCII letters only.
+func ContainsFold[Text string | []byte](text Text, part string) bool {
 	if part == "" {
 		return true
 	}
@@ -50,7 +50,7 @@ func lowerASCII(char byte) byte {
 	return char
 }
 
-func equalFoldASCII(a, b string) bool {
+func equalFoldASCII[Text string | []byte](a Text, b string) bool {
 	for index := range len(a) {
 		if lowerASCII(a[index]) != lowerASCII(b[index]) {
 			return false

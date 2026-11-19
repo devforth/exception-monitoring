@@ -66,7 +66,7 @@ func CleanupRuns(runs []store.CleanupRun, projectName func(id int) string) []con
 	for _, run := range runs {
 		stop := run.Limit * config.CleanupStopPercent / 100
 		view := contracts.CleanupRunView{
-			ID: run.Sequence, StartedAt: run.StartedAt, Status: run.Status, Reached: run.Reached, Error: run.Error,
+			ID: run.Sequence, StartedAt: run.StartedAt, Status: run.Status, Error: run.Error,
 			Limit: config.FormatSize(run.Limit), SizeBefore: config.FormatSize(run.SizeBefore),
 			Compacted: config.FormatSize(run.Compacted), SizeAfter: config.FormatSize(run.SizeAfter),
 			Stop: config.FormatSize(stop), Needed: config.FormatSize(max(run.Compacted-stop, 0)),
@@ -81,7 +81,7 @@ func CleanupRuns(runs []store.CleanupRun, projectName func(id int) string) []con
 			}
 
 			for _, id := range slices.Sorted(maps.Keys(step.Projects)) {
-				stepView.Projects = append(stepView.Projects, contracts.CleanupProjectView{Project: projectName(id), Deleted: deleted(*step.Projects[id])})
+				stepView.Projects = append(stepView.Projects, contracts.CleanupProjectView{Project: projectName(id), Deleted: step.Projects[id].String()})
 			}
 
 			view.Steps = append(view.Steps, stepView)
@@ -138,22 +138,6 @@ func stepNumbers(steps []store.CleanupStep) string {
 		}
 
 		index = end + 1
-	}
-
-	return strings.Join(parts, ", ")
-}
-
-// deleted reads "120 logs, 3 events, 5 events thinned".
-func deleted(counts store.CleanupCounts) string {
-	var parts []string
-
-	for _, part := range []struct {
-		count int
-		name  string
-	}{{counts.Logs, "logs"}, {counts.Events, "events"}, {counts.Thinned, "events thinned"}, {counts.Issues, "issues"}} {
-		if part.count > 0 {
-			parts = append(parts, fmt.Sprintf("%d %s", part.count, part.name))
-		}
 	}
 
 	return strings.Join(parts, ", ")

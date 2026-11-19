@@ -85,7 +85,7 @@ func (channel *fakeChannel) attemptCount() int {
 // fakeFactory hands out the channel registered for each connection id.
 type fakeFactory struct {
 	mutex    sync.Mutex
-	channels map[int64]Channel
+	channels map[string]Channel
 }
 
 func (factory *fakeFactory) Channel(connection store.Connection) (Channel, error) {
@@ -96,7 +96,7 @@ func (factory *fakeFactory) Channel(connection store.Connection) (Channel, error
 		return channel, nil
 	}
 
-	return nil, fmt.Errorf("no channel for connection %d", connection.ID)
+	return nil, fmt.Errorf("no channel for connection %s", connection.ID)
 }
 
 // testSetup is a database with connections and a fake channel for each.
@@ -111,12 +111,12 @@ func newSetup(t *testing.T) *testSetup {
 
 	database := storetest.Open(t)
 
-	return &testSetup{t: t, database: database, factory: &fakeFactory{channels: map[int64]Channel{}}}
+	return &testSetup{t: t, database: database, factory: &fakeFactory{channels: map[string]Channel{}}}
 }
 
 // connect creates an active connection receiving the given projects (nil:
 // all projects) and levels, delivering to channel.
-func (setup *testSetup) connect(channel Channel, projects []int, levels ...string) int64 {
+func (setup *testSetup) connect(channel Channel, projects []int, levels ...string) string {
 	setup.t.Helper()
 
 	if len(levels) == 0 {
@@ -168,10 +168,16 @@ func (setup *testSetup) start(options Options) *Notifier {
 func (setup *testSetup) outboxCounts() map[string]int {
 	setup.t.Helper()
 
-	counts, err := setup.database.OutboxCounts(context.Background())
+	messages, err := setup.database.ListOutbox(context.Background(), store.OutboxFilter{})
 
 	if err != nil {
 		setup.t.Fatal(err)
+	}
+
+	counts := map[string]int{}
+
+	for _, message := range messages {
+		counts[message.Status]++
 	}
 
 	return counts
@@ -205,7 +211,7 @@ func waitFor(t *testing.T, what string, condition func() bool) {
 }
 
 func issue(id int, level string) Notification {
-	return Notification{Kind: NewIssue, ProjectID: 1, Project: "backend", IssueID: int64(id), Title: fmt.Sprintf("Error %d", id), Level: level}
+	return Notification{Kind: NewIssue, ProjectID: 1, Project: "backend", IssueID: fmt.Sprintf("issue%03d", id), Title: fmt.Sprintf("Error %d", id), Level: level}
 }
 
 func titles(notifications []Notification) string {
@@ -233,7 +239,7 @@ func TestRouting(t *testing.T) {
 	connection, _ := setup.database.GetConnection(context.Background(), disabledID)
 	connection.Active = false
 
-	if err := setup.database.UpdateConnection(context.Background(), connection, time.Now()); err != nil {
+	if err := setup.database.UpdateConnection(context.Background(), connection); err != nil {
 		t.Fatal(err)
 	}
 
@@ -312,7 +318,7 @@ func TestFloodLimitResetsEveryWindow(t *testing.T) {
 	notifier.Notify(issue(3, "error")) // a new window: sent individually
 	closeNotifier(t, notifier)
 
-	if len(channel.sent) != 2 || channel.sent[1].IssueID != 3 || len(channel.summaries) != 1 {
+	if len(channel.sent) != 2 || channel.sent[1].IssueID != "issue003" || len(channel.summaries) != 1 {
 		t.Fatalf("sent %d, summaries %d", len(channel.sent), len(channel.summaries))
 	}
 }
@@ -410,7 +416,7 @@ func TestDisabledConnectionFailsQueuedMessages(t *testing.T) {
 	connection, _ := setup.database.GetConnection(context.Background(), id)
 	connection.Active = false
 
-	if err := setup.database.UpdateConnection(context.Background(), connection, time.Now()); err != nil {
+	if err := setup.database.UpdateConnection(context.Background(), connection); err != nil {
 		t.Fatal(err)
 	}
 
@@ -581,7 +587,7 @@ func TestFloodKeepsOnlySummaryExamples(t *testing.T) {
 		t.Fatalf("connections = %v, %v", connections, err)
 	}
 
-	windows := map[int64]*window{connections[0].ID: {sent: 5}} // the direct quota is used up
+	windows := map[string]*window{connections[0].ID: {sent: 5}} // the direct quota is used up
 
 	for index := range 1000 {
 		notification := issue(index, "error")

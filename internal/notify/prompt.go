@@ -20,7 +20,7 @@ func agentPrompt(notification Notification) string {
 const promptCaption = "Prompt for a coding agent: it reproduces and explains the error without changing code."
 
 // promptFileName names the prompt file after the issue, such as
-// "backend-error-6.md", so prompts saved from several messages do not
+// "backend-error-k3x9q2mf.md", so prompts saved from several messages do not
 // overwrite each other.
 func promptFileName(notification Notification) string {
 	level := notification.Level
@@ -29,7 +29,7 @@ func promptFileName(notification Notification) string {
 		level = "error"
 	}
 
-	return fmt.Sprintf("%s-%s-%d.md", fileNamePart(notification.Project), fileNamePart(level), notification.IssueID)
+	return fmt.Sprintf("%s-%s-%s.md", fileNamePart(notification.Project), fileNamePart(level), notification.IssueID)
 }
 
 // fileNamePart keeps letters, digits and dashes, lowercase: project names

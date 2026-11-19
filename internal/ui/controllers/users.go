@@ -98,7 +98,7 @@ func (controller *Controllers) UpdateUser(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	redirectAfterPost(w, r, fmt.Sprintf("/users/%d?notice=saved", id))
+	redirectAfterPost(w, r, fmt.Sprintf("/users/%s?notice=saved", id))
 }
 
 // ResetUserPassword gives the user a temporary password, shown this once.
@@ -133,7 +133,7 @@ func (controller *Controllers) DeleteUser(w http.ResponseWriter, r *http.Request
 }
 
 // renderUser shows a user's page, with a temporary password just set.
-func (controller *Controllers) renderUser(w http.ResponseWriter, r *http.Request, id int64, password, notice string) {
+func (controller *Controllers) renderUser(w http.ResponseWriter, r *http.Request, id string, password, notice string) {
 	user, err := controller.users.Get(r.Context(), id)
 
 	if controller.failed(w, r, err) {

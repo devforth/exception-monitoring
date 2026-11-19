@@ -18,8 +18,8 @@ import (
 // that one cleaned query, so the page never shows a filter that is not
 // applied, nor applies one it does not show.
 
-// maxSearchLength caps the search text: a LIKE over a megabyte of pattern
-// helps nobody.
+// maxSearchLength caps the search text: comparing a megabyte of pattern with
+// every line helps nobody.
 const maxSearchLength = 200
 
 var issueStatuses = []string{store.StatusUnresolved, store.StatusResolved, store.StatusIgnored, "all"}

@@ -58,26 +58,18 @@ const secretKey = "0123456789abcdef0123456789abcdef"
 func newTestServer(t *testing.T, adminPassword string) *testServer {
 	t.Helper()
 
-	return startServer(t, openDatabase(t), "admin", adminPassword)
+	return startServer(t, storetest.Open(t), "admin", adminPassword)
 }
 
-func openDatabase(t *testing.T) store.Store {
-	t.Helper()
-
-	database := storetest.Open(t)
-
-	return database
-}
-
-// startServer builds a server on an existing database, like a restart of the
-// real server with possibly different settings.
 // newTestServerWith is newTestServer with settings changed by configure.
 func newTestServerWith(t *testing.T, configure func(settings *config.Config)) *testServer {
 	t.Helper()
 
-	return startServer(t, openDatabase(t), "admin", password, configure)
+	return startServer(t, storetest.Open(t), "admin", password, configure)
 }
 
+// startServer builds a server on an existing database, like a restart of the
+// real server with possibly different settings.
 func startServer(t *testing.T, database store.Store, adminUsername, adminPassword string, configure ...func(settings *config.Config)) *testServer {
 	t.Helper()
 
@@ -127,7 +119,10 @@ func startServer(t *testing.T, database store.Store, adminUsername, adminPasswor
 		Store: database, PublicURL: settings.Notifications.PublicURL, TrustedProxies: settings.TrustedProxies, ResourcePath: mcp.Path,
 	}
 	factory := notify.Factory{SMTP: smtp, Box: box, TelegramURL: telegram.URL}
-	webUI, err := ui.New(context.Background(), logger, database, settings, registry, factory, authorization)
+	all := services.New(services.Dependencies{
+		Logger: logger, Store: database, Registry: registry, Settings: settings, Factory: factory, OAuth: authorization,
+	})
+	webUI, err := ui.New(context.Background(), logger, database, settings, registry, factory, all)
 
 	if err != nil {
 		t.Fatal(err)
@@ -138,9 +133,7 @@ func startServer(t *testing.T, database store.Store, adminUsername, adminPasswor
 		Database: database,
 		Ingest:   ingest.New(logger, settings, registry, ingest.StoreSink{Store: database, Logger: logger}),
 		UI:       webUI,
-		MCP: mcp.New(logger, database, catalog.New(database, registry, services.New(services.Dependencies{
-			Logger: logger, Store: database, Registry: registry, Settings: settings, Factory: factory, OAuth: authorization,
-		})), authorization, config.DefaultAppName, "test"),
+		MCP:      mcp.New(logger, database, catalog.New(database, registry, all), authorization, config.DefaultAppName, "test"),
 	}).Handler()
 
 	return &testServer{t: t, handler: handler, mails: mails}
@@ -246,10 +239,10 @@ func (server *testServer) sendEnvelope(target string, body []byte) {
 }
 
 var (
-	issueLink = regexp.MustCompile(`href="/issues/(\d+)"`)
+	issueLink = regexp.MustCompile(`href="/issues/([a-z0-9]{8})"`)
 	// The personal token just generated, and the disconnect buttons, on the MCP page.
 	personalTokenField = regexp.MustCompile(`id="mcp-personal-token" value="Bearer ([^"]+)"`)
-	disconnectAction   = regexp.MustCompile(`action="(/agents/\d+/disconnect)"`)
+	disconnectAction   = regexp.MustCompile(`action="(/agents/[a-z0-9]{8}/disconnect)"`)
 )
 
 // issueIDs lists the issues linked from a page, each once and in order (a

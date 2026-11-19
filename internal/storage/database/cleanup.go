@@ -9,6 +9,7 @@ import (
 	"maps"
 	"math"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -26,8 +27,9 @@ const (
 	cleanupRecentAge  = config.CleanupRecentAge
 	cleanupKeepEvents = config.OldEventsPerIssue
 	cleanupChunk      = 2000
+	cleanupDecode     = 2 << 20
 	cleanupRest       = 2 * time.Millisecond
-	cleanupEvery      = 50 << 20
+	cleanupEvery      = config.CleanupWritten
 	cleanupHistory    = 100 // runs kept
 )
 
@@ -44,37 +46,61 @@ const (
 	cleanupFailed  = model.CleanupFailed
 )
 
-// RunCleanup runs ReduceAging and Cleanup now, every interval and after every cleanupEvery bytes written.
+// RunCleanup checks the size (ReduceAging, then Cleanup) now, every interval
+// and after every cleanupEvery bytes written, and compacts the inbox now and
+// halfway between the checks (config.CleanupInterval).
 func (database *Store) RunCleanup(ctx context.Context, maxBytes int64, interval time.Duration, logger *slog.Logger) {
-	ticker := time.NewTicker(interval)
+	checks := time.NewTicker(interval)
+	inbox := time.NewTimer(interval / 2)
 
-	defer ticker.Stop()
+	defer checks.Stop()
+	defer inbox.Stop()
+
+	database.logCompactInbox(ctx, logger)
 
 	for {
-		if maxBytes > 0 {
-			if reduced, err := database.ReduceAging(ctx); err != nil && ctx.Err() == nil {
-				logger.Error("thinning old events failed", "err", err)
-			} else if len(reduced) > 0 {
-				logger.Debug("old events thinned", "step", stepLine(reduced[0]))
+		database.checkSize(ctx, maxBytes, logger)
+
+		for waiting := true; waiting; {
+			select {
+			case <-ctx.Done():
+				return
+			case <-inbox.C:
+				database.logCompactInbox(ctx, logger)
+				inbox.Reset(interval)
+			case <-checks.C:
+				waiting = false
+			case <-database.cleanupWake:
+				waiting = false
 			}
 		}
+	}
+}
 
-		run, err := database.Cleanup(ctx, maxBytes)
+func (database *Store) logCompactInbox(ctx context.Context, logger *slog.Logger) {
+	if err := database.compactInbox(); err != nil && ctx.Err() == nil {
+		logger.Error("compacting the inbox failed", "err", err)
+	}
+}
 
-		switch {
-		case ctx.Err() != nil:
-		case err != nil:
-			logger.Error("cleanup failed", "err", err, "reached", fmt.Sprintf("step %d", run.Reached))
-		case run.Status == cleanupDone:
-			logCleanup(logger, run)
+// checkSize thins the events that turned a month old and runs the cleanup if the database is at maxBytes.
+func (database *Store) checkSize(ctx context.Context, maxBytes int64, logger *slog.Logger) {
+	if maxBytes > 0 {
+		if reduced, err := database.ReduceAging(ctx); err != nil && ctx.Err() == nil {
+			logger.Error("thinning old events failed", "err", err)
+		} else if len(reduced) > 0 {
+			logger.Debug("old events thinned", "step", stepLine(reduced[0]))
 		}
+	}
 
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		case <-database.cleanupWake:
-		}
+	run, err := database.Cleanup(ctx, maxBytes)
+
+	switch {
+	case ctx.Err() != nil:
+	case err != nil:
+		logger.Error("cleanup failed", "err", err, "reached", fmt.Sprintf("step %d", run.Reached))
+	case run.Status == cleanupDone:
+		logCleanup(logger, run)
 	}
 }
 
@@ -103,24 +129,17 @@ func stepLine(step CleanupStep) string {
 	var projects []string
 
 	for _, project := range slices.Sorted(maps.Keys(step.Projects)) {
-		counts := step.Projects[project]
-
-		var parts []string
-
-		for _, part := range []struct {
-			count int
-			name  string
-		}{{counts.Logs, "logs"}, {counts.Events, "events"}, {counts.Thinned, "events thinned"}, {counts.Issues, "issues"}} {
-			if part.count > 0 {
-				parts = append(parts, fmt.Sprintf("%d %s", part.count, part.name))
-			}
-		}
-
-		projects = append(projects, fmt.Sprintf("project %d: %s", project, strings.Join(parts, ", ")))
+		projects = append(projects, fmt.Sprintf("project %d: %s", project, step.Projects[project]))
 	}
 
 	return fmt.Sprintf("%s, freed %s in %s: %s", step.Name, config.FormatSize(step.Freed), step.Duration.Round(time.Millisecond),
 		strings.Join(projects, "; "))
+}
+
+// compactInbox takes processed envelopes, credentials included, out of the
+// files: a deleted record keeps its bytes until a compaction reaches its key.
+func (database *Store) compactInbox() error {
+	return database.db.CompactRange(database.inbox.KeyRange())
 }
 
 func (database *Store) noteWritten() {
@@ -334,11 +353,13 @@ type cleanupCursor struct {
 	need     int64 // bytes still to free; only steps that are not always stop there
 	always   bool
 	records  int
+	decoded  int // bytes of payloads parsed (thinning), which is what takes the time
 }
 
-// full says the batch has done enough: cleanupChunk records, or freed what is needed.
+// full says the batch has done enough: cleanupChunk records or cleanupDecode
+// bytes parsed (the write lock is held meanwhile), or freed what is needed.
 func (cursor *cleanupCursor) full() bool {
-	return cursor.records >= cleanupChunk || (!cursor.always && -cursor.batch.Counted() >= cursor.need)
+	return cursor.records >= cleanupChunk || cursor.decoded >= cleanupDecode || (!cursor.always && -cursor.batch.Counted() >= cursor.need)
 }
 
 func (cursor *cleanupCursor) number(offset int) uint64 {
@@ -517,10 +538,7 @@ func withBatch(run CleanupRun, name string, counted map[int]*CleanupCounts, free
 			step.Projects[project] = total
 		}
 
-		total.Logs += counts.Logs
-		total.Events += counts.Events
-		total.Thinned += counts.Thinned
-		total.Issues += counts.Issues
+		total.Add(*counts)
 	}
 
 	return run
@@ -608,12 +626,16 @@ func (database *Store) deleteOldestLogs(ranks []byte) cleanupBatch {
 func (database *Store) eachIssue(wants func(*issueRecord) bool,
 	visit func(writer *batchWriter, cursor *cleanupCursor, issue *issueRecord) (bool, error),
 ) cleanupBatch {
-	return func(writer *batchWriter, cursor *cleanupCursor) (bool, error) {
-		database.issuesMutex.RLock()
-		last := database.table.lastID
-		database.issuesMutex.RUnlock()
+	var ids []string // sorted once per step; each batch checks the issues as they are then
 
-		for id := max(int64(cursor.number(0)), 1); id <= last; id++ {
+	return func(writer *batchWriter, cursor *cleanupCursor) (bool, error) {
+		if ids == nil {
+			ids = database.issueIDs(wants)
+		}
+
+		from := kv.Decode(cursor.position, 0).Text()
+
+		for _, id := range ids[sort.SearchStrings(ids, from):] {
 			// The table changes only under the write lock, which this batch holds.
 			database.issuesMutex.RLock()
 			stored, ok := database.table.byID[id]
@@ -624,7 +646,7 @@ func (database *Store) eachIssue(wants func(*issueRecord) bool,
 			}
 
 			if cursor.full() {
-				cursor.position = kv.K(kv.U64(uint64(id)))
+				cursor.position = kv.K(kv.Text(id))
 
 				return false, nil
 			}
@@ -633,7 +655,7 @@ func (database *Store) eachIssue(wants func(*issueRecord) bool,
 			done, err := visit(writer, cursor, issue)
 
 			if err != nil || !done {
-				cursor.position = kv.K(kv.U64(uint64(id)))
+				cursor.position = kv.K(kv.Text(id))
 
 				return false, err
 			}
@@ -641,6 +663,24 @@ func (database *Store) eachIssue(wants func(*issueRecord) bool,
 
 		return true, nil
 	}
+}
+
+// issueIDs lists, sorted, the issues wants accepts now.
+func (database *Store) issueIDs(wants func(*issueRecord) bool) []string {
+	database.issuesMutex.RLock()
+
+	ids := []string{}
+
+	for id, issue := range database.table.byID {
+		if wants(issue) {
+			ids = append(ids, id)
+		}
+	}
+
+	database.issuesMutex.RUnlock()
+	slices.Sort(ids)
+
+	return ids
 }
 
 // trimIssues deletes the oldest events received before cutoff (zero: any)
@@ -651,7 +691,7 @@ func (database *Store) trimIssues(keep int, cutoff time.Time, match func(*issueR
 	return database.eachIssue(wants, func(writer *batchWriter, cursor *cleanupCursor, issue *issueRecord) (bool, error) {
 		done := true
 
-		err := database.events.Primary(kv.U64(uint64(issue.ID))).Each(database.db, func(entry kv.Entry[eventRecord]) (bool, error) {
+		err := database.events.Primary(kv.Text(issue.ID)).Head().Each(database.db, func(entry kv.Entry[eventRecord]) (bool, error) {
 			if issue.Stored <= keep || (!cutoff.IsZero() && !entry.Record.ReceivedAt.Before(cutoff)) {
 				return false, nil
 			}
@@ -681,7 +721,7 @@ func (database *Store) deleteOldestEvents(cutoff time.Time) cleanupBatch {
 		queries := make([]kv.Query[eventRecord], 0, len(allRanks))
 
 		for _, rank := range allRanks {
-			queries = append(queries, database.events.By("age", kv.U8(rank)).From(kv.U64(from)))
+			queries = append(queries, database.events.By("age", kv.U8(rank)).From(kv.U64(from)).Head())
 		}
 
 		full := false
@@ -718,45 +758,61 @@ func (database *Store) deleteOldestEvents(cutoff time.Time) cleanupBatch {
 func (database *Store) deleteUnseen(seenBefore time.Time, whole bool) cleanupBatch {
 	type unseen struct {
 		lastSeen int64
-		id       int64
+		id       string
 	}
 
-	compare := func(a, b unseen) int { return cmp.Or(cmp.Compare(a.lastSeen, b.lastSeen), cmp.Compare(a.id, b.id)) }
+	compare := func(a, b unseen) int { return cmp.Or(cmp.Compare(a.lastSeen, b.lastSeen), strings.Compare(a.id, b.id)) }
+
+	wants := func(issue *issueRecord) bool {
+		return (whole || issue.Stored > 0) && (seenBefore.IsZero() || issue.LastSeen.Before(seenBefore))
+	}
+
+	var issues []unseen // sorted once per step; each batch checks the issues as they are then
 
 	return func(writer *batchWriter, cursor *cleanupCursor) (bool, error) {
-		after := unseen{math.MinInt64, 0}
+		if issues == nil {
+			database.issuesMutex.RLock()
+
+			for _, issue := range database.table.byID {
+				if wants(issue) {
+					issues = append(issues, unseen{issue.LastSeen.UnixNano(), issue.ID})
+				}
+			}
+
+			database.issuesMutex.RUnlock()
+			slices.SortFunc(issues, compare)
+		}
+
+		after := unseen{math.MinInt64, ""}
 
 		if len(cursor.position) > 0 {
-			after = unseen{int64(cursor.number(0)), int64(cursor.number(8))}
+			decoder := kv.Decode(cursor.position, 0)
+			after = unseen{int64(decoder.U64()), decoder.Text()}
 		}
 
-		var issues []unseen
+		start, _ := slices.BinarySearchFunc(issues, after, compare)
 
-		database.issuesMutex.RLock()
+		for _, candidate := range issues[start:] {
+			// Gone, or seen again since the list was made: the next run judges it.
+			database.issuesMutex.RLock()
+			stored, ok := database.table.byID[candidate.id]
+			database.issuesMutex.RUnlock()
 
-		for _, issue := range database.table.byID {
-			candidate := unseen{issue.LastSeen.UnixNano(), issue.ID}
-
-			if (whole || issue.Stored > 0) && (seenBefore.IsZero() || issue.LastSeen.Before(seenBefore)) && compare(candidate, after) > 0 {
-				issues = append(issues, candidate)
+			if !ok || compare(candidate, after) <= 0 || !wants(stored) || stored.LastSeen.UnixNano() != candidate.lastSeen {
+				continue
 			}
-		}
 
-		database.issuesMutex.RUnlock()
-		slices.SortFunc(issues, compare)
-
-		for _, candidate := range issues {
 			done := !cursor.full()
 
 			if !done {
-				cursor.position = kv.K(kv.U64(uint64(after.lastSeen)), kv.U64(uint64(after.id)))
+				cursor.position = kv.K(kv.U64(uint64(after.lastSeen)), kv.Text(after.id))
 
 				return false, nil
 			}
 
 			issue, _ := writer.issue(candidate.id)
 
-			err := database.events.Primary(kv.U64(uint64(issue.ID))).Each(database.db, func(entry kv.Entry[eventRecord]) (bool, error) {
+			err := database.events.Primary(kv.Text(issue.ID)).Head().Each(database.db, func(entry kv.Entry[eventRecord]) (bool, error) {
 				if cursor.full() {
 					done = false
 
@@ -771,7 +827,7 @@ func (database *Store) deleteUnseen(seenBefore time.Time, whole bool) cleanupBat
 			})
 
 			if err != nil || !done {
-				cursor.position = kv.K(kv.U64(uint64(after.lastSeen)), kv.U64(uint64(after.id)))
+				cursor.position = kv.K(kv.U64(uint64(after.lastSeen)), kv.Text(after.id))
 
 				return false, err
 			}

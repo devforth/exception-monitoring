@@ -6,7 +6,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -120,11 +119,11 @@ func TestStoreSinkNotifies(t *testing.T) {
 
 	first := notifier.notifications[0]
 
-	if first.IssueURL != "https://errors.example.com/issues/"+strconv.FormatInt(first.IssueID, 10) || first.Project != "backend" || first.Title != "Error: boom" || first.Event == nil {
+	if first.IssueURL != "https://errors.example.com/issues/"+first.IssueID || first.Project != "backend" || first.Title != "Error: boom" || first.Event == nil {
 		t.Fatalf("notification: %+v", first)
 	}
 
-	if err := database.SetIssueStatus(context.Background(), first.IssueID, store.StatusResolved, store.Actor{}); err != nil {
+	if _, err := database.SetIssuesStatus(context.Background(), []string{first.IssueID}, store.StatusResolved, store.Actor{}); err != nil {
 		t.Fatal(err)
 	}
 

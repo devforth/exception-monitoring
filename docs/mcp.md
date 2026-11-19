@@ -1,6 +1,6 @@
 # Coding agents (MCP)
 
-The server is an [MCP](https://modelcontextprotocol.io) server at `/mcp` (Streamable HTTP), so coding agents such as Claude Code and Codex can list issues, read an error with its stack, request and logs, and change issue statuses. A typical request to an agent: "explain issue 42 and find the cause in this repository".
+The server is an [MCP](https://modelcontextprotocol.io) server at `/mcp` (Streamable HTTP), so coding agents such as Claude Code and Codex can list issues, read an error with its stack, request and logs, and change issue statuses. A typical request to an agent: "explain issue k3x9q2mf and find the cause in this repository".
 
 The **MCP** page of the UI has the exact commands for your server. The agent acts as the user who connected it, with that user's role, and every status change it makes is recorded under that user's name.
 
@@ -71,7 +71,7 @@ An agent acts as the user who connected it and is offered only the tools of that
 
 Not available to agents: changing your own password (the UI asks for the current one) and generating personal tokens. Tools that delete data or reset passwords tell the agent to show what will change and wait for your confirmation in chat.
 
-Notifications and the issue page carry the request for an agent, e.g. `Exception Monitoring MCP: get_issue {"issue_id":42}`, to paste into the agent.
+Notifications and the issue page carry the request for an agent, e.g. `Exception Monitoring MCP: get_issue {"issue_id":"k3x9q2mf"}`, to paste into the agent.
 
 ## What leaves the server
 

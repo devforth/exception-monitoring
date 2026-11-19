@@ -35,6 +35,11 @@ type Picker struct {
 	Count   int // how many are chosen
 }
 
+// Shown: a picker with one option and nothing chosen would filter nothing.
+func (picker Picker) Shown() bool {
+	return len(picker.Options) > 1 || picker.Count > 0
+}
+
 func NewPicker(param, kind, all, label string, names, chosen []string) Picker {
 	picker := Picker{Param: param, Kind: kind, All: all, Label: label, Options: Options(names, chosen)}
 
@@ -45,6 +50,16 @@ func NewPicker(param, kind, all, label string, names, chosen []string) Picker {
 	}
 
 	return picker
+}
+
+// NewLevelPicker offers the levels of all (highest first) that some record
+// has, and those the link chose: others would find nothing.
+func NewLevelPicker(all, present, chosen []string) Picker {
+	offered := slices.DeleteFunc(slices.Clone(all), func(level string) bool {
+		return !slices.Contains(present, level) && !slices.Contains(chosen, level)
+	})
+
+	return NewPicker("level", "level", "All levels", "Levels", offered, chosen)
 }
 
 // LevelOptions lists the known levels highest first, chosen when recorded

@@ -6,7 +6,7 @@
 <h1>Delivery log</h1>
 <p class="muted">Every notification message and what happened to it. Failed attempts are retried for a while (<code>NOTIFY_RETRY_FOR</code>); sent messages are kept for <code>NOTIFY_KEEP_SENT</code>, failed ones for <code>NOTIFY_KEEP_FAILED</code>.</p>
 
-<form class="filters" method="get" action="/notifications/log"
+<form class="filters" id="delivery-filters" method="get" action="/notifications/log"
       hx-get="/notifications/log" hx-target="#delivery-list" hx-swap="outerHTML"
       hx-trigger="input delay:300ms, submit" hx-push-url="true" hx-sync="this:replace">
   <select name="connection" aria-label="Connection">
@@ -17,7 +17,6 @@
     <option value="">Any status</option>
     {{range .Statuses}}<option value="{{.}}" {{if eq . $.Data.Status}}selected{{end}}>{{.}}</option>{{end}}
   </select>
-  {{template "per-page" .Pager}}
 </form>
 
 {{template "delivery-list" $}}

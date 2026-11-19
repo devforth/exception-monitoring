@@ -77,7 +77,7 @@ type deliveryHealth struct {
 }
 
 type connectionOutput struct {
-	ID               int64           `json:"id"`
+	ID               string          `json:"id"`
 	Name             string          `json:"name"`
 	Type             string          `json:"type"`
 	Email            string          `json:"email,omitempty"`
@@ -104,7 +104,7 @@ func (handler *handlers) connectionView(call Call, connection store.Connection, 
 		output.Projects = append(output.Projects, handler.projectName(id))
 	}
 
-	if state, ok := health[strconv.FormatInt(connection.ID, 10)]; ok {
+	if state, ok := health[connection.ID]; ok {
 		output.Delivery = &deliveryHealth{Pending: state.Pending, Retrying: state.Retrying, Failed: state.Failed, LastError: call.Text(state.LastError)}
 
 		if !state.LastSentAt.IsZero() {
@@ -152,7 +152,7 @@ func emailStep(step services.EmailStep) (emailStepOutput, error) {
 
 	switch {
 	case step.Duplicate != nil:
-		return output, Invalid("connection %d (%s) already sends to this address: update it instead", step.Duplicate.ID, step.Duplicate.Name)
+		return output, Invalid("connection %s (%s) already sends to this address: update it instead", step.Duplicate.ID, step.Duplicate.Name)
 	case step.Error != "":
 		return output, Invalid("%s", step.Error)
 	case output.Confirmed:
@@ -283,7 +283,7 @@ func (handler *handlers) saveConnection(ctx context.Context, call Call, form url
 	}
 
 	if saved.Duplicate != nil {
-		return connectionOutput{}, Invalid("connection %d (%s) already sends there: update it instead", saved.Duplicate.ID, saved.Duplicate.Name)
+		return connectionOutput{}, Invalid("connection %s (%s) already sends there: update it instead", saved.Duplicate.ID, saved.Duplicate.Name)
 	}
 
 	if err := problemsError(saved.Problems, connectionFormFields); err != nil {
@@ -316,7 +316,7 @@ func (handler *handlers) createConnection(ctx context.Context, call Call, input 
 			return connectionOutput{}, Invalid("email: confirm %q first with start_email_verification and confirm_email", input.Email)
 		}
 
-		form.Set("destination_id", strconv.FormatInt(destination.ID, 10))
+		form.Set("destination_id", destination.ID)
 	}
 
 	if err := handler.applyConnection(form, input.connectionFields, input.chatFields); err != nil {
@@ -327,11 +327,11 @@ func (handler *handlers) createConnection(ctx context.Context, call Call, input 
 }
 
 type connectionInput struct {
-	ConnectionID int64 `json:"connection_id" jsonschema:"id from list_connections."`
+	ConnectionID string `json:"connection_id" jsonschema:"id from list_connections."`
 }
 
 type updateConnectionInput struct {
-	ConnectionID int64 `json:"connection_id" jsonschema:"id from list_connections."`
+	ConnectionID string `json:"connection_id" jsonschema:"id from list_connections."`
 	connectionFields
 	chatFields
 }
@@ -394,7 +394,7 @@ func (handler *handlers) deleteConnection(ctx context.Context, _ Call, input con
 }
 
 type listDeliveriesInput struct {
-	ConnectionID int64  `json:"connection_id,omitempty" jsonschema:"Only this connection."`
+	ConnectionID string `json:"connection_id,omitempty" jsonschema:"Only this connection."`
 	Status       string `json:"status,omitempty" jsonschema:"pending, sent or failed."`
 	Limit        int    `json:"limit,omitempty" jsonschema:"Messages per page, 1 to 100 (default 20)."`
 	Cursor       string `json:"cursor,omitempty" jsonschema:"next_cursor of the previous page."`
@@ -406,7 +406,7 @@ type deliveryOutput struct {
 	Message       string    `json:"message"`
 	Project       string    `json:"project,omitempty"`
 	Title         string    `json:"title,omitempty"`
-	IssueID       int64     `json:"issue_id,omitempty"`
+	IssueID       string    `json:"issue_id,omitempty"`
 	Status        string    `json:"status"`
 	Attempts      int       `json:"attempts"`
 	LastError     string    `json:"last_error,omitempty"`
@@ -437,8 +437,8 @@ func (handler *handlers) listDeliveries(ctx context.Context, call Call, input li
 
 	filter := store.OutboxFilter{Status: input.Status, Limit: limit + 1, Offset: int(offset)}
 
-	if input.ConnectionID != 0 {
-		filter.Channel = strconv.FormatInt(input.ConnectionID, 10)
+	if input.ConnectionID != "" {
+		filter.Channel = input.ConnectionID
 	}
 
 	records, err := handler.services.Deliveries.List(ctx, filter)

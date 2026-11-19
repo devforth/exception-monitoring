@@ -57,7 +57,7 @@ func (verification *Verification) StartEmail(ctx context.Context, entered string
 	address := strings.ToLower(parsed.Address)
 
 	// One connection per address: edit the existing one instead.
-	existing, err := verification.connections.FindDuplicate(ctx, config.ChannelEmail, address, 0)
+	existing, err := verification.connections.FindDuplicate(ctx, config.ChannelEmail, address, "")
 
 	if err != nil || existing != nil {
 		return EmailStep{State: "input", Address: address, Duplicate: existing}, err
@@ -93,7 +93,7 @@ func (verification *Verification) FindDestination(ctx context.Context, address s
 var againStep = EmailStep{State: "input", Error: "Enter the email address again."}
 
 // ResendCode mails a new code to the address of destination id.
-func (verification *Verification) ResendCode(ctx context.Context, id int64) (EmailStep, error) {
+func (verification *Verification) ResendCode(ctx context.Context, id string) (EmailStep, error) {
 	destination, err := verification.EmailDestination(ctx, id)
 
 	if err != nil {
@@ -108,7 +108,7 @@ func (verification *Verification) ResendCode(ctx context.Context, id int64) (Ema
 }
 
 // ConfirmCode checks a code entered for the address of destination id.
-func (verification *Verification) ConfirmCode(ctx context.Context, id int64, code string) (EmailStep, error) {
+func (verification *Verification) ConfirmCode(ctx context.Context, id string, code string) (EmailStep, error) {
 	destination, err := verification.EmailDestination(ctx, id)
 
 	if err != nil {
@@ -141,11 +141,11 @@ var ErrNotEmail = errors.New("not an email destination")
 
 // EmailDestination reads the email destination with id; ErrNotEmail when it
 // is a chat, store.ErrNotFound when it does not exist.
-func (verification *Verification) EmailDestination(ctx context.Context, id int64) (store.Destination, error) {
+func (verification *Verification) EmailDestination(ctx context.Context, id string) (store.Destination, error) {
 	return emailDestination(ctx, verification.store, id)
 }
 
-func emailDestination(ctx context.Context, database store.Store, id int64) (store.Destination, error) {
+func emailDestination(ctx context.Context, database store.Store, id string) (store.Destination, error) {
 	destination, err := database.GetDestination(ctx, id)
 
 	if err == nil && destination.Type != config.ChannelEmail {
@@ -218,8 +218,8 @@ func (verification *Verification) Confirm(ctx context.Context, destination store
 
 // codeHash is what is stored instead of the code: tied to the destination,
 // so a code cannot confirm another address.
-func codeHash(destinationID int64, code string) string {
-	sum := sha256.Sum256(fmt.Appendf(nil, "%d:%s", destinationID, code))
+func codeHash(destinationID string, code string) string {
+	sum := sha256.Sum256(fmt.Appendf(nil, "%s:%s", destinationID, code))
 
 	return hex.EncodeToString(sum[:])
 }

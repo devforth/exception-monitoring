@@ -1,23 +1,5 @@
-// Package oauth lets coding agents connect to the MCP server: an OAuth 2.1
-// authorization server for public clients (authorization code with PKCE,
-// rotating refresh tokens), and the personal token for agents that take a
-// header instead.
-//
-// The flow, as Claude Code or Codex run it:
-//  1. /mcp answers 401 with WWW-Authenticate pointing to the protected
-//     resource metadata (RFC 9728), which names this server as the
-//     authorization server; its metadata (RFC 8414) lists the endpoints.
-//  2. The agent registers itself (RFC 7591, POST /oauth/register).
-//  3. It opens /oauth/authorize in the browser; the admin logs in to the UI
-//     and allows the agent on the consent page (package ui), which sends the
-//     browser back to the agent with a code.
-//  4. The agent trades the code for an access token (an hour) and a refresh
-//     token (30 days, replaced at every use) at POST /oauth/token.
-//
-// Every connected agent is a grant, listed on the MCP page of the UI, where it
-// can be disconnected. Only SHA-256 hashes of codes and tokens are stored, and
-// nothing is kept in memory, so the UI and the MCP endpoint each use their own
-// Server over the same database.
+// Package oauth signs coding agents in to the MCP server: an OAuth 2.1
+// authorization server for public clients, and the personal token.
 package oauth
 
 import (
@@ -188,7 +170,7 @@ func unauthorized(w http.ResponseWriter, challenge, message string) {
 
 // NewPersonalToken replaces the user's personal token and returns the new
 // one; it is shown once, only its hash is stored.
-func (server *Server) NewPersonalToken(ctx context.Context, userID int64) (string, error) {
+func (server *Server) NewPersonalToken(ctx context.Context, userID string) (string, error) {
 	token, err := newSecret(personalPrefix)
 
 	if err != nil {
@@ -200,17 +182,17 @@ func (server *Server) NewPersonalToken(ctx context.Context, userID int64) (strin
 
 // Grants lists the connected agents and the personal token of a user,
 // newest first.
-func (server *Server) Grants(ctx context.Context, userID int64) ([]store.Grant, error) {
+func (server *Server) Grants(ctx context.Context, userID string) ([]store.Grant, error) {
 	return server.Store.ListGrants(ctx, userID, server.now())
 }
 
 // Grant reads a grant, to check whose it is.
-func (server *Server) Grant(ctx context.Context, grantID int64) (store.Grant, error) {
+func (server *Server) Grant(ctx context.Context, grantID string) (store.Grant, error) {
 	return server.Store.GetGrant(ctx, grantID)
 }
 
 // Disconnect revokes a grant: its tokens stop working at once.
-func (server *Server) Disconnect(ctx context.Context, grantID int64) error {
+func (server *Server) Disconnect(ctx context.Context, grantID string) error {
 	return server.Store.DeleteGrant(ctx, grantID)
 }
 

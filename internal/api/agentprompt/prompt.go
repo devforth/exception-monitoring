@@ -1,16 +1,6 @@
-// Package agentprompt builds a prompt that asks a coding agent to reproduce
-// and explain an error (not to fix it) from a
-// captured error.
-//
-// The prompt leaves the monitoring server, so it is built from an allowlist,
-// never from the raw event: exception chain, stack frames with source,
-// message, request method and path, runtime names and versions, breadcrumbs,
-// related log lines and the issue history. Left out on purpose: user data,
-// request headers, cookies, bodies and query strings, server names, frame
-// variables, `extra`, SDK contexts other than runtime/os/browser, log
-// attributes and panel URLs. Free text that is kept (error values, source
-// lines, log bodies, …) goes through Redact, which replaces IP addresses,
-// URL hosts, emails, credentials and home directories with placeholders.
+// Package agentprompt builds the prompt that asks a coding agent to reproduce
+// and explain a captured error, from an allowlist of its fields with free text
+// redacted.
 package agentprompt
 
 import (
@@ -107,8 +97,8 @@ var fakeMarker = regexp.MustCompile(`(?i)(begin|end)\W*error\W*data`)
 // this server's MCP (named appName, APP_NAME): it reads the issue with
 // get_issue. Notifications and the issue pages show it, so it is the same
 // everywhere.
-func MCPReference(appName string, issueID int64) string {
-	return fmt.Sprintf(`%s MCP: get_issue {"issue_id":%d}`, appName, issueID)
+func MCPReference(appName string, issueID string) string {
+	return fmt.Sprintf(`%s MCP: get_issue {"issue_id":"%s"}`, appName, issueID)
 }
 
 // Build returns the prompt: the instructions, the error data (Describe)

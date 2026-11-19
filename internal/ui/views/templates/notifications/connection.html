@@ -32,7 +32,7 @@
   {{end}}
 
   {{/* app.js shows only the fields of the selected type; without JS all are shown. */}}
-  {{$testURL := "/notifications/test-chat"}}{{if not .New}}{{$testURL = printf "/notifications/%d/test-chat" .ID}}{{end}}
+  {{$testURL := "/notifications/test-chat"}}{{if not .New}}{{$testURL = printf "/notifications/%s/test-chat" .ID}}{{end}}
   {{if or .New (eq .Type "email")}}
   <div class="type-fields" data-type="email">
     {{template "email-step" .Email}}
@@ -114,7 +114,7 @@
       <fieldset>
         <label class="option"><input type="checkbox" name="all_projects" class="all-projects" {{if .AllProjects}}checked{{end}}> All projects, including ones added later</label>
         <div class="project-choices">
-          {{range .Projects}}<label class="option"><input type="checkbox" name="project" value="{{.Value}}" {{if .Checked}}checked{{end}}> <span class="option-name">{{.Label}}</span></label>{{end}}
+          {{range .Projects}}<label class="option"><input type="checkbox" name="project" value="{{.Value}}" {{if .Checked}}checked{{end}}> {{.Label}}</label>{{end}}
         </div>
       </fieldset>
     </details>
@@ -136,7 +136,7 @@
       <input type="checkbox" name="active" {{if .Active}}checked{{end}}>
       Active: send notifications {{template "hint" (fieldHelp "Notifications" "Active")}}
     </label>
-    <label class="option issue-link-option">
+    <label class="option">
       <input type="checkbox" name="include_issue_link" {{if not .HideIssueLink}}checked{{end}}>
       Include Open issue link {{template "hint" (fieldHelp "Notifications" "Include Open issue link")}}
     </label>

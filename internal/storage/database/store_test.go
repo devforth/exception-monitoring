@@ -4,16 +4,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/devforth/exception-monitoring/internal/storage/kv"
 	model "github.com/devforth/exception-monitoring/internal/storage/store"
 )
 
 func openTest(t *testing.T) *Store {
 	t.Helper()
 
-	database, err := OpenMemory(nil)
+	database, err := OpenMemory()
 
 	if err != nil {
 		t.Fatal(err)
@@ -38,12 +41,12 @@ func checkCollections(t *testing.T, database *Store) {
 	}
 }
 
-func saveEvent(t *testing.T, database *Store, fingerprint string, at time.Time, keep int) model.SaveResult {
+func saveEvent(t *testing.T, database *Store, fingerprint string, at time.Time) model.SaveResult {
 	t.Helper()
 
 	result, err := database.SaveEvent(context.Background(), model.NewEvent{
 		ProjectID: 1, EventID: fmt.Sprintf("%032x", at.UnixNano()), Fingerprint: fingerprint, Title: "Error: " + fingerprint,
-		Level: "error", Timestamp: at, ReceivedAt: at, Payload: []byte(`{}`), KeepEvents: keep, TraceID: "trace-" + fingerprint,
+		Level: "error", Timestamp: at, ReceivedAt: at, Payload: []byte(`{}`), TraceID: "trace-" + fingerprint,
 	})
 
 	if err != nil {
@@ -62,28 +65,19 @@ func storedIssue(database *Store, fingerprint string) *issueRecord {
 }
 
 // An issue counts its stored events per day, not per event: with no limit
-// on events, a busy issue stays small in memory and on disk. With a limit,
-// the oldest go.
+// on events, a busy issue stays small in memory and on disk.
 func TestIssueStaysSmallWithManyEvents(t *testing.T) {
 	database := openTest(t)
 	start := time.Date(2026, 11, 10, 8, 0, 0, 0, time.UTC)
 
 	for index := range 300 {
-		saveEvent(t, database, "busy", start.Add(time.Duration(index)*time.Second), 0)
+		saveEvent(t, database, "busy", start.Add(time.Duration(index)*time.Second))
 	}
 
 	issue := storedIssue(database, "busy")
 
 	if issue.Stored != 300 || issue.EventCount != 300 || len(issue.EventDays) != 1 || issue.EventDays[0].Count != 300 {
 		t.Fatalf("stored %d, count %d, days %v", issue.Stored, issue.EventCount, issue.EventDays)
-	}
-
-	saveEvent(t, database, "busy", start.Add(time.Hour), 3)
-
-	events, err := database.ListEvents(context.Background(), model.EventFilter{IssueID: issue.ID})
-
-	if err != nil || len(events) != 3 || storedIssue(database, "busy").Stored != 3 {
-		t.Fatalf("after a trim: %d events, %v", len(events), err)
 	}
 }
 
@@ -93,8 +87,8 @@ func TestIssueDateRange(t *testing.T) {
 	ctx := context.Background()
 	database := openTest(t)
 	morning := time.Date(2026, 11, 10, 8, 0, 0, 0, time.UTC)
-	saveEvent(t, database, "morning", morning, 0)
-	saveEvent(t, database, "evening", morning.Add(12*time.Hour), 0)
+	saveEvent(t, database, "morning", morning)
+	saveEvent(t, database, "evening", morning.Add(12*time.Hour))
 
 	day := time.Date(2026, 11, 10, 0, 0, 0, 0, time.UTC)
 
@@ -124,7 +118,7 @@ func TestListCursorsAndPages(t *testing.T) {
 	start := time.Date(2026, 11, 10, 8, 0, 0, 0, time.UTC)
 
 	for index := range 5 {
-		saveEvent(t, database, "one", start.Add(time.Duration(index)*time.Minute), 0)
+		saveEvent(t, database, "one", start.Add(time.Duration(index)*time.Minute))
 	}
 
 	issue := storedIssue(database, "one")
@@ -167,13 +161,13 @@ func TestListCursorsAndPages(t *testing.T) {
 func TestDeleteIssue(t *testing.T) {
 	ctx := context.Background()
 	database := openTest(t)
-	result := saveEvent(t, database, "gone", time.Date(2026, 11, 10, 8, 0, 0, 0, time.UTC), 0)
+	result := saveEvent(t, database, "gone", time.Date(2026, 11, 10, 8, 0, 0, 0, time.UTC))
 
 	if size, err := database.DatabaseSize(ctx); err != nil || size <= 0 {
 		t.Errorf("size %d %v", size, err)
 	}
 
-	if _, err := database.SetIssuesStatus(ctx, []int64{result.IssueID}, model.StatusResolved, model.Actor{Source: model.SourceAPI}); err != nil {
+	if _, err := database.SetIssuesStatus(ctx, []string{result.IssueID}, model.StatusResolved, model.Actor{Source: model.SourceAPI}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -181,8 +175,8 @@ func TestDeleteIssue(t *testing.T) {
 		t.Fatalf("history %v", history)
 	}
 
-	if err := database.DeleteIssue(ctx, result.IssueID); err != nil {
-		t.Fatal(err)
+	if deleted, err := database.DeleteIssues(ctx, []string{result.IssueID, result.IssueID, "missing0"}); err != nil || deleted != 1 {
+		t.Fatalf("deleted %d, %v", deleted, err)
 	}
 
 	for _, check := range []func() (int, error){
@@ -219,31 +213,20 @@ func TestDeleteIssue(t *testing.T) {
 	}
 }
 
-// A trim in a later batch skips the events an earlier trim of the same
-// batch deleted (the database still shows them until the batch is written).
-func TestTrimAcrossBatches(t *testing.T) {
-	ctx := context.Background()
+// Ping reads the database, so /health fails once it cannot.
+func TestPing(t *testing.T) {
 	database := openTest(t)
-	start := time.Date(2026, 11, 10, 8, 0, 0, 0, time.UTC)
-	event := func(index int) model.NewEvent {
-		at := start.Add(time.Duration(index) * time.Minute)
 
-		return model.NewEvent{ProjectID: 1, EventID: fmt.Sprintf("%032x", index), Fingerprint: "trim", Title: "Error", Level: "error", Timestamp: at, ReceivedAt: at, Payload: []byte(`{}`), KeepEvents: 3}
+	if err := database.Ping(context.Background()); err != nil {
+		t.Fatalf("open store: %v", err)
 	}
 
-	if _, err := database.Write([]Envelope{{Events: []model.NewEvent{event(1), event(2)}}}); err != nil {
+	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := database.Write([]Envelope{{Events: []model.NewEvent{event(3), event(4), event(5)}}}); err != nil {
-		t.Fatal(err)
-	}
-
-	issue := storedIssue(database, "trim")
-	events, _ := database.ListEvents(ctx, model.EventFilter{IssueID: issue.ID})
-
-	if len(events) != 3 || issue.Stored != 3 || events[2].EventID != fmt.Sprintf("%032x", 3) {
-		t.Fatalf("kept %d events (stored %d): %v", len(events), issue.Stored, events)
+	if err := database.Ping(context.Background()); err == nil {
+		t.Error("a closed store answers the ping")
 	}
 }
 
@@ -361,5 +344,227 @@ func TestInbox(t *testing.T) {
 
 	if waiting, _ := database.InInbox(first.Sequence); waiting || database.InboxBytes() != int64(second.Size) {
 		t.Errorf("stored entry still waiting: %v, %d bytes", waiting, database.InboxBytes())
+	}
+}
+
+// A project's "no level" stays apart from "the defaults" (nil) once stored.
+func TestProjectKeepsNoLevels(t *testing.T) {
+	ctx := context.Background()
+	database := openTest(t)
+
+	var none []string
+
+	id, err := database.CreateProject(ctx, model.Project{Name: "api", PublicKey: "0123456789abcdef", EventLevels: &none}, time.Now())
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	project, err := database.GetProject(ctx, id)
+
+	if err != nil || project.EventLevels == nil || len(*project.EventLevels) != 0 || project.LogLevels != nil {
+		t.Fatalf("stored levels: %v, %v (%v)", project.EventLevels, project.LogLevels, err)
+	}
+
+	if id < firstProjectID || id >= firstProjectID+projectIDRange {
+		t.Fatalf("id %d is not 8 digits", id)
+	}
+}
+
+// A database of another format, or one from before the format was recorded, is refused at start.
+func TestFormatIsChecked(t *testing.T) {
+	dir := t.TempDir()
+
+	for _, test := range []struct {
+		change  func(batch *kv.Batch, key kv.Key)
+		refusal string
+	}{
+		{func(*kv.Batch, kv.Key) {}, ""},
+		{func(batch *kv.Batch, key kv.Key) { batch.Put(key, []byte("0")) }, "another format: 0"},
+		{func(batch *kv.Batch, key kv.Key) { batch.Delete(key) }, "development version"},
+	} {
+		database, err := Open(dir)
+
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		writeLogs(t, database, "info", 1, "line")
+
+		if err := database.db.Update(true, func(batch *kv.Batch) error { test.change(batch, kv.Key("format/")); return nil }); err != nil {
+			t.Fatal(err)
+		}
+
+		_ = database.Close()
+		reopened, err := Open(dir)
+
+		if test.refusal == "" && err != nil || test.refusal != "" && (err == nil || !strings.Contains(err.Error(), test.refusal)) {
+			t.Fatalf("reopen: %v, want %q", err, test.refusal)
+		}
+
+		if err == nil {
+			_ = reopened.Close()
+		}
+
+		if err := database.db.Update(true, func(batch *kv.Batch) error { batch.Put(kv.Key("format/"), []byte(storeFormat)); return nil }); err == nil {
+			t.Fatal("a closed database accepted a write")
+		}
+
+		dir = t.TempDir()
+	}
+}
+
+// Counts stop one past the limit, by keys or by records alike.
+func TestLogCountStopsAtTheLimit(t *testing.T) {
+	ctx := context.Background()
+	database := openTest(t)
+	limit := model.LogCountLimit
+	model.LogCountLimit = 5
+
+	t.Cleanup(func() { model.LogCountLimit = limit })
+	writeLogs(t, database, "error", 4, "error")
+	writeLogs(t, database, "info", 3, "info")
+
+	for _, test := range []struct {
+		filter model.LogFilter
+		count  int
+		more   bool
+	}{
+		{model.LogFilter{}, 5, true},
+		{model.LogFilter{Levels: []string{"error"}}, 4, false},
+		{model.LogFilter{Query: "INFO"}, 3, false},
+		{model.LogFilter{ProjectIDs: []int{1, 2}}, 5, true},
+	} {
+		if count, more, err := database.CountLogs(ctx, test.filter); err != nil || count != test.count || more != test.more {
+			t.Errorf("%+v: %d %v %v, want %d %v", test.filter, count, more, err, test.count, test.more)
+		}
+	}
+}
+
+// The search finds the same lines whether the stored bytes can be searched
+// first or, for characters JSON escapes, only the decoded line.
+func TestLogSearch(t *testing.T) {
+	ctx := context.Background()
+	database := openTest(t)
+
+	if err := database.SaveLogs(ctx, []model.NewLog{
+		{ProjectID: 1, Timestamp: database.now(), Level: "info", Body: `GET /users <id> & "quoted" C:\temp`},
+		{ProjectID: 1, Timestamp: database.now(), Level: "info", Body: "nothing here"},
+	}, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	for query, want := range map[string]int{"get /USERS": 1, `"quoted"`: 1, "<id> &": 1, `C:\temp`: 1, "here": 1, "absent": 0, "level": 0} {
+		if logs, err := database.ListLogs(ctx, model.LogFilter{Query: query}); err != nil || len(logs) != want {
+			t.Errorf("%q: %d logs, want %d (%v)", query, len(logs), want, err)
+		}
+	}
+}
+
+// An outbox message keeps both payloads as they were, either of them empty.
+func TestOutboxPayloads(t *testing.T) {
+	ctx := context.Background()
+	database := openTest(t)
+	now := time.Now()
+
+	for _, payloads := range [][2]string{{`{"Title":"boom"}`, `{"exception":{}}`}, {`{"Count":3}`, ""}} {
+		if err := database.EnqueueOutbox(ctx, []string{"conn0001"}, "notification", []byte(payloads[0]), []byte(payloads[1]), now); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	due, err := database.DueOutbox(ctx, "conn0001", now, 10)
+
+	if err != nil || len(due) != 2 || string(due[0].Payload) != `{"Title":"boom"}` || string(due[0].EventPayload) != `{"exception":{}}` ||
+		string(due[1].Payload) != `{"Count":3}` || len(due[1].EventPayload) != 0 {
+		t.Fatalf("due: %+v, %v", due, err)
+	}
+
+	if count, err := database.CountOutbox(ctx, model.OutboxFilter{Status: model.OutboxPending}); err != nil || count != 2 {
+		t.Fatalf("pending: %d, %v", count, err)
+	}
+}
+
+// Deleting a project removes its issues, events and logs, in several batches,
+// and its place in connections; the other projects keep theirs.
+func TestDeleteProject(t *testing.T) {
+	ctx := context.Background()
+	database := openTest(t)
+
+	for _, project := range []model.Project{{ID: 1, Name: "backend", PublicKey: "0123456789abcdef"}, {ID: 2, Name: "frontend", PublicKey: "abcdef0123456789"}} {
+		if err := database.SeedProject(ctx, project, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	writeLogs(t, database, "info", 2*deleteChunk+10, "line") // projects 1 and 2 by turns
+
+	for _, project := range []int{1, 2} {
+		for index := range 3 {
+			if _, err := database.SaveEvent(ctx, model.NewEvent{ProjectID: project, EventID: fmt.Sprintf("%d-%d", project, index), Fingerprint: fmt.Sprint(index),
+				Title: "Error", Level: "error", Timestamp: time.Now(), ReceivedAt: time.Now(), Payload: []byte(`{}`)}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	destination, _ := database.CreateDestination(ctx, model.Destination{Type: "slack", Verified: true}, time.Now())
+	connection, err := database.CreateConnection(ctx, model.Connection{Name: "Ops", DestinationID: destination, ProjectIDs: []int{1, 2}, Active: true}, time.Now())
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := database.DeleteProject(ctx, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	for project, want := range map[int]int{1: 0, 2: deleteChunk + 5} {
+		if logs := countLogs(t, database, model.LogFilter{ProjectIDs: []int{project}}); logs != want {
+			t.Errorf("project %d keeps %d logs, want %d", project, logs, want)
+		}
+
+		if issues, _ := database.CountIssues(ctx, model.IssueFilter{ProjectIDs: []int{project}}); issues != map[int]int{1: 0, 2: 3}[project] {
+			t.Errorf("project %d keeps %d issues", project, issues)
+		}
+	}
+
+	if saved, _ := database.GetConnection(ctx, connection); !slices.Equal(saved.ProjectIDs, []int{2}) {
+		t.Errorf("connection projects: %v", saved.ProjectIDs)
+	}
+}
+
+// Pages kept as the issues go match pages of a full sort, for every order.
+func TestIssuePagesMatchAFullSort(t *testing.T) {
+	ctx := context.Background()
+	database := openTest(t)
+	start := time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC)
+
+	for index := range 60 {
+		at := start.Add(time.Duration(index%7) * time.Minute) // ties, broken by id
+
+		if _, err := database.SaveEvent(ctx, model.NewEvent{ProjectID: 1 + index%2, EventID: fmt.Sprint(index), Fingerprint: fmt.Sprint(index % 30),
+			Title: "Error", Level: "error", Timestamp: at, ReceivedAt: at, Payload: []byte(`{}`)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for _, sort := range model.IssueSorts {
+		all, err := database.ListIssues(ctx, model.IssueFilter{Sort: sort, Offset: maxKeptIssues})
+
+		if err != nil || len(all) != 0 {
+			t.Fatalf("%s: %d issues past the end, %v", sort, len(all), err)
+		}
+
+		everything, _ := database.ListIssues(ctx, model.IssueFilter{Sort: sort})
+
+		for offset := 0; offset < 30; offset += 7 {
+			page, _ := database.ListIssues(ctx, model.IssueFilter{Sort: sort, Offset: offset, Limit: 7})
+			want := everything[offset:min(offset+7, len(everything))]
+
+			if !slices.EqualFunc(page, want, func(a, b model.Issue) bool { return a.ID == b.ID }) {
+				t.Errorf("%s from %d: got %v, want %v", sort, offset, page, want)
+			}
+		}
 	}
 }

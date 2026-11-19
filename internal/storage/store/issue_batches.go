@@ -8,17 +8,17 @@ const MaxIssueBatch = 100
 
 // NormalizeIssueIDs validates the entire batch before any query or mutation.
 // Duplicate IDs are handled once, preserving the supplied order.
-func NormalizeIssueIDs(ids []int64) ([]int64, error) {
+func NormalizeIssueIDs(ids []string) ([]string, error) {
 	if len(ids) == 0 || len(ids) > MaxIssueBatch {
 		return nil, fmt.Errorf("issue_ids must contain between 1 and %d IDs", MaxIssueBatch)
 	}
 
-	unique := make([]int64, 0, len(ids))
-	seen := make(map[int64]bool, len(ids))
+	unique := make([]string, 0, len(ids))
+	seen := make(map[string]bool, len(ids))
 
 	for _, id := range ids {
-		if id <= 0 {
-			return nil, fmt.Errorf("issue IDs must be positive")
+		if !ValidID(id) {
+			return nil, fmt.Errorf("issue IDs are %d lowercase letters or digits, not %q", IDLength, id)
 		}
 
 		if !seen[id] {

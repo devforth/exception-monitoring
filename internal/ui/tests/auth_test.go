@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/devforth/exception-monitoring/internal/storage/storetest"
+
 	"github.com/devforth/exception-monitoring/internal/platform/config"
 )
 
@@ -58,7 +60,7 @@ func TestLogin(t *testing.T) {
 // only: later starts with other values change nothing, and sessions survive
 // restarts.
 func TestSuperadminFromEnvOnce(t *testing.T) {
-	database := openDatabase(t)
+	database := storetest.Open(t)
 
 	first := startServer(t, database, "admin", password)
 	first.login()

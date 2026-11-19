@@ -35,7 +35,7 @@ type SavedConnection struct {
 // destination_id of a confirmed address), the stored one otherwise (an
 // empty chat field keeps the stored token).
 func (service *Connections) Save(ctx context.Context, form url.Values, connection store.Connection) (SavedConnection, error) {
-	isNew := connection.ID == 0
+	isNew := connection.ID == ""
 
 	if isNew {
 		connection = store.Connection{Type: strings.TrimSpace(form.Get("type"))}
@@ -52,9 +52,8 @@ func (service *Connections) Save(ctx context.Context, form url.Values, connectio
 
 	switch {
 	case isNew && connection.Type == config.ChannelEmail:
-		// The address must have been confirmed first (StartEmail, ConfirmEmail).
-		destinationID, _ := strconv.ParseInt(form.Get("destination_id"), 10, 64)
-		destination, err := emailDestination(ctx, service.store, destinationID)
+		// The address must have been confirmed first (Verification.StartEmail, Verification.ConfirmCode).
+		destination, err := emailDestination(ctx, service.store, form.Get("destination_id"))
 
 		if err != nil || !destination.Verified {
 			problems["address"] = "Confirm the email address first."
@@ -227,8 +226,9 @@ type chatSecret struct {
 // a form with problems is shown again without being saved or compared.
 func readChatSecret(form url.Values, factory notify.Factory, channelType, existing string, formValid bool) chatSecret {
 	var (
-		tokens any
-		key    string
+		tokens  any
+		key     string
+		changed bool // a chat field was filled in; otherwise the stored secret stays as it is
 	)
 
 	result := chatSecret{Problems: map[string]string{}}
@@ -242,11 +242,11 @@ func readChatSecret(form url.Values, factory notify.Factory, channelType, existi
 		}
 
 		if value := strings.TrimSpace(form.Get("bot_token")); value != "" {
-			telegram.BotToken = value
+			telegram.BotToken, changed = value, true
 		}
 
 		if value := strings.TrimSpace(form.Get("chat_id")); value != "" {
-			telegram.ChatID = value
+			telegram.ChatID, changed = value, true
 		}
 
 		if !telegramTokenRe.MatchString(telegram.BotToken) {
@@ -270,7 +270,7 @@ func readChatSecret(form url.Values, factory notify.Factory, channelType, existi
 			"webhook_url": &slack.WebhookURL, "slack_bot_token": &slack.BotToken, "slack_channel": &slack.Channel,
 		} {
 			if value := strings.TrimSpace(form.Get(field)); value != "" {
-				*target = value
+				*target, changed = value, true
 			}
 		}
 
@@ -296,6 +296,13 @@ func readChatSecret(form url.Values, factory notify.Factory, channelType, existi
 	}
 
 	if !formValid || len(result.Problems) > 0 {
+		return result
+	}
+
+	// Encrypting again would give another ciphertext (a random nonce) and a needless write.
+	if !changed && existing != "" {
+		result.Secret, result.Key = existing, key
+
 		return result
 	}
 

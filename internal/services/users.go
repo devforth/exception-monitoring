@@ -38,14 +38,13 @@ type Problems map[string]string
 
 // EnsureSuperadmin creates the superadmin from ADMIN_USERNAME and
 // ADMIN_PASSWORD when there is none: once, at the first start. Later the
-// variables are not used; agents connected before users existed are given to
-// the superadmin.
+// variables are not used.
 func (users *Users) EnsureSuperadmin(ctx context.Context, username, password string) error {
-	superadmin, err := users.store.Superadmin(ctx)
+	_, err := users.store.Superadmin(ctx)
 
 	switch {
 	case err == nil:
-		return users.store.AdoptAgents(ctx, superadmin.ID)
+		return nil
 	case !errors.Is(err, store.ErrNotFound):
 		return err
 	case password == "":
@@ -60,7 +59,7 @@ func (users *Users) EnsureSuperadmin(ctx context.Context, username, password str
 		return err
 	}
 
-	id, err := users.store.CreateUser(ctx, store.User{Username: username, Name: username, Role: store.RoleSuperadmin, CreatedAt: users.now()}, hash)
+	_, err = users.store.CreateUser(ctx, store.User{Username: username, Name: username, Role: store.RoleSuperadmin, CreatedAt: users.now()}, hash)
 
 	if errors.Is(err, store.ErrUsernameTaken) {
 		return fmt.Errorf("ADMIN_USERNAME %q belongs to an existing user: choose another username for the superadmin", username)
@@ -72,21 +71,21 @@ func (users *Users) EnsureSuperadmin(ctx context.Context, username, password str
 
 	users.logger.Info("superadmin created", "username", username)
 
-	return users.store.AdoptAgents(ctx, id)
+	return nil
 }
 
 func (users *Users) List(ctx context.Context) ([]store.User, error) {
 	return users.store.ListUsers(ctx)
 }
 
-func (users *Users) Get(ctx context.Context, id int64) (store.User, error) {
+func (users *Users) Get(ctx context.Context, id string) (store.User, error) {
 	return users.store.GetUser(ctx, id)
 }
 
 // Create adds a user with a temporary password, returned to be shown once.
-func (users *Users) Create(ctx context.Context, viewer store.User, input UserInput) (int64, string, Problems, error) {
+func (users *Users) Create(ctx context.Context, viewer store.User, input UserInput) (string, string, Problems, error) {
 	if !viewer.CanAdminister() {
-		return 0, "", nil, ErrForbidden
+		return "", "", nil, ErrForbidden
 	}
 
 	input.Username = strings.TrimSpace(input.Username)
@@ -100,28 +99,28 @@ func (users *Users) Create(ctx context.Context, viewer store.User, input UserInp
 	}
 
 	if len(problems) > 0 {
-		return 0, "", problems, nil
+		return "", "", problems, nil
 	}
 
 	password := temporaryPassword()
 	hash, err := HashPassword(password)
 
 	if err != nil {
-		return 0, "", nil, err
+		return "", "", nil, err
 	}
 
 	user := store.User{Username: input.Username, Name: nameOr(input.Name, input.Username), Role: input.Role, MustChangePassword: true, CreatedAt: users.now()}
 	id, err := users.store.CreateUser(ctx, user, hash)
 
 	if errors.Is(err, store.ErrUsernameTaken) {
-		return 0, "", Problems{"username": "This username is taken."}, nil
+		return "", "", Problems{"username": "This username is taken."}, nil
 	}
 
 	return id, password, nil, err
 }
 
 // Update changes a user's name and role.
-func (users *Users) Update(ctx context.Context, viewer store.User, id int64, input UserInput) (Problems, error) {
+func (users *Users) Update(ctx context.Context, viewer store.User, id string, input UserInput) (Problems, error) {
 	target, err := users.manageable(ctx, viewer, id)
 
 	if err != nil {
@@ -138,7 +137,7 @@ func (users *Users) Update(ctx context.Context, viewer store.User, id int64, inp
 // ResetPassword gives a user a temporary password (returned to be shown
 // once): their sessions end and their agents are disconnected, since
 // whoever knew the old password may have connected them.
-func (users *Users) ResetPassword(ctx context.Context, viewer store.User, id int64) (string, error) {
+func (users *Users) ResetPassword(ctx context.Context, viewer store.User, id string) (string, error) {
 	if _, err := users.manageable(ctx, viewer, id); err != nil {
 		return "", err
 	}
@@ -148,7 +147,7 @@ func (users *Users) ResetPassword(ctx context.Context, viewer store.User, id int
 
 // Delete removes a user with their sessions and agents; their name stays in
 // the issue histories.
-func (users *Users) Delete(ctx context.Context, viewer store.User, id int64) error {
+func (users *Users) Delete(ctx context.Context, viewer store.User, id string) error {
 	if _, err := users.manageable(ctx, viewer, id); err != nil {
 		return err
 	}
@@ -167,8 +166,8 @@ func (users *Users) UpdateName(ctx context.Context, viewer store.User, name stri
 	return nil, users.store.UpdateUserName(ctx, viewer.ID, nameOr(name, viewer.Username))
 }
 
-// SetPasswordByOperator is the reset-password command: run on the server,
-// so by whoever runs it, usually the superadmin who forgot the password.
+// SetPasswordByOperator is the reset-password command: run with the server
+// stopped by whoever runs it, usually the superadmin who forgot the password.
 // Sessions end, agents stay; the new password is temporary.
 func (users *Users) SetPasswordByOperator(ctx context.Context, username string) (string, error) {
 	user, err := users.store.FindUser(ctx, username)
@@ -180,7 +179,7 @@ func (users *Users) SetPasswordByOperator(ctx context.Context, username string) 
 	return users.setTemporaryPassword(ctx, user.ID, false)
 }
 
-func (users *Users) setTemporaryPassword(ctx context.Context, id int64, revokeAgents bool) (string, error) {
+func (users *Users) setTemporaryPassword(ctx context.Context, id string, revokeAgents bool) (string, error) {
 	password := temporaryPassword()
 
 	return password, setPassword(ctx, users.store, id, password, store.PasswordChange{MustChangePassword: true, RevokeAgents: revokeAgents})
@@ -188,7 +187,7 @@ func (users *Users) setTemporaryPassword(ctx context.Context, id int64, revokeAg
 
 // manageable returns user id when the viewer may change them (ErrForbidden
 // otherwise).
-func (users *Users) manageable(ctx context.Context, viewer store.User, id int64) (store.User, error) {
+func (users *Users) manageable(ctx context.Context, viewer store.User, id string) (store.User, error) {
 	target, err := users.store.GetUser(ctx, id)
 
 	if err == nil && !viewer.CanManage(target) {
@@ -208,7 +207,7 @@ func (users *Users) Authenticate(ctx context.Context, username, password string)
 		return store.User{}, false, err
 	}
 
-	if !checkPassword(cmp.Or(hash, dummyPasswordHash()), password) || user.ID == 0 {
+	if !checkPassword(cmp.Or(hash, dummyPasswordHash()), password) || user.ID == "" {
 		return store.User{}, false, nil
 	}
 
@@ -249,7 +248,7 @@ func nameOr(name, username string) string {
 
 // setPassword stores a new password hash with what the change ends. It
 // checks no role: callers are the methods of Users, which do.
-func setPassword(ctx context.Context, database store.Store, id int64, password string, change store.PasswordChange) error {
+func setPassword(ctx context.Context, database store.Store, id string, password string, change store.PasswordChange) error {
 	hash, err := HashPassword(password)
 
 	if err != nil {

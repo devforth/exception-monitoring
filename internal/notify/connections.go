@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"slices"
 	"time"
 
@@ -47,14 +46,9 @@ type Factory struct {
 	AppName string
 	SMTP    config.SMTP
 	Box     *secret.Box // nil without SECRET_KEY: chat connections cannot be used
-	// HTTPClient is used by chat channels; nil means http.DefaultClient.
-	HTTPClient *http.Client
 	// TelegramURL replaces the Telegram API (tests point it to a fake
 	// server); empty means https://api.telegram.org.
 	TelegramURL string
-	// SlackURL replaces the Slack Web API the same way; empty means
-	// https://slack.com/api.
-	SlackURL string
 }
 
 // ErrNoSecretKey means a chat connection exists but SECRET_KEY is not set.
@@ -91,7 +85,7 @@ func (factory Factory) DecryptSecret(encrypted string, target any) error {
 }
 
 func (factory Factory) telegram(tokens TelegramSecret) Telegram {
-	return Telegram{BotToken: tokens.BotToken, ChatID: tokens.ChatID, AppName: factory.AppName, Client: factory.HTTPClient, apiURL: factory.TelegramURL}
+	return Telegram{BotToken: tokens.BotToken, ChatID: tokens.ChatID, AppName: factory.AppName, apiURL: factory.TelegramURL}
 }
 
 // TelegramChatTitle asks Telegram for the name of the chat of these tokens,
@@ -161,7 +155,6 @@ func (factory Factory) channel(connection store.Connection) (Channel, error) {
 
 		return Slack{
 			WebhookURL: tokens.WebhookURL, BotToken: tokens.BotToken, Channel: tokens.Channel, AppName: factory.AppName,
-			Client: factory.HTTPClient, apiURL: factory.SlackURL,
 		}, nil
 	default:
 		return nil, fmt.Errorf("unknown connection type %q", connection.Type)

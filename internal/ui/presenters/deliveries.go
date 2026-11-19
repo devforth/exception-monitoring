@@ -1,8 +1,6 @@
 package presenters
 
 import (
-	"strconv"
-
 	"github.com/devforth/exception-monitoring/internal/notify"
 	"github.com/devforth/exception-monitoring/internal/storage/store"
 	"github.com/devforth/exception-monitoring/internal/ui/contracts"
@@ -14,7 +12,7 @@ func ConnectionLabels(connections []store.Connection) map[string]string {
 	labels := map[string]string{}
 
 	for _, connection := range connections {
-		labels[strconv.FormatInt(connection.ID, 10)] = connection.Name
+		labels[connection.ID] = connection.Name
 	}
 
 	return labels
@@ -25,7 +23,7 @@ func ConnectionOptions(connections []store.Connection, selected string) []lists.
 	var options []lists.Option
 
 	for _, connection := range connections {
-		id := strconv.FormatInt(connection.ID, 10)
+		id := connection.ID
 		options = append(options, lists.Option{Name: id, Selected: id == selected})
 	}
 

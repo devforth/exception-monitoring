@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/devforth/exception-monitoring/internal/storage/storetest"
+
 	"github.com/devforth/exception-monitoring/internal/storage/store"
 
 	"github.com/devforth/exception-monitoring/internal/fixtures"
@@ -23,7 +25,7 @@ var dsnPattern = regexp.MustCompile(`http://([0-9a-f]{32})@example\.com/(\d+)`)
 // A project added in the UI gets a DSN that works at once, without a restart;
 // its settings can be changed, and deleting it removes its data.
 func TestProjectLifecycle(t *testing.T) {
-	database := openDatabase(t)
+	database := storetest.Open(t)
 	server := startServer(t, database, "admin", password)
 	server.login()
 
@@ -253,7 +255,7 @@ func TestProjectsPage(t *testing.T) {
 // The cleanup history is a page of its own, linked from the Projects page;
 // the steps of a run open in a popup.
 func TestCleanupHistoryPage(t *testing.T) {
-	database := openDatabase(t)
+	database := storetest.Open(t)
 	server := startServer(t, database, "admin", password)
 	server.login()
 
@@ -261,16 +263,8 @@ func TestCleanupHistoryPage(t *testing.T) {
 		t.Fatal("the Projects page does not link the cleanup history")
 	}
 
-	cleaner, ok := database.(interface {
-		Cleanup(ctx context.Context, maxBytes int64) (store.CleanupRun, error)
-	})
-
-	if !ok {
-		if page := server.page("/projects/cleanups"); !strings.Contains(page, "No cleanup has run yet.") {
-			t.Fatal("the empty history says nothing")
-		}
-
-		return
+	if page := server.page("/projects/cleanups"); !strings.Contains(page, "No cleanup has run yet.") {
+		t.Fatal("the empty history says nothing")
 	}
 
 	ctx := context.Background()
@@ -279,7 +273,7 @@ func TestCleanupHistoryPage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := cleaner.Cleanup(ctx, 1); err != nil {
+	if _, err := database.Cleanup(ctx, 1); err != nil {
 		t.Fatal(err)
 	}
 

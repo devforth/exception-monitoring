@@ -1,5 +1,4 @@
-// Package database stores issues, events, logs and the ingest inbox on the
-// kv layer; everything else passes to the store.Store it is given.
+// Package database is the store (store.Store) on the kv layer: every collection is declared in schema.go.
 package database
 
 import (
@@ -19,10 +18,9 @@ import (
 
 // Store is the database; issues and time marks are also kept in memory.
 type Store struct {
-	model.Store
-
 	db *kv.DB
 	collections
+	formatKey kv.Key
 
 	inboxBytes atomic.Int64
 
@@ -49,28 +47,48 @@ type Store struct {
 
 var _ model.Store = (*Store)(nil)
 
-// Open opens the database in dataDir; rest serves the parts not stored here.
-func Open(dataDir string, rest model.Store) (*Store, error) {
-	engine, err := openEngine(filepath.Join(dataDir, engineName))
+// Open opens the database in dataDir.
+func Open(dataDir string) (*Store, error) {
+	location := filepath.Join(dataDir, engineName)
+	engine, err := openEngine(location)
 
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
 
-	return open(engine, rest)
+	database, err := open(engine)
+
+	if errors.Is(err, errFormat) {
+		return nil, fmt.Errorf("%w: move %s away to start over", err, location)
+	}
+
+	return database, err
 }
 
-// OpenMemory opens a store kept in memory, for tests.
-func OpenMemory(rest model.Store) (*Store, error) { return open(openMemoryEngine(), rest) }
+// errFormat: the database was written in another format.
+var errFormat = errors.New("the database has another format")
 
-func open(engine kv.Engine, rest model.Store) (*Store, error) {
+// OpenMemory opens a store kept in memory, for tests.
+func OpenMemory() (*Store, error) { return open(openMemoryEngine()) }
+
+// storeFormat is the version of what this package writes. A database of
+// another format is refused at start rather than misread; there are no
+// migrations yet, so a change of format means starting over.
+const storeFormat = "1"
+
+func open(engine kv.Engine) (*Store, error) {
 	schema := kv.NewSchema()
-	database := &Store{Store: rest, collections: defineCollections(schema), now: time.Now, messageStart: map[string]uint64{},
+	formatKey := schema.Reserve("format")
+	database := &Store{collections: defineCollections(schema), formatKey: formatKey, now: time.Now, messageStart: map[string]uint64{},
 		cleanupWake: make(chan struct{}, 1)}
 	db, err := kv.OpenDB(engine, schema)
 
 	if err == nil {
 		database.db = db
+		err = database.checkFormat(formatKey)
+	}
+
+	if err == nil {
 		err = errors.Join(database.loadIssues(), database.loadInboxSize(), database.loadMarks())
 	}
 
@@ -83,21 +101,53 @@ func open(engine kv.Engine, rest model.Store) (*Store, error) {
 	return database, nil
 }
 
-// Close closes the database and rest; calling it again returns the first result.
+// checkFormat writes the format into a new database and refuses one written in another.
+func (database *Store) checkFormat(key kv.Key) error {
+	stored, err := database.db.Get(key)
+
+	switch {
+	case err == nil && string(stored) == storeFormat:
+		return nil
+	case err == nil:
+		return fmt.Errorf("%w: %s, this version reads %s", errFormat, stored, storeFormat)
+	case !errors.Is(err, kv.ErrNotFound):
+		return err
+	}
+
+	iterator := database.db.Iterate(nil, nil)
+	used := iterator.First()
+
+	if err := iterator.Close(); err != nil {
+		return err
+	}
+
+	if used {
+		return fmt.Errorf("%w: written by a development version before format %s", errFormat, storeFormat)
+	}
+
+	return database.db.Update(true, func(batch *kv.Batch) error {
+		batch.Put(key, []byte(storeFormat))
+
+		return nil
+	})
+}
+
+// Close closes the database; calling it again returns the first result.
 func (database *Store) Close() error {
 	database.closeOnce.Do(func() {
 		database.closed.Store(true)
 		database.closeErr = database.db.Close()
-
-		if database.Store != nil {
-			database.closeErr = errors.Join(database.closeErr, database.Store.Close())
-		}
 	})
 
 	return database.closeErr
 }
 
-func (database *Store) Ping(context.Context) error { return nil }
+// Ping reads the format key, so a closed store or a failing disk answers with an error.
+func (database *Store) Ping(context.Context) error {
+	_, err := database.db.Get(database.formatKey)
+
+	return err
+}
 
 // DatabaseSize returns the engine's size on disk.
 func (database *Store) DatabaseSize(context.Context) (int64, error) { return database.db.Size() }

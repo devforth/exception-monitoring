@@ -1,22 +1,13 @@
-// Package scrub removes credentials from SDK payloads before they are stored.
-//
-// An SDK with sendDefaultPii (or a custom integration) sends request cookies
-// and headers such as Authorization: the session tokens of the monitored
-// app's users. Stored, they would be readable by anyone with the panel, the
-// API or a copy of the database, and could be used to take over those
-// sessions. So every JSON key that names a secret has its value replaced
-// with Filtered before anything is parsed or stored, and so do sensitive
-// query parameters in URLs and Bearer/Basic credentials in free text.
-//
-// The rules are key-name based (like the data scrubbing of hosted error
-// trackers), so they work for every part of a payload: request headers and
-// cookies, frame variables, breadcrumb data, extra, contexts and log
-// attributes.
+// Package scrub removes credentials from SDK payloads before they are parsed
+// or stored: values of keys that name a secret, Bearer/Basic credentials and
+// sensitive query parameters become Filtered.
 package scrub
 
 import (
 	"bytes"
 	"encoding/json"
+	"encoding/json/jsontext"
+	"io"
 	"net/url"
 	"regexp"
 	"strings"
@@ -137,46 +128,229 @@ func isASCII(text string) bool {
 	return true
 }
 
-// JSON returns payload with credentials replaced. Input that is not valid
-// JSON is returned unchanged: the parser rejects it later anyway.
+// NewDecoder reads a payload as a token stream. SDKs may repeat a key or send
+// invalid UTF-8; both are accepted, as the event parser accepts them.
+func NewDecoder(payload []byte) *jsontext.Decoder {
+	return jsontext.NewDecoder(bytes.NewReader(payload), jsontext.AllowDuplicateNames(true), jsontext.AllowInvalidUTF8(true))
+}
+
+// NewEncoder writes a token stream compactly, without HTML escaping.
+func NewEncoder(output io.Writer) *jsontext.Encoder {
+	return jsontext.NewEncoder(output, jsontext.EscapeForHTML(false), jsontext.AllowDuplicateNames(true), jsontext.AllowInvalidUTF8(true))
+}
+
+// JSON returns payload with credentials replaced, read and written as one
+// token stream (no tree is built). Input that is not valid JSON is returned
+// unchanged: the parser rejects it later anyway.
 func JSON(payload []byte) []byte {
-	decoder := json.NewDecoder(bytes.NewReader(payload))
-	decoder.UseNumber() // keep numbers exactly as sent
-
-	var document any
-
-	if err := decoder.Decode(&document); err != nil {
-		return payload
-	}
-
 	var output bytes.Buffer
 
-	encoder := json.NewEncoder(&output)
-	encoder.SetEscapeHTML(false)
-
-	if err := encoder.Encode(Value(document)); err != nil {
+	if err := Stream(NewDecoder(payload), NewEncoder(&output)); err != nil {
 		return payload
 	}
 
 	return bytes.TrimRight(output.Bytes(), "\n")
 }
 
-// Value removes credentials from an already decoded JSON value in place.
-// Numbers should be decoded with json.Decoder.UseNumber to preserve precision.
-func Value(node any) any {
+// Stream copies the next value from decoder to encoder with credentials
+// removed: values of keys that name a secret, the second of a [name, value]
+// pair whose name does, and credentials in strings (Text).
+func Stream(decoder *jsontext.Decoder, encoder *jsontext.Encoder) error {
+	switch decoder.PeekKind() {
+	case '{':
+		return Object(decoder, encoder, nil)
+	case '[':
+		return array(decoder, encoder)
+	case '"':
+		return stringValue(decoder, encoder)
+	}
+
+	value, err := decoder.ReadValue()
+
+	if err != nil {
+		return err
+	}
+
+	return encoder.WriteValue(value)
+}
+
+// Object copies the next object member by member. member, when set, may take
+// one over (write it, or drop it by writing nothing) and says whether it did;
+// a member whose key names a secret is filtered before member sees it.
+func Object(decoder *jsontext.Decoder, encoder *jsontext.Encoder,
+	member func(name string, decoder *jsontext.Decoder, encoder *jsontext.Encoder) (bool, error),
+) error {
+	if err := copyToken(decoder, encoder); err != nil {
+		return err
+	}
+
+	for decoder.PeekKind() != '}' {
+		key, err := decoder.ReadToken()
+
+		if err != nil {
+			return err
+		}
+
+		name := key.String()
+
+		if IsSensitiveKey(name) {
+			if err := encoder.WriteToken(jsontext.String(name)); err != nil {
+				return err
+			}
+
+			if err := writeFiltered(decoder, encoder); err != nil {
+				return err
+			}
+
+			continue
+		}
+
+		if member != nil {
+			if done, err := member(name, decoder, encoder); err != nil || done {
+				if err != nil {
+					return err
+				}
+
+				continue
+			}
+		}
+
+		if err := encoder.WriteToken(jsontext.String(name)); err != nil {
+			return err
+		}
+
+		if err := Stream(decoder, encoder); err != nil {
+			return err
+		}
+	}
+
+	return copyToken(decoder, encoder)
+}
+
+// Values copies the next array element by element through each.
+func Values(decoder *jsontext.Decoder, encoder *jsontext.Encoder, each func(decoder *jsontext.Decoder, encoder *jsontext.Encoder) error) error {
+	if err := copyToken(decoder, encoder); err != nil {
+		return err
+	}
+
+	for decoder.PeekKind() != ']' {
+		if err := each(decoder, encoder); err != nil {
+			return err
+		}
+	}
+
+	return copyToken(decoder, encoder)
+}
+
+// array copies an array. One led by a secret's name may be a [name, value]
+// pair (headers and query strings may come this way), whose value is
+// filtered; that takes its length, so such an array (a small one in
+// practice) is read whole and scrubbed as a tree: rereading each element
+// as a stream would take time growing with the square of its nesting.
+func array(decoder *jsontext.Decoder, encoder *jsontext.Encoder) error {
+	if err := copyToken(decoder, encoder); err != nil {
+		return err
+	}
+
+	if decoder.PeekKind() == '"' {
+		first, err := decoder.ReadValue()
+
+		if err != nil {
+			return err
+		}
+
+		first = first.Clone() // a read value is valid only until the next read
+
+		var name string
+
+		if err := json.Unmarshal(first, &name); err != nil {
+			return err
+		}
+
+		if !IsSensitiveKey(name) {
+			if err := writeText(encoder, first, name); err != nil {
+				return err
+			}
+		} else {
+			return ledBySecret(decoder, encoder, first, name)
+		}
+	}
+
+	for decoder.PeekKind() != ']' {
+		if err := Stream(decoder, encoder); err != nil {
+			return err
+		}
+	}
+
+	return copyToken(decoder, encoder)
+}
+
+// ledBySecret writes the rest of an array whose first element, a secret's
+// name, is read: a pair's value is filtered, the elements of a longer array
+// are scrubbed as trees.
+func ledBySecret(decoder *jsontext.Decoder, encoder *jsontext.Encoder, first jsontext.Value, name string) error {
+	var rest []jsontext.Value
+
+	for decoder.PeekKind() != ']' {
+		element, err := decoder.ReadValue()
+
+		if err != nil {
+			return err
+		}
+
+		rest = append(rest, element.Clone())
+	}
+
+	if _, err := decoder.ReadToken(); err != nil {
+		return err
+	}
+
+	if len(rest) == 1 {
+		if err := encoder.WriteValue(first); err != nil {
+			return err
+		}
+
+		if err := writeFiltered(NewDecoder(rest[0]), encoder); err != nil {
+			return err
+		}
+	} else {
+		if err := writeText(encoder, first, name); err != nil {
+			return err
+		}
+
+		for _, element := range rest {
+			reader := json.NewDecoder(bytes.NewReader(element))
+			reader.UseNumber()
+
+			var node any
+
+			if err := reader.Decode(&node); err != nil {
+				return err
+			}
+
+			if err := writeJSON(encoder, tree(node)); err != nil {
+				return err
+			}
+		}
+	}
+
+	return encoder.WriteToken(jsontext.EndArray)
+}
+
+// tree removes credentials from a decoded value in place, by the rules of Stream.
+func tree(node any) any {
 	switch typed := node.(type) {
 	case map[string]any:
 		for key, child := range typed {
 			if IsSensitiveKey(key) {
 				typed[key] = filtered(child)
 			} else {
-				typed[key] = Value(child)
+				typed[key] = tree(child)
 			}
 		}
 
 		return typed
 	case []any:
-		// Headers and query strings may come as [name, value] pairs.
 		if len(typed) == 2 {
 			if name, ok := typed[0].(string); ok && IsSensitiveKey(name) {
 				typed[1] = filtered(typed[1])
@@ -186,7 +360,7 @@ func Value(node any) any {
 		}
 
 		for index, child := range typed {
-			typed[index] = Value(child)
+			typed[index] = tree(child)
 		}
 
 		return typed
@@ -197,13 +371,11 @@ func Value(node any) any {
 	}
 }
 
-// filtered replaces a sensitive value. A log attribute keeps its
-// {"value", "type"} shape, so the log still parses.
+// filtered is what replaces a secret's value in a tree (see writeFiltered).
 func filtered(node any) any {
 	if attribute, ok := node.(map[string]any); ok {
 		if _, hasValue := attribute["value"]; hasValue {
-			attribute["value"] = Filtered
-			attribute["type"] = "string"
+			attribute["value"], attribute["type"] = Filtered, "string"
 
 			return attribute
 		}
@@ -214,6 +386,108 @@ func filtered(node any) any {
 	}
 
 	return Filtered
+}
+
+func copyToken(decoder *jsontext.Decoder, encoder *jsontext.Encoder) error {
+	token, err := decoder.ReadToken()
+
+	if err != nil {
+		return err
+	}
+
+	return encoder.WriteToken(token)
+}
+
+// stringValue copies a string, through Text only when it may hold a
+// credential; most strings are copied as they came.
+func stringValue(decoder *jsontext.Decoder, encoder *jsontext.Encoder) error {
+	raw, err := decoder.ReadValue()
+
+	if err != nil {
+		return err
+	}
+
+	if !mayHoldCredential(raw) {
+		return encoder.WriteValue(raw)
+	}
+
+	var text string
+
+	if err := json.Unmarshal(raw, &text); err != nil {
+		return err
+	}
+
+	return writeText(encoder, raw, text)
+}
+
+// writeText writes text through Text; unchanged, the raw value as it came.
+func writeText(encoder *jsontext.Encoder, raw jsontext.Value, text string) error {
+	if scrubbed := Text(text); scrubbed != text {
+		return encoder.WriteToken(jsontext.String(scrubbed))
+	}
+
+	return encoder.WriteValue(raw)
+}
+
+// mayHoldCredential reports whether Text could change a raw JSON string: it
+// has "=" (a query), "bearer" or "basic" in any case, or an escape or a byte
+// beyond ASCII, which are checked the slow way.
+func mayHoldCredential(raw []byte) bool {
+	for index, char := range raw {
+		switch {
+		case char == '=' || char == '\\' || char >= 0x80:
+			return true
+		case char|0x20 == 'b':
+			rest := raw[index:]
+
+			if len(rest) >= 5 && bytes.EqualFold(rest[:5], []byte("basic")) || len(rest) >= 6 && bytes.EqualFold(rest[:6], []byte("bearer")) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// writeFiltered replaces the next value: null stays null, a log attribute
+// keeps its {"value", "type"} shape so the log still parses, anything else
+// becomes Filtered.
+func writeFiltered(decoder *jsontext.Decoder, encoder *jsontext.Encoder) error {
+	raw, err := decoder.ReadValue()
+
+	if err != nil {
+		return err
+	}
+
+	switch raw.Kind() {
+	case 'n':
+		return encoder.WriteValue(raw)
+	case '{':
+		attribute := map[string]any{}
+		reader := json.NewDecoder(bytes.NewReader(raw))
+		reader.UseNumber()
+
+		if reader.Decode(&attribute) == nil {
+			if _, hasValue := attribute["value"]; hasValue {
+				return writeJSON(encoder, filtered(attribute))
+			}
+		}
+	}
+
+	return encoder.WriteToken(jsontext.String(Filtered))
+}
+
+func writeJSON(encoder *jsontext.Encoder, value any) error {
+	var output bytes.Buffer
+
+	writer := json.NewEncoder(&output)
+	writer.SetEscapeHTML(false)
+
+	if err := writer.Encode(value); err != nil {
+		return err
+	}
+
+	return encoder.WriteValue(bytes.TrimRight(output.Bytes(), "\n"))
 }
 
 // Text removes credentials from free text: Bearer/Basic tokens and

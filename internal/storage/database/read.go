@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strings"
 
+	"github.com/devforth/exception-monitoring/internal/platform/config"
 	"github.com/devforth/exception-monitoring/internal/platform/text"
 	"github.com/devforth/exception-monitoring/internal/storage/kv"
 	model "github.com/devforth/exception-monitoring/internal/storage/store"
@@ -97,8 +99,8 @@ func (database *Store) ListEvents(_ context.Context, filter model.EventFilter) (
 	switch {
 	case filter.TraceID != "":
 		queries = append(queries, database.events.By("trace", kv.Text(filter.TraceID)))
-	case filter.IssueID != 0:
-		queries = append(queries, database.events.Primary(kv.U64(uint64(filter.IssueID))))
+	case filter.IssueID != "":
+		queries = append(queries, database.events.Primary(kv.Text(filter.IssueID)))
 	default:
 		for _, rank := range allRanks {
 			queries = append(queries, database.events.By("age", kv.U8(rank)))
@@ -106,13 +108,13 @@ func (database *Store) ListEvents(_ context.Context, filter model.EventFilter) (
 	}
 
 	for index := range queries {
-		queries[index] = before(queries[index], limit)
+		queries[index] = before(queries[index], limit).Head()
 	}
 
 	events := []model.EventSummary{}
 
 	err := newestFirst(database.db, queries, func(entry kv.Entry[eventRecord]) bool {
-		if filter.IssueID == 0 || entry.Record.IssueID == filter.IssueID {
+		if filter.IssueID == "" || entry.Record.IssueID == filter.IssueID {
 			events = append(events, eventSummary(entry.Record.eventMeta))
 		}
 
@@ -132,8 +134,8 @@ func (database *Store) GetEvent(_ context.Context, projectID int, eventID string
 	return fullEvent(record), nil
 }
 
-func (database *Store) LatestEvent(_ context.Context, issueID int64) (model.Event, error) {
-	entry, err := database.events.Primary(kv.U64(uint64(issueID))).Newest().First(database.db)
+func (database *Store) LatestEvent(_ context.Context, issueID string) (model.Event, error) {
+	entry, err := database.events.Primary(kv.Text(issueID)).Newest().First(database.db)
 
 	if err != nil {
 		return model.Event{}, notFound(err)
@@ -200,19 +202,53 @@ func logMatches(record logRecord, filter model.LogFilter) bool {
 
 // scanLogs visits matching logs newest first until visit returns false.
 func (database *Store) scanLogs(filter model.LogFilter, visit func(record logRecord) bool) error {
-	var stop uint64
+	queries := database.logQueries(filter)
 
-	if !filter.Since.IsZero() {
-		stop = database.sequenceAt(filter.Since.Add(-markSlack))
-	}
-
-	return newestFirst(database.db, database.logQueries(filter), func(entry kv.Entry[logRecord]) bool {
-		if entry.Record.Sequence < stop {
-			return false
+	for index := range queries {
+		if !filter.Since.IsZero() {
+			queries[index] = queries[index].From(kv.U64(database.sequenceAt(filter.Since.Add(-markSlack))))
 		}
 
+		if rawSearchable(filter.Query) {
+			queries[index] = queries[index].Raw(func(value []byte) bool { return text.ContainsFold(value, filter.Query) })
+		}
+	}
+
+	return newestFirst(database.db, queries, func(entry kv.Entry[logRecord]) bool {
 		return !logMatches(entry.Record, filter) || visit(entry.Record)
 	})
+}
+
+// rawSearchable: the text appears as is in a stored log, since JSON escapes
+// none of its characters, so the stored bytes can be searched before decoding.
+func rawSearchable(query string) bool {
+	if query == "" {
+		return false
+	}
+
+	for _, char := range query {
+		if char < ' ' || strings.ContainsRune(`"\<>&`, char) || char == '\u2028' || char == '\u2029' {
+			return false
+		}
+	}
+
+	return true
+}
+
+// countByKeys: the walks of the filter select exactly the logs it means, so
+// counting their keys is enough.
+func countByKeys(filter model.LogFilter) bool {
+	exact := filter.Query == "" && filter.Since.IsZero() && filter.Until.IsZero()
+
+	if filter.TraceID != "" {
+		return exact && len(filter.ProjectIDs) == 0 && len(filter.Levels) == 0 && len(filter.SpanIDs) == 0
+	}
+
+	if len(filter.SpanIDs) > 0 {
+		return exact && len(filter.ProjectIDs) == 0 && len(filter.Levels) == 0
+	}
+
+	return exact
 }
 
 func logView(record logRecord) model.LogRecord {
@@ -242,8 +278,49 @@ func (database *Store) ListLogs(_ context.Context, filter model.LogFilter) ([]mo
 	return logs, err
 }
 
+// LogLevels looks for one key per level: a log's key starts with its level's rank.
+func (database *Store) LogLevels(context.Context) ([]string, error) {
+	var levels []string
+
+	for _, rank := range allRanks {
+		found := false
+		err := database.logs.Primary(kv.U8(rank)).Limit(1).Keys(database.db, func(kv.Key) (bool, error) {
+			found = true
+
+			return false, nil
+		})
+
+		if err != nil {
+			return nil, err
+		}
+
+		if found {
+			levels = append(levels, config.LogLevels[rank])
+		}
+	}
+
+	return levels, nil
+}
+
 func (database *Store) CountLogs(_ context.Context, filter model.LogFilter) (int, bool, error) {
 	count := 0
+
+	if countByKeys(filter) {
+		// One more than the limit tells there are more.
+		for _, query := range database.logQueries(filter) {
+			found, _, err := query.Count(database.db, model.LogCountLimit+1-count)
+
+			if count += found; err != nil {
+				return 0, false, err
+			}
+
+			if count > model.LogCountLimit {
+				return model.LogCountLimit, true, nil
+			}
+		}
+
+		return count, false, nil
+	}
 
 	err := database.scanLogs(filter, func(logRecord) bool {
 		count++
@@ -271,7 +348,7 @@ func (database *Store) IssuesForLogs(_ context.Context, logs []model.LogRecord) 
 		looked[record.SpanID] = true
 
 		queries := []kv.Query[eventRecord]{
-			database.events.By("span", kv.Text(record.SpanID)), database.events.By("parent", kv.Text(record.SpanID)),
+			database.events.By("span", kv.Text(record.SpanID)).Head(), database.events.By("parent", kv.Text(record.SpanID)).Head(),
 		}
 
 		err := newestFirst(database.db, queries, func(entry kv.Entry[eventRecord]) bool {

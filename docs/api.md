@@ -10,10 +10,11 @@ The API and the [MCP tools](mcp.md) are the same endpoints with the same names, 
 
 ## Conventions
 
-- Each endpoint is `/api/v1/<name>`. Endpoints that only read are `GET` with the input as query parameters (`?project=backend&limit=50`; a list takes repeated or comma-separated values: `issue_ids=1,2`). Endpoints that change data are `POST` with the input as a JSON object.
+- Each endpoint is `/api/v1/<name>`. Endpoints that only read are `GET` with the input as query parameters (`?project=backend&limit=50`; a list takes repeated or comma-separated values: `issue_ids=k3x9q2mf,a7c2d4e9`). Endpoints that change data are `POST` with the input as a JSON object.
 - Errors: a status code with `{"error": "message"}`: 400 for invalid input (unknown parameters too), 401 without a valid token, 404 for missing records and unknown endpoints.
 - Lists return `{"items": [...], "next_cursor": "..."}`. Pass `cursor=<next_cursor>` for the next page; there is no `next_cursor` on the last one. `limit` is 1–100, default 20.
 - `project` takes a project id (`1`) or name (`backend`). `level` takes one level.
+- Issues, users, notification connections and agents have IDs of 8 random lowercase letters and digits (`k3x9q2mf`); a project keeps the number in its DSN.
 - Times are RFC 3339 in UTC, e.g. `2026-11-11T10:00:00Z`.
 - Free text (titles, log lines) is returned as stored; the MCP tools return it with IPs, hosts, emails and credentials replaced, since it goes to a model provider.
 
@@ -31,7 +32,7 @@ The API and the [MCP tools](mcp.md) are the same endpoints with the same names, 
 | `POST update_issue_status` | `issue_ids` (1–100), `status` | Set `resolved`, `ignored` or `unresolved` on all of them or none; returns the updated issues. |
 | `GET get_event_payload` | `project`, `event_id` | REST only. The event with the full JSON the SDK sent (credentials removed) in `payload`. |
 | `GET list_trace` | `trace_id` | REST only. Events (without payloads) and logs, with their attributes, of one trace, up to 100 of each. |
-| `POST delete_issue` | `issue_id` | Delete the issue with its events: `{"deleted": <id>}` (agents: admins only). |
+| `POST delete_issue` | `issue_id` | Delete the issue with its events: `{"deleted": "<id>"}` (agents: admins only). |
 
 ### list_issues input
 
@@ -42,7 +43,7 @@ The API and the [MCP tools](mcp.md) are the same endpoints with the same names, 
 | `query` | Text in the title or location. |
 | `since`, `until` | Time range, `since` inclusive, `until` exclusive. |
 | `date_by` | What the range applies to: `event` (default: any event of the issue in the range), `first_seen` or `last_seen`. |
-| `sort` | `last_seen` (default), `first_seen`, `event_count`, `id`, each newest or most first, or with `_asc`; `project` (A–Z) or `project_desc`. |
+| `sort` | `last_seen` (default), `first_seen`, `event_count`, each newest or most first, or with `_asc`; `project` (A–Z) or `project_desc`. |
 | `limit`, `cursor` | Paging. |
 
 ## Example: resolve every unresolved issue of a project

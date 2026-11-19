@@ -1,27 +1,5 @@
-// Package grouping decides which events are the same problem (issue).
-//
-// Every event gets a fingerprint; events with the same fingerprint in the same
-// project belong to one issue. The fingerprint is a hash of "components":
-//
-//  1. If the SDK sent a custom fingerprint, its values are the components.
-//     "{{ default }}" inside it expands to the default components.
-//  2. Otherwise, for exceptions: each exception in the chain contributes its
-//     type and its stack frames (only in-app frames if there are any; files
-//     of installed packages never count as in-app, see sentry.Frame.IsInApp).
-//     Only the frames from the error back to the nearest async boundary count
-//     (Firefox and Safari mark the frame that scheduled the async work with
-//     "*", as in "promise callback*queueFlush"): the path that led there, such
-//     as which list a task was opened from, differs while the error is the
-//     same. A frame is the file (or module), the function and the source line of the call
-//     (context_line), without line numbers: a deploy that shifts code by a few
-//     lines does not create a new issue, while two throws in one function, or
-//     two functions with the same name (JS names `handler: () => {}` after the
-//     property), stay apart. Anonymous functions without source fall back to
-//     the line number. If no frame has source code (browser SDKs send none),
-//     the stack says little, so the normalized error text is added too.
-//  3. Events without a usable stack (messages, exceptions without frames) are
-//     grouped by their text with variable parts (numbers, IDs, hashes)
-//     replaced by placeholders, so "order 890" and "order 891" match.
+// Package grouping decides which events are one issue: events of a project
+// with the same Fingerprint, a hash of the event's Components.
 package grouping
 
 import (

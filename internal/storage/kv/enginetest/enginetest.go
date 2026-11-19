@@ -112,18 +112,6 @@ func Run(t *testing.T, open Open, persistent bool) {
 				t.Errorf("%s: %q, want %q", name, got, test.want)
 			}
 		}
-
-		iterator := engine.Iterate([]byte("a"), []byte("b"))
-
-		if !iterator.Seek([]byte("a\x01")) || string(iterator.Key()) != "ab" {
-			t.Errorf("seek: %q", iterator.Key())
-		}
-
-		if iterator.Seek([]byte("b")) {
-			t.Errorf("seek past the upper bound found %q", iterator.Key())
-		}
-
-		_ = iterator.Close()
 	})
 
 	t.Run("snapshot", func(t *testing.T) {

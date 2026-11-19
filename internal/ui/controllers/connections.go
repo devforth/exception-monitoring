@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strconv"
 
 	"github.com/devforth/exception-monitoring/internal/platform/config"
 	"github.com/devforth/exception-monitoring/internal/services"
@@ -86,7 +85,7 @@ func (controller *Controllers) ConnectionPage(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	view.Waiting = health[strconv.FormatInt(connection.ID, 10)].Retrying
+	view.Waiting = health[connection.ID].Retrying
 
 	if connection.Type == config.ChannelEmail {
 		if destination, err := controller.verification.EmailDestination(r.Context(), connection.DestinationID); err == nil {
@@ -140,7 +139,7 @@ func (controller *Controllers) UpdateConnection(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	redirectAfterPost(w, r, fmt.Sprintf("/notifications/%d?notice=saved", connection.ID))
+	redirectAfterPost(w, r, fmt.Sprintf("/notifications/%s?notice=saved", connection.ID))
 }
 
 func (controller *Controllers) renderConnectionForm(w http.ResponseWriter, r *http.Request, connection store.Connection, problems map[string]string, failure string, existing *services.Duplicate) {
@@ -172,7 +171,7 @@ func (controller *Controllers) RetryConnection(w http.ResponseWriter, r *http.Re
 	target := requests.SafeNext(r.PostFormValue("return"))
 
 	if r.PostFormValue("return") == "" {
-		target = fmt.Sprintf("/notifications/%d", connection.ID)
+		target = fmt.Sprintf("/notifications/%s", connection.ID)
 	}
 
 	redirectAfterPost(w, r, target+"?notice=retried")
@@ -194,7 +193,7 @@ func (controller *Controllers) TestConnection(w http.ResponseWriter, r *http.Req
 	case err != nil:
 		controller.renderConnectionForm(w, r, connection, nil, "The test message was not delivered: "+err.Error(), nil)
 	default:
-		redirectAfterPost(w, r, fmt.Sprintf("/notifications/%d?notice=test-sent", connection.ID))
+		redirectAfterPost(w, r, fmt.Sprintf("/notifications/%s?notice=test-sent", connection.ID))
 	}
 }
 

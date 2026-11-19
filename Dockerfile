@@ -14,8 +14,7 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
     -o /out/exception-monitoring ./cmd/exception-monitoring
 
 # Data dir owned by the unprivileged runtime user (named volumes inherit this ownership).
-# /tmp: SQLite writes temporary files there (VACUUM, building a search index);
-# scratch has none, and SQLite then fails with "disk I/O error".
+# /tmp: scratch has none; it is there for temporary files of the runtime and libraries.
 RUN mkdir -p /out/data /out/tmp && chown 65534:65534 /out/data && chmod 1777 /out/tmp
 
 
